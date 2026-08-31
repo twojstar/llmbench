@@ -622,8 +622,6 @@ private fun handleMainFrameNavigation(
         "intent" -> {
             if (navigation.hasGesture()) {
                 onExternalIntentRequested(uri)
-            } else {
-                openIntentFallback(context, uri)
             }
             true
         }
@@ -667,15 +665,9 @@ private fun openExternalIntentUri(context: Context, uri: Uri) {
     val targetPackage = parsedIntent.`package` ?: parsedIntent.component?.packageName
 
     if (!targetPackage.isNullOrBlank()) {
-        parsedIntent.apply {
-            addCategory(Intent.CATEGORY_BROWSABLE)
-            component = null
-            selector = null
-            setPackage(targetPackage)
-            removeExtra("browser_fallback_url")
-        }
-        try {
-            context.startActivity(parsedIntent)
+        val launchIntent = sanitizeExternalIntent(parsedIntent, targetPackage)
+        if (launchIntent != null) try {
+            context.startActivity(launchIntent)
             return
         } catch (error: ActivityNotFoundException) {
             Log.w(WEBVIEW_LOG_TAG, "Intent target unavailable; trying HTTPS fallback", error)
@@ -687,12 +679,16 @@ private fun openExternalIntentUri(context: Context, uri: Uri) {
     fallbackUri?.let { openExternalUri(context, it) }
 }
 
-/** Uses only an HTTPS browser fallback when an intent has no user gesture. */
-private fun openIntentFallback(context: Context, uri: Uri) {
-    val parsedIntent = runCatching {
-        Intent.parseUri(uri.toString(), Intent.URI_INTENT_SCHEME)
-    }.getOrNull() ?: return
-    validatedHttpsFallback(parsedIntent)?.let { openExternalUri(context, it) }
+/** Reduces an intent URI to a safe browsable ACTION_VIEW handoff. */
+private fun sanitizeExternalIntent(intent: Intent, targetPackage: String): Intent? {
+    val data = intent.data ?: return null
+    val scheme = data.scheme?.lowercase() ?: return null
+    if (scheme in setOf("file", "content", "android.resource", "javascript", "data")) return null
+
+    return Intent(Intent.ACTION_VIEW, data).apply {
+        addCategory(Intent.CATEGORY_BROWSABLE)
+        setPackage(targetPackage)
+    }
 }
 
 /** Returns an intent browser fallback only when it is HTTPS. */
