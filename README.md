@@ -2,7 +2,7 @@
 
 Android workspace for using multiple AI services from one app without turning every provider into a separate installed client.
 
-> Status: early prototype. The current Android code was bootstrapped in Gemini AI Studio and still carries temporary `AiProfileStudio` package/name remnants that will be normalized in a follow-up change.
+> Status: early prototype. The Android code was bootstrapped in Gemini AI Studio and is now normalized under the LlmBench project identity.
 
 ## What it is
 
@@ -45,7 +45,7 @@ trvny/.ai             reusable profiles / instructions / skills
       └── optional consumption
               │
               ▼
-trvny/aishub           LlmBench Android application
+twojstar/llmbench      LlmBench Android application
 ```
 
 Do not vendor a second copy of `.ai` here. If runtime integration becomes useful, consume a pinned/exported representation with an explicit boundary.
@@ -70,7 +70,7 @@ Backends are optional, not the default. If a feature truly needs one, prefer a t
 ## Near-term roadmap
 
 - [ ] remove generated/build-machine files from version control
-- [ ] normalize app name, namespace and application ID to LlmBench
+- [x] normalize app name, namespace and application ID to LlmBench
 - [ ] harden WebView security while preserving provider login compatibility
 - [ ] add Gemini AI Studio as a provider target and test its WebView behavior
 - [ ] add AIHubMix and OpenRouter-compatible free-provider adapters

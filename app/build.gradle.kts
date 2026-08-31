@@ -6,11 +6,11 @@ plugins {
 }
 
 android {
-    namespace = "com.example.aiprofilestudio"
+    namespace = "com.twojstar.llmbench"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.aistudio.applet.ieabma"
+        applicationId = "com.twojstar.llmbench"
         minSdk = 26
         targetSdk = 35
         versionCode = 1

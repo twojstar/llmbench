@@ -19,5 +19,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "AI Profile Studio"
+rootProject.name = "LlmBench"
 include(":app")
