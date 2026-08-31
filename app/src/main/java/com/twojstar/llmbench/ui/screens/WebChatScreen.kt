@@ -539,6 +539,10 @@ private fun createConfiguredWebView(
                         openExternalUri(context, uri)
                         true
                     }
+                    "intent" -> {
+                        openExternalIntentUri(context, uri)
+                        true
+                    }
                     else -> true
                 }
             }
@@ -578,6 +582,33 @@ private fun openExternalUri(context: Context, uri: Uri) {
         context.startActivity(intent)
     } catch (_: Exception) {
         // Unsupported or unavailable external schemes stay blocked from the WebView.
+    }
+}
+
+private fun openExternalIntentUri(context: Context, uri: Uri) {
+    try {
+        val parsedIntent = Intent.parseUri(uri.toString(), Intent.URI_INTENT_SCHEME)
+        val targetPackage = parsedIntent.`package` ?: parsedIntent.component?.packageName
+        val fallbackUrl = parsedIntent.getStringExtra("browser_fallback_url")
+
+        if (!targetPackage.isNullOrBlank()) {
+            parsedIntent.apply {
+                addCategory(Intent.CATEGORY_BROWSABLE)
+                component = null
+                selector = null
+                setPackage(targetPackage)
+                removeExtra("browser_fallback_url")
+            }
+            context.startActivity(parsedIntent)
+            return
+        }
+
+        val fallbackUri = fallbackUrl?.let(Uri::parse)
+        if (fallbackUri?.scheme.equals("https", ignoreCase = true)) {
+            openExternalUri(context, fallbackUri)
+        }
+    } catch (_: Exception) {
+        // Invalid or unavailable intent links remain blocked.
     }
 }
 
