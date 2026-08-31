@@ -304,7 +304,9 @@ fun WebChatScreen(
                                 try {
                                     val intent = Intent(Intent.ACTION_VIEW, Uri.parse(currentUrl))
                                     context.startActivity(intent)
-                                } catch (_: Exception) {
+                                } catch (_: ActivityNotFoundException) {
+                                    viewModel.showSnackbar("Could not launch external browser")
+                                } catch (_: SecurityException) {
                                     viewModel.showSnackbar("Could not launch external browser")
                                 }
                             },
@@ -642,8 +644,10 @@ private fun openExternalUri(context: Context, uri: Uri) {
             addCategory(Intent.CATEGORY_BROWSABLE)
         }
         context.startActivity(intent)
-    } catch (_: Exception) {
-        // Unsupported or unavailable external schemes stay blocked from the WebView.
+    } catch (_: ActivityNotFoundException) {
+        // Unsupported external handlers stay blocked from the WebView.
+    } catch (_: SecurityException) {
+        // Handlers rejected by platform security stay blocked from the WebView.
     }
 }
 
