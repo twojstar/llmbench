@@ -609,7 +609,9 @@ private fun handleMainFrameNavigation(
     return when (uri.scheme?.lowercase()) {
         "https" -> false
         "http", "mailto", "tel", "sms" -> {
-            openExternalUri(context, uri)
+            if (navigation.hasGesture()) {
+                openExternalUri(context, uri)
+            }
             true
         }
         "intent" -> {
