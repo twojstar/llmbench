@@ -11,7 +11,7 @@ kotlin {
         namespace = "com.twojstar.llmbench.shared"
         compileSdk = 35
         minSdk = 26
-        compilerOptions.configure {
+        compilerOptions {
             jvmTarget.set(JvmTarget.JVM_21)
         }
     }
