@@ -9,6 +9,7 @@ import android.content.Intent
 import android.graphics.Bitmap
 import android.net.Uri
 import android.net.http.SslError
+import android.util.Log
 import android.view.ViewGroup
 import android.webkit.*
 import androidx.activity.compose.BackHandler
@@ -45,6 +46,8 @@ import com.twojstar.llmbench.data.model.WebAiService
 import com.twojstar.llmbench.ui.theme.*
 import com.twojstar.llmbench.ui.viewmodel.StudioUiState
 import com.twojstar.llmbench.ui.viewmodel.StudioViewModel
+
+private const val WEBVIEW_LOG_TAG = "LlmBenchWeb"
 
 /** Hosts account-backed AI services with mobile-first WebView controls. */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -304,9 +307,11 @@ fun WebChatScreen(
                                 try {
                                     val intent = Intent(Intent.ACTION_VIEW, Uri.parse(currentUrl))
                                     context.startActivity(intent)
-                                } catch (_: ActivityNotFoundException) {
+                                } catch (error: ActivityNotFoundException) {
+                                    Log.w(WEBVIEW_LOG_TAG, "External browser handler unavailable", error)
                                     viewModel.showSnackbar("Could not launch external browser")
-                                } catch (_: SecurityException) {
+                                } catch (error: SecurityException) {
+                                    Log.w(WEBVIEW_LOG_TAG, "External browser launch rejected", error)
                                     viewModel.showSnackbar("Could not launch external browser")
                                 }
                             },
@@ -646,10 +651,10 @@ private fun openExternalUri(context: Context, uri: Uri) {
             addCategory(Intent.CATEGORY_BROWSABLE)
         }
         context.startActivity(intent)
-    } catch (_: ActivityNotFoundException) {
-        // Unsupported external handlers stay blocked from the WebView.
-    } catch (_: SecurityException) {
-        // Handlers rejected by platform security stay blocked from the WebView.
+    } catch (error: ActivityNotFoundException) {
+        Log.w(WEBVIEW_LOG_TAG, "External URI handler unavailable", error)
+    } catch (error: SecurityException) {
+        Log.w(WEBVIEW_LOG_TAG, "External URI launch rejected", error)
     }
 }
 
@@ -672,10 +677,10 @@ private fun openExternalIntentUri(context: Context, uri: Uri) {
         try {
             context.startActivity(parsedIntent)
             return
-        } catch (_: ActivityNotFoundException) {
-            // Fall through to the validated HTTPS fallback.
-        } catch (_: SecurityException) {
-            // Fall through to the validated HTTPS fallback.
+        } catch (error: ActivityNotFoundException) {
+            Log.w(WEBVIEW_LOG_TAG, "Intent target unavailable; trying HTTPS fallback", error)
+        } catch (error: SecurityException) {
+            Log.w(WEBVIEW_LOG_TAG, "Intent target rejected; trying HTTPS fallback", error)
         }
     }
 
