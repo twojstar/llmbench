@@ -10,7 +10,7 @@ object YamlParser {
      */
     fun dumpProfile(profile: Profile): String {
         val sb = StringBuilder()
-        sb.appendLine("# yaml-language-server: \$schema=../schema/style-profile.schema.json")
+        sb.appendLine("# yaml-language-server: \$schema=https://raw.githubusercontent.com/trvny/.ai/main/schema/style-profile.schema.json")
         sb.appendLine("schemaVersion: \"${profile.schemaVersion}\"")
         sb.appendLine("id: ${profile.id}")
         sb.appendLine("locale: ${profile.locale}")
