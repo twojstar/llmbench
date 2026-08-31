@@ -46,6 +46,7 @@ import com.twojstar.llmbench.ui.theme.*
 import com.twojstar.llmbench.ui.viewmodel.StudioUiState
 import com.twojstar.llmbench.ui.viewmodel.StudioViewModel
 
+/** Hosts account-backed AI services with mobile-first WebView controls. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun WebChatScreen(
@@ -397,30 +398,14 @@ fun WebChatScreen(
     }
 
     // Quick Prompt / Profile Copier Dialog
-    pendingExternalIntentUri?.let { pendingUri ->
-        val targetPackage = runCatching {
-            Intent.parseUri(pendingUri.toString(), Intent.URI_INTENT_SCHEME).`package`
-        }.getOrNull()
-        AlertDialog(
-            onDismissRequest = { pendingExternalIntentUri = null },
-            title = { Text("Open another app?") },
-            text = {
-                Text(
-                    targetPackage?.let { "This login wants to open $it." }
-                        ?: "This login wants to leave LlmBench and open another app."
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    pendingExternalIntentUri = null
-                    openExternalIntentUri(context, pendingUri)
-                }) { Text("Open") }
-            },
-            dismissButton = {
-                TextButton(onClick = { pendingExternalIntentUri = null }) { Text("Stay here") }
-            }
-        )
-    }
+    ExternalIntentConfirmationDialog(
+        uri = pendingExternalIntentUri,
+        onDismiss = { pendingExternalIntentUri = null },
+        onConfirm = { pendingUri ->
+            pendingExternalIntentUri = null
+            openExternalIntentUri(context, pendingUri)
+        }
+    )
 
     if (showPromptHelperDialog) {
         AlertDialog(
@@ -487,6 +472,37 @@ fun WebChatScreen(
     }
 }
 
+/** Requires explicit user consent before an intent URI leaves LlmBench. */
+@Composable
+private fun ExternalIntentConfirmationDialog(
+    uri: Uri?,
+    onDismiss: () -> Unit,
+    onConfirm: (Uri) -> Unit
+) {
+    val pendingUri = uri ?: return
+    val targetPackage = runCatching {
+        Intent.parseUri(pendingUri.toString(), Intent.URI_INTENT_SCHEME).`package`
+    }.getOrNull()
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Open another app?") },
+        text = {
+            Text(
+                targetPackage?.let { "This login wants to open $it." }
+                    ?: "This login wants to leave LlmBench and open another app."
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = { onConfirm(pendingUri) }) { Text("Open") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Stay here") }
+        }
+    )
+}
+
+/** Builds the least-privileged WebView needed by account-backed providers. */
 @SuppressLint("SetJavaScriptEnabled")
 private fun createConfiguredWebView(
     context: Context,
@@ -561,25 +577,7 @@ private fun createConfiguredWebView(
 
             override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
                 val navigation = request ?: return true
-                if (!navigation.isForMainFrame) return false
-
-                val uri = navigation.url
-                return when (uri.scheme?.lowercase()) {
-                    "https" -> false
-                    "http", "mailto", "tel", "sms" -> {
-                        openExternalUri(context, uri)
-                        true
-                    }
-                    "intent" -> {
-                        if (navigation.hasGesture()) {
-                            onExternalIntentRequested(uri)
-                        } else {
-                            openIntentFallback(context, uri)
-                        }
-                        true
-                    }
-                    else -> true
-                }
+                return handleMainFrameNavigation(context, navigation, onExternalIntentRequested)
             }
 
             override fun onReceivedSslError(
@@ -597,6 +595,34 @@ private fun createConfiguredWebView(
     return webView
 }
 
+/** Routes a top-level WebView navigation without granting implicit app-launch authority. */
+private fun handleMainFrameNavigation(
+    context: Context,
+    navigation: WebResourceRequest,
+    onExternalIntentRequested: (Uri) -> Unit
+): Boolean {
+    if (!navigation.isForMainFrame) return false
+
+    val uri = navigation.url
+    return when (uri.scheme?.lowercase()) {
+        "https" -> false
+        "http", "mailto", "tel", "sms" -> {
+            openExternalUri(context, uri)
+            true
+        }
+        "intent" -> {
+            if (navigation.hasGesture()) {
+                onExternalIntentRequested(uri)
+            } else {
+                openIntentFallback(context, uri)
+            }
+            true
+        }
+        else -> true
+    }
+}
+
+/** Switches between the installed WebView mobile UA and a desktop-shaped variant. */
 private fun applyUserAgent(webView: WebView, isDesktop: Boolean) {
     val defaultUserAgent = WebSettings.getDefaultUserAgent(webView.context)
     webView.settings.userAgentString = if (isDesktop) {
@@ -609,6 +635,7 @@ private fun applyUserAgent(webView: WebView, isDesktop: Boolean) {
     }
 }
 
+/** Delegates an explicitly allowed external URI to a browsable system handler. */
 private fun openExternalUri(context: Context, uri: Uri) {
     try {
         val intent = Intent(Intent.ACTION_VIEW, uri).apply {
@@ -620,6 +647,7 @@ private fun openExternalUri(context: Context, uri: Uri) {
     }
 }
 
+/** Launches a user-confirmed intent URI or falls back to validated HTTPS. */
 private fun openExternalIntentUri(context: Context, uri: Uri) {
     val parsedIntent = runCatching {
         Intent.parseUri(uri.toString(), Intent.URI_INTENT_SCHEME)
@@ -648,6 +676,7 @@ private fun openExternalIntentUri(context: Context, uri: Uri) {
     fallbackUri?.let { openExternalUri(context, it) }
 }
 
+/** Uses only an HTTPS browser fallback when an intent has no user gesture. */
 private fun openIntentFallback(context: Context, uri: Uri) {
     val parsedIntent = runCatching {
         Intent.parseUri(uri.toString(), Intent.URI_INTENT_SCHEME)
@@ -655,11 +684,13 @@ private fun openIntentFallback(context: Context, uri: Uri) {
     validatedHttpsFallback(parsedIntent)?.let { openExternalUri(context, it) }
 }
 
+/** Returns an intent browser fallback only when it is HTTPS. */
 private fun validatedHttpsFallback(intent: Intent): Uri? {
     val fallbackUri = intent.getStringExtra("browser_fallback_url")?.let(Uri::parse) ?: return null
     return fallbackUri.takeIf { it.scheme.equals("https", ignoreCase = true) }
 }
 
+/** Maps a provider to its lightweight toolbar icon. */
 fun getWebServiceIcon(service: WebAiService): ImageVector {
     return when (service) {
         WebAiService.CLAUDE -> Icons.Default.Flare
