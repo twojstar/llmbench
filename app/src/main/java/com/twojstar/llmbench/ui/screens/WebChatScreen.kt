@@ -7,7 +7,7 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
 import android.net.Uri
-import android.os.Build
+import android.net.http.SslError
 import android.view.ViewGroup
 import android.webkit.*
 import androidx.activity.compose.BackHandler
@@ -64,8 +64,20 @@ fun WebChatScreen(
     var canGoForward by remember { mutableStateOf(false) }
     var showPromptHelperDialog by remember { mutableStateOf(false) }
 
-    // Map of persistent WebViews to prevent reloading when switching tabs
+    // Map of persistent WebViews to prevent reloading when switching tabs.
     val webViewMap = remember { mutableMapOf<WebAiService, WebView>() }
+
+    DisposableEffect(webViewMap) {
+        onDispose {
+            webViewMap.values.forEach { webView ->
+                webView.stopLoading()
+                webView.webChromeClient = null
+                webView.webViewClient = WebViewClient()
+                webView.destroy()
+            }
+            webViewMap.clear()
+        }
+    }
 
     val activeWebView = webViewMap[selectedService]
 
@@ -465,16 +477,21 @@ private fun createConfiguredWebView(
         settings.apply {
             javaScriptEnabled = true
             domStorageEnabled = true
-            databaseEnabled = true
             useWideViewPort = true
             loadWithOverviewMode = true
             setSupportZoom(true)
             builtInZoomControls = true
             displayZoomControls = false
-            mediaPlaybackRequiresUserGesture = false
-            mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-            allowContentAccess = true
-            allowFileAccess = true
+            mediaPlaybackRequiresUserGesture = true
+            mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
+            allowContentAccess = false
+            allowFileAccess = false
+            @Suppress("DEPRECATION")
+            allowFileAccessFromFileURLs = false
+            @Suppress("DEPRECATION")
+            allowUniversalAccessFromFileURLs = false
+            javaScriptCanOpenWindowsAutomatically = false
+            setGeolocationEnabled(false)
         }
 
         // Enable Cookies and 3rd-party cookies for OAuth logins (Google, Apple, Microsoft, Auth0)
@@ -512,20 +529,26 @@ private fun createConfiguredWebView(
             }
 
             override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
-                val uri = request?.url ?: return false
-                val scheme = uri.scheme ?: ""
+                val navigation = request ?: return true
+                if (!navigation.isForMainFrame) return false
 
-                // Handle external protocols like intent:, tel:, mailto:
-                if (scheme != "http" && scheme != "https") {
-                    try {
-                        val intent = Intent(Intent.ACTION_VIEW, uri)
-                        context.startActivity(intent)
-                        return true
-                    } catch (_: Exception) {
-                        return false
+                val uri = navigation.url
+                return when (uri.scheme?.lowercase()) {
+                    "https" -> false
+                    "http", "mailto", "tel", "sms" -> {
+                        openExternalUri(context, uri)
+                        true
                     }
+                    else -> true
                 }
-                return false
+            }
+
+            override fun onReceivedSslError(
+                view: WebView?,
+                handler: SslErrorHandler?,
+                error: SslError?
+            ) {
+                handler?.cancel()
             }
         }
 
@@ -536,13 +559,25 @@ private fun createConfiguredWebView(
 }
 
 private fun applyUserAgent(webView: WebView, isDesktop: Boolean) {
-    if (isDesktop) {
-        webView.settings.userAgentString =
-            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
+    val defaultUserAgent = WebSettings.getDefaultUserAgent(webView.context)
+    webView.settings.userAgentString = if (isDesktop) {
+        defaultUserAgent
+            .replace(Regex("\\([^)]*Android[^)]*\\)"), "(X11; Linux x86_64)")
+            .replace(" Version/4.0", "")
+            .replace(Regex("\\s+Mobile(?=\\s|$)"), "")
     } else {
-        // Modern Chrome mobile User Agent for full compatibility with Google Login, Cloudflare, OpenAI & Anthropic
-        webView.settings.userAgentString =
-            "Mozilla/5.0 (Linux; Android 14; Pixel 8 Pro) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.6613.88 Mobile Safari/537.36"
+        defaultUserAgent
+    }
+}
+
+private fun openExternalUri(context: Context, uri: Uri) {
+    try {
+        val intent = Intent(Intent.ACTION_VIEW, uri).apply {
+            addCategory(Intent.CATEGORY_BROWSABLE)
+        }
+        context.startActivity(intent)
+    } catch (_: Exception) {
+        // Unsupported or unavailable external schemes stay blocked from the WebView.
     }
 }
 

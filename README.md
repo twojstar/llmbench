@@ -69,13 +69,13 @@ Backends are optional, not the default. If a feature truly needs one, prefer a t
 
 ## Near-term roadmap
 
-- [ ] remove generated/build-machine files from version control
+- [x] remove generated/build-machine files from version control
 - [x] normalize app name, namespace and application ID to LlmBench
-- [ ] harden WebView security while preserving provider login compatibility
+- [x] harden WebView security while preserving provider login compatibility
 - [ ] add Gemini AI Studio as a provider target and test its WebView behavior
 - [ ] add AIHubMix and OpenRouter-compatible free-provider adapters
 - [ ] create a provider-tweak/userscript interface instead of hard-coded WebView hacks
-- [ ] add CI build/lint checks
+- [x] add CI build/lint checks
 - [ ] document which providers work fully, partially, or block embedded login
 
 ## Development
