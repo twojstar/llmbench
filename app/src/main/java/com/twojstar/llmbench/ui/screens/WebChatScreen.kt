@@ -1,13 +1,15 @@
 package com.twojstar.llmbench.ui.screens
 
 import android.annotation.SuppressLint
+import android.content.ActivityNotFoundException
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
 import android.net.Uri
-import android.os.Build
+import android.net.http.SslError
+import android.util.Log
 import android.view.ViewGroup
 import android.webkit.*
 import androidx.activity.compose.BackHandler
@@ -45,6 +47,9 @@ import com.twojstar.llmbench.ui.theme.*
 import com.twojstar.llmbench.ui.viewmodel.StudioUiState
 import com.twojstar.llmbench.ui.viewmodel.StudioViewModel
 
+private const val WEBVIEW_LOG_TAG = "LlmBenchWeb"
+
+/** Hosts account-backed AI services with mobile-first WebView controls. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun WebChatScreen(
@@ -63,9 +68,22 @@ fun WebChatScreen(
     var canGoBack by remember { mutableStateOf(false) }
     var canGoForward by remember { mutableStateOf(false) }
     var showPromptHelperDialog by remember { mutableStateOf(false) }
+    var pendingExternalIntentUri by remember { mutableStateOf<Uri?>(null) }
 
-    // Map of persistent WebViews to prevent reloading when switching tabs
+    // Map of persistent WebViews to prevent reloading when switching tabs.
     val webViewMap = remember { mutableMapOf<WebAiService, WebView>() }
+
+    DisposableEffect(webViewMap) {
+        onDispose {
+            webViewMap.values.forEach { webView ->
+                webView.stopLoading()
+                webView.webChromeClient = null
+                webView.webViewClient = WebViewClient()
+                webView.destroy()
+            }
+            webViewMap.clear()
+        }
+    }
 
     val activeWebView = webViewMap[selectedService]
 
@@ -289,7 +307,11 @@ fun WebChatScreen(
                                 try {
                                     val intent = Intent(Intent.ACTION_VIEW, Uri.parse(currentUrl))
                                     context.startActivity(intent)
-                                } catch (_: Exception) {
+                                } catch (error: ActivityNotFoundException) {
+                                    Log.w(WEBVIEW_LOG_TAG, "External browser handler unavailable", error)
+                                    viewModel.showSnackbar("Could not launch external browser")
+                                } catch (error: SecurityException) {
+                                    Log.w(WEBVIEW_LOG_TAG, "External browser launch rejected", error)
                                     viewModel.showSnackbar("Could not launch external browser")
                                 }
                             },
@@ -359,6 +381,9 @@ fun WebChatScreen(
                                         canGoBack = back
                                         canGoForward = fwd
                                     }
+                                },
+                                onExternalIntentRequested = { uri ->
+                                    pendingExternalIntentUri = uri
                                 }
                             ).also { wv ->
                                 webViewMap[service] = wv
@@ -380,6 +405,15 @@ fun WebChatScreen(
     }
 
     // Quick Prompt / Profile Copier Dialog
+    ExternalIntentConfirmationDialog(
+        uri = pendingExternalIntentUri,
+        onDismiss = { pendingExternalIntentUri = null },
+        onConfirm = { pendingUri ->
+            pendingExternalIntentUri = null
+            openExternalIntentUri(context, pendingUri)
+        }
+    )
+
     if (showPromptHelperDialog) {
         AlertDialog(
             onDismissRequest = { showPromptHelperDialog = false },
@@ -445,6 +479,37 @@ fun WebChatScreen(
     }
 }
 
+/** Requires explicit user consent before an intent URI leaves LlmBench. */
+@Composable
+private fun ExternalIntentConfirmationDialog(
+    uri: Uri?,
+    onDismiss: () -> Unit,
+    onConfirm: (Uri) -> Unit
+) {
+    val pendingUri = uri ?: return
+    val targetPackage = runCatching {
+        Intent.parseUri(pendingUri.toString(), Intent.URI_INTENT_SCHEME).`package`
+    }.getOrNull()
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Open another app?") },
+        text = {
+            Text(
+                targetPackage?.let { "This login wants to open $it." }
+                    ?: "This login wants to leave LlmBench and open another app."
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = { onConfirm(pendingUri) }) { Text("Open") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Stay here") }
+        }
+    )
+}
+
+/** Builds the least-privileged WebView needed by account-backed providers. */
 @SuppressLint("SetJavaScriptEnabled")
 private fun createConfiguredWebView(
     context: Context,
@@ -453,7 +518,8 @@ private fun createConfiguredWebView(
     onUrlChanged: (String) -> Unit,
     onTitleChanged: (String) -> Unit,
     onProgressChanged: (Int) -> Unit,
-    onNavStateChanged: (canGoBack: Boolean, canGoForward: Boolean) -> Unit
+    onNavStateChanged: (canGoBack: Boolean, canGoForward: Boolean) -> Unit,
+    onExternalIntentRequested: (Uri) -> Unit
 ): WebView {
     val webView = WebView(context).apply {
         layoutParams = ViewGroup.LayoutParams(
@@ -465,16 +531,21 @@ private fun createConfiguredWebView(
         settings.apply {
             javaScriptEnabled = true
             domStorageEnabled = true
-            databaseEnabled = true
             useWideViewPort = true
             loadWithOverviewMode = true
             setSupportZoom(true)
             builtInZoomControls = true
             displayZoomControls = false
-            mediaPlaybackRequiresUserGesture = false
-            mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-            allowContentAccess = true
-            allowFileAccess = true
+            mediaPlaybackRequiresUserGesture = true
+            mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
+            allowContentAccess = false
+            allowFileAccess = false
+            @Suppress("DEPRECATION")
+            allowFileAccessFromFileURLs = false
+            @Suppress("DEPRECATION")
+            allowUniversalAccessFromFileURLs = false
+            javaScriptCanOpenWindowsAutomatically = false
+            setGeolocationEnabled(false)
         }
 
         // Enable Cookies and 3rd-party cookies for OAuth logins (Google, Apple, Microsoft, Auth0)
@@ -512,20 +583,16 @@ private fun createConfiguredWebView(
             }
 
             override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
-                val uri = request?.url ?: return false
-                val scheme = uri.scheme ?: ""
+                val navigation = request ?: return true
+                return handleMainFrameNavigation(context, navigation, onExternalIntentRequested)
+            }
 
-                // Handle external protocols like intent:, tel:, mailto:
-                if (scheme != "http" && scheme != "https") {
-                    try {
-                        val intent = Intent(Intent.ACTION_VIEW, uri)
-                        context.startActivity(intent)
-                        return true
-                    } catch (_: Exception) {
-                        return false
-                    }
-                }
-                return false
+            override fun onReceivedSslError(
+                view: WebView?,
+                handler: SslErrorHandler?,
+                error: SslError?
+            ) {
+                handler?.cancel()
             }
         }
 
@@ -535,17 +602,102 @@ private fun createConfiguredWebView(
     return webView
 }
 
-private fun applyUserAgent(webView: WebView, isDesktop: Boolean) {
-    if (isDesktop) {
-        webView.settings.userAgentString =
-            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
-    } else {
-        // Modern Chrome mobile User Agent for full compatibility with Google Login, Cloudflare, OpenAI & Anthropic
-        webView.settings.userAgentString =
-            "Mozilla/5.0 (Linux; Android 14; Pixel 8 Pro) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.6613.88 Mobile Safari/537.36"
+/** Routes a top-level WebView navigation without granting implicit app-launch authority. */
+private fun handleMainFrameNavigation(
+    context: Context,
+    navigation: WebResourceRequest,
+    onExternalIntentRequested: (Uri) -> Unit
+): Boolean {
+    if (!navigation.isForMainFrame) return false
+
+    val uri = navigation.url
+    return when (uri.scheme?.lowercase()) {
+        "https" -> false
+        "http", "mailto", "tel", "sms" -> {
+            if (navigation.hasGesture()) {
+                openExternalUri(context, uri)
+            }
+            true
+        }
+        "intent" -> {
+            if (navigation.hasGesture()) {
+                onExternalIntentRequested(uri)
+            }
+            true
+        }
+        else -> true
     }
 }
 
+/** Switches between the installed WebView mobile UA and a desktop-shaped variant. */
+private fun applyUserAgent(webView: WebView, isDesktop: Boolean) {
+    val defaultUserAgent = WebSettings.getDefaultUserAgent(webView.context)
+    webView.settings.userAgentString = if (isDesktop) {
+        defaultUserAgent
+            .replace(Regex("\\([^)]*Android[^)]*\\)"), "(X11; Linux x86_64)")
+            .replace(" Version/4.0", "")
+            .replace(Regex("\\s+Mobile(?=\\s|$)"), "")
+    } else {
+        defaultUserAgent
+    }
+}
+
+/** Delegates an explicitly allowed external URI to a browsable system handler. */
+private fun openExternalUri(context: Context, uri: Uri) {
+    try {
+        val intent = Intent(Intent.ACTION_VIEW, uri).apply {
+            addCategory(Intent.CATEGORY_BROWSABLE)
+        }
+        context.startActivity(intent)
+    } catch (error: ActivityNotFoundException) {
+        Log.w(WEBVIEW_LOG_TAG, "External URI handler unavailable", error)
+    } catch (error: SecurityException) {
+        Log.w(WEBVIEW_LOG_TAG, "External URI launch rejected", error)
+    }
+}
+
+/** Launches a user-confirmed intent URI or falls back to validated HTTPS. */
+private fun openExternalIntentUri(context: Context, uri: Uri) {
+    val parsedIntent = runCatching {
+        Intent.parseUri(uri.toString(), Intent.URI_INTENT_SCHEME)
+    }.getOrNull() ?: return
+    val fallbackUri = validatedHttpsFallback(parsedIntent)
+    val targetPackage = parsedIntent.`package` ?: parsedIntent.component?.packageName
+
+    if (!targetPackage.isNullOrBlank()) {
+        val launchIntent = sanitizeExternalIntent(parsedIntent, targetPackage)
+        if (launchIntent != null) try {
+            context.startActivity(launchIntent)
+            return
+        } catch (error: ActivityNotFoundException) {
+            Log.w(WEBVIEW_LOG_TAG, "Intent target unavailable; trying HTTPS fallback", error)
+        } catch (error: SecurityException) {
+            Log.w(WEBVIEW_LOG_TAG, "Intent target rejected; trying HTTPS fallback", error)
+        }
+    }
+
+    fallbackUri?.let { openExternalUri(context, it) }
+}
+
+/** Reduces an intent URI to a safe browsable ACTION_VIEW handoff. */
+private fun sanitizeExternalIntent(intent: Intent, targetPackage: String): Intent? {
+    val data = intent.data ?: return null
+    val scheme = data.scheme?.lowercase() ?: return null
+    if (scheme in setOf("file", "content", "android.resource", "javascript", "data")) return null
+
+    return Intent(Intent.ACTION_VIEW, data).apply {
+        addCategory(Intent.CATEGORY_BROWSABLE)
+        setPackage(targetPackage)
+    }
+}
+
+/** Returns an intent browser fallback only when it is HTTPS. */
+private fun validatedHttpsFallback(intent: Intent): Uri? {
+    val fallbackUri = intent.getStringExtra("browser_fallback_url")?.let(Uri::parse) ?: return null
+    return fallbackUri.takeIf { it.scheme.equals("https", ignoreCase = true) }
+}
+
+/** Maps a provider to its lightweight toolbar icon. */
 fun getWebServiceIcon(service: WebAiService): ImageVector {
     return when (service) {
         WebAiService.CLAUDE -> Icons.Default.Flare
