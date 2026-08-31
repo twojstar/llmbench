@@ -70,7 +70,7 @@ Backends are optional, not the default. If a feature truly needs one, prefer a t
 ## Near-term roadmap
 
 - [ ] remove generated/build-machine files from version control
-- [ ] normalize app name, namespace and application ID to LlmBench
+- [x] normalize app name, namespace and application ID to LlmBench
 - [ ] harden WebView security while preserving provider login compatibility
 - [ ] add Gemini AI Studio as a provider target and test its WebView behavior
 - [ ] add AIHubMix and OpenRouter-compatible free-provider adapters
