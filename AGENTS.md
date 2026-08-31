@@ -1,10 +1,9 @@
 # AGENTS.md
 
-LlmBench is an Android application. Keep application work here and keep reusable cross-project AI configuration in `trvny/.ai`.
+LlmBench is an Android application.
 
 ## Repository boundaries
 
-- Do not copy or fork the `.ai` core into this repository.
 - If LlmBench consumes `.ai`, use an explicit adapter/import boundary and keep `.ai` canonical upstream.
 - Prefer extending the existing Android structure over creating parallel implementations.
 
