@@ -20,4 +20,4 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "LlmBench"
-include(":app")
+include(":app", ":shared")

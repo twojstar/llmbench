@@ -1,4 +1,4 @@
-name: Android CI
+name: Android + KMP CI
 
 on: # yamllint disable-line rule:truthy
   push:
@@ -45,8 +45,8 @@ jobs:
             gradle wrapper --gradle-version "$GRADLE_VERSION"
           fi
 
-      - name: Build, test & lint
-        run: ./gradlew assembleDebug testDebugUnitTest lintDebug --stacktrace
+      - name: Build Android, test shared & lint
+        run: ./gradlew :app:assembleDebug :app:testDebugUnitTest :app:lintDebug :shared:desktopTest --stacktrace
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v7
