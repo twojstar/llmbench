@@ -604,7 +604,7 @@ private fun openExternalIntentUri(context: Context, uri: Uri) {
         }
 
         val fallbackUri = fallbackUrl?.let(Uri::parse)
-        if (fallbackUri?.scheme.equals("https", ignoreCase = true)) {
+        if (fallbackUri != null && fallbackUri.scheme.equals("https", ignoreCase = true)) {
             openExternalUri(context, fallbackUri)
         }
     } catch (_: Exception) {
