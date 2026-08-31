@@ -20,5 +20,5 @@ LlmBench is an Android application. Keep application work here and keep reusable
 
 - Inspect current main, open PRs and recent changes before overlapping work.
 - Keep one logical change per pull request.
-- Temporary `AiProfileStudio` names are legacy AI Studio export names, not a new source of truth.
+- Use `LlmBench` as the app/project name and `com.twojstar.llmbench` as the canonical Android namespace/application ID.
 - Keep documentation short and update it when provider support or security assumptions change.
