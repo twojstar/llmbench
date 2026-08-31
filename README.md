@@ -1,121 +1,89 @@
-<div align="center">
+# LlmBench
 
-# `.ai`
+Android workspace for using multiple AI services from one app without turning every provider into a separate installed client.
 
-**Portable AI core for profiles, overlays, provider adapters, reusable instructions and skills.**
+> Status: early prototype. The current Android code was bootstrapped in Gemini AI Studio and still carries temporary `AiProfileStudio` package/name remnants that will be normalized in a follow-up change.
 
-[![validate](https://img.shields.io/github/actions/workflow/status/trvny/.ai/validate.yml?branch=main&label=validate&logo=githubactions&logoColor=white&style=flat-square)](https://github.com/trvny/.ai/actions/workflows/validate.yml)
-[![code license](https://img.shields.io/github/license/trvny/.ai?label=code&logo=opensourceinitiative&logoColor=white&color=6f42c1&style=flat-square)](https://spdx.org/licenses/ISC)
-<a href="https://deepwiki.com/trvny/.ai"><img src="https://deepwiki.com/badge.svg" alt="DeepWiki"></a>
+## What it is
 
-[**Submodule guide**](docs/submodule.md) · [**Example overlay**](examples/profile.overlay.yaml) · [**Schema**](schema/style-profile.schema.json)
+LlmBench is intended to combine three layers:
 
-</div>
+1. **Web accounts** — persistent WebView tabs for services where the user signs in with their normal account.
+2. **Free/native providers** — a shared chat/compare surface for API-compatible free providers such as OpenRouter-style endpoints.
+3. **Optional AI tooling** — reusable profiles/instructions from [`trvny/.ai`](https://github.com/trvny/.ai) without copying that repository into this one.
 
----
+The first prototype already contains Compose UI, persistent per-provider WebViews, a native comparison chat, profile/instruction rendering, YAML editing and a small skills/docs browser.
 
-## Public core, private overlay
+## Initial provider targets
 
-`.ai` keeps reusable AI configuration in one public place while downstream repositories keep their own private or project-specific differences.
+### Account-backed WebViews
 
-```mermaid
-flowchart LR
-    C[Public .ai core] --> M[Compose]
-    O[Private overlay] --> M
-    M --> E[Effective profile / instructions]
-```
+- ChatGPT
+- Claude
+- Gemini
+- DeepSeek
+- Kimi
+- Gemini AI Studio, if its authentication and editor remain usable inside Android WebView
 
-Later layers win. Reusable changes go upstream; local differences stay downstream. No reverse synchronization is needed.
+### Native / free-provider layer
 
-## Layout
+Planned adapters include OpenRouter-compatible services and other free endpoints such as AIHubMix where their terms and APIs allow it. Provider-specific details belong behind adapters rather than being spread through UI code.
+
+## WebView approach
+
+Each web provider gets a persistent WebView instance so switching tabs does not constantly destroy sessions or drafts. Provider tweaks can later live in a small, auditable userscript-style adapter layer for things such as mobile layout fixes, hiding redundant chrome, or provider-specific navigation.
+
+LlmBench must not scrape passwords, session cookies, OAuth tokens or other login credentials. Authentication remains between the embedded provider page and that provider.
+
+## Relationship to `.ai`
+
+[`trvny/.ai`](https://github.com/trvny/.ai) remains the canonical portable AI configuration core. This repository is the Android client.
 
 ```text
-.ai/
-├── AGENTS.md      canonical repository guidance
-├── CLAUDE.md      Claude import shim -> AGENTS.md
-├── GEMINI.md      Gemini import shim -> AGENTS.md
-├── profiles/      base profiles
-├── examples/      overlay examples
-├── schema/        profile schema
-├── tools/         composition helpers
-├── tests/         core and repository contract tests
-├── instructions/  reusable instructions
-├── styles/        style guidance
-├── templates/     project starters
-├── skills/        portable opt-in skills
-├── .claude/       Claude reference defaults
-└── .codex/        Codex reference defaults
+trvny/.ai             reusable profiles / instructions / skills
+      │
+      └── optional consumption
+              │
+              ▼
+trvny/aishub           LlmBench Android application
 ```
 
-`CLAUDE.md` and `GEMINI.md` are regular text import shims rather than symlinks, so the canonical `AGENTS.md` also works in Windows checkouts without requiring symlink support.
+Do not vendor a second copy of `.ai` here. If runtime integration becomes useful, consume a pinned/exported representation with an explicit boundary.
 
-Files here are building blocks. Providers do not automatically discover or apply everything in the repository.
+## Architecture direction
 
-## Use it in another repository
-
-The usual setup is a pinned submodule plus a local overlay:
-
-```bash
-git submodule add https://github.com/trvny/.ai.git .ai/core
-cp .ai/core/examples/profile.overlay.yaml .ai/profile.yaml
+```text
+Compose UI
+├── Web workspace
+│   ├── provider registry
+│   ├── persistent WebViews
+│   └── provider tweaks
+├── Native compare hub
+│   ├── provider adapters
+│   └── shared chat models
+└── Profile tools
+    └── optional .ai-compatible import/rendering
 ```
 
-For repositories that already use it:
+Backends are optional, not the default. If a feature truly needs one, prefer a tiny stateless service and evaluate Cloudflare, Google Cloud, AWS or Oracle free tiers based on the actual requirement rather than choosing infrastructure first.
 
-```bash
-git submodule update --init --recursive
-```
+## Near-term roadmap
 
-See **[docs/submodule.md](docs/submodule.md)** for cloning, profile composition, rendering, updates and CI checkout.
+- [ ] remove generated/build-machine files from version control
+- [ ] normalize app name, namespace and application ID to LlmBench
+- [ ] harden WebView security while preserving provider login compatibility
+- [ ] add Gemini AI Studio as a provider target and test its WebView behavior
+- [ ] add AIHubMix and OpenRouter-compatible free-provider adapters
+- [ ] create a provider-tweak/userscript interface instead of hard-coded WebView hacks
+- [ ] add CI build/lint checks
+- [ ] document which providers work fully, partially, or block embedded login
 
-## Composition
+## Development
 
-```bash
-python .ai/core/tools/merge_profile.py \
-  .ai/core/profiles/default.yaml \
-  .ai/profile.yaml \
-  --schema .ai/core/schema/style-profile.schema.json \
-  --output .ai/generated/profile.yaml
-```
+The project currently targets Android API 35 with minSdk 26 and uses Kotlin, Jetpack Compose, OkHttp and kotlinx.serialization.
 
-The final composed profile is validated against the schema. Partial overlays only need to contain the values they change.
-
-Provider-specific files remain reference defaults. Adapt or expose them where the consuming tool expects them rather than duplicating the whole core.
-
-## Security boundary
-
-Keep credentials, tokens, personal paths, private endpoints and machine-specific configuration out of the public core. Use environment variables, secret storage or ignored local files instead.
-
-## Design rules
-
-- one maintained source of truth per concern
-- public core, downstream overlays
-- thin provider adapters
-- generated output separate from maintained input
-- simple files before frameworks
-- explicit behavior before hidden magic
+The repository is still an early AI Studio export, so expect cleanup before treating the build layout or package names as stable.
 
 ## License
 
-[ISC](LICENSE)
-
----
-
-## 📰 Mininews
-
-<!--README_FEED:START-->
-- [Urban Word of the Day — Salad Days](https://www.urbandictionary.com/define.php?term=Salad%20Days&defid=6122902)
-- [Urban Word of the Day — grebo](https://www.urbandictionary.com/define.php?term=grebo&defid=1975218)
-- [How to Engage with New Media: A Strategic Guide for Nonprofit Organizations](https://carnegieendowment.org/research/2026/08/how-to-engage-with-new-media-a-strategic-guide-for-nonprofit-organizations)
-- [Urban Word of the Day — board chow](https://www.urbandictionary.com/define.php?term=board%20chow&defid=2568411)
-- [100 lat na straży! - malopolska.pl](https://news.google.com/atom/articles/CBMickFVX3lxTFBxWXFKbUs0MnJrS3B0V3hET1VNVHRjLXc5RGFEM0ZZdlJoMlhrbjFJeExPNU5pQ2lvdHNfTHRUVG5pV0Z2RzA0Z3lZM1lPWDgzMEswbFdvVXM2RnoydFV2VjdIb05KZk0xbHJEcjNKSDhTdw?oc=5)
-- [Nowy rozkład jazdy PKP od 30 sierpnia. Zmiany także na trasie przez Krzeszowice, Trzebinię i Chrzanów - Przelom.pl - portal ziemi chrzanowskiej](https://news.google.com/atom/articles/CBMijwFBVV95cUxQV254VnUyMEllanZ3RFh5YUZEOVlaRDQxREg1SE1wLWtIWmV5cnYwQ2F1UlFXMmk3dmhzQ0NOV2NqQWxpV3h0WVV2ajJuUGYzTnIxWEJEMkY5bk9aTHlWMVpac0djYVM2Q0pHSmlOeHJKWS1nQ19DZG43TzVXVzFaZ191cXl4S0NqZkFmdkt0TQ?oc=5)
-<!--README_FEED:END-->
-
-## 💬 Cytat z szuflady
-
-<!-- markdownlint-disable MD033 -->
-<!--STARTS_HERE_QUOTE_README-->
-<i>❝“On two occasions I have been asked, ‘If you put into the machine wrong figures, will the right answers come out?’  I am not able rightly to apprehend the kind of confusion of ideas that could provoke such a question.”— Charles Babbage❞</i>
-<!--ENDS_HERE_QUOTE_README-->
-<!-- markdownlint-enable MD033 -->
+ISC, see [LICENSE](LICENSE).

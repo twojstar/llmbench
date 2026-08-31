@@ -1,8 +1,29 @@
-__pycache__/
-*.py[cod]
-.venv/
+# Android / Gradle
+.gradle/
+**/build/
+local.properties
+.idea/
+*.iml
+captures/
+.externalNativeBuild/
+.cxx/
+
+# Signing / local credentials
+*.jks
+*.keystore
 .env
 .env.*
 .dev.vars
+
+# Python helpers
+__pycache__/
+*.py[cod]
+.venv/
+
+# Generated AI/profile output
 .ai/generated/
 generated/
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
