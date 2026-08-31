@@ -1,6 +1,7 @@
 package com.twojstar.llmbench.ui.screens
 
 import android.annotation.SuppressLint
+import android.content.ActivityNotFoundException
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -63,6 +64,7 @@ fun WebChatScreen(
     var canGoBack by remember { mutableStateOf(false) }
     var canGoForward by remember { mutableStateOf(false) }
     var showPromptHelperDialog by remember { mutableStateOf(false) }
+    var pendingExternalIntentUri by remember { mutableStateOf<Uri?>(null) }
 
     // Map of persistent WebViews to prevent reloading when switching tabs.
     val webViewMap = remember { mutableMapOf<WebAiService, WebView>() }
@@ -371,6 +373,9 @@ fun WebChatScreen(
                                         canGoBack = back
                                         canGoForward = fwd
                                     }
+                                },
+                                onExternalIntentRequested = { uri ->
+                                    pendingExternalIntentUri = uri
                                 }
                             ).also { wv ->
                                 webViewMap[service] = wv
@@ -392,6 +397,31 @@ fun WebChatScreen(
     }
 
     // Quick Prompt / Profile Copier Dialog
+    pendingExternalIntentUri?.let { pendingUri ->
+        val targetPackage = runCatching {
+            Intent.parseUri(pendingUri.toString(), Intent.URI_INTENT_SCHEME).`package`
+        }.getOrNull()
+        AlertDialog(
+            onDismissRequest = { pendingExternalIntentUri = null },
+            title = { Text("Open another app?") },
+            text = {
+                Text(
+                    targetPackage?.let { "This login wants to open $it." }
+                        ?: "This login wants to leave LlmBench and open another app."
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    pendingExternalIntentUri = null
+                    openExternalIntentUri(context, pendingUri)
+                }) { Text("Open") }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingExternalIntentUri = null }) { Text("Stay here") }
+            }
+        )
+    }
+
     if (showPromptHelperDialog) {
         AlertDialog(
             onDismissRequest = { showPromptHelperDialog = false },
@@ -465,7 +495,8 @@ private fun createConfiguredWebView(
     onUrlChanged: (String) -> Unit,
     onTitleChanged: (String) -> Unit,
     onProgressChanged: (Int) -> Unit,
-    onNavStateChanged: (canGoBack: Boolean, canGoForward: Boolean) -> Unit
+    onNavStateChanged: (canGoBack: Boolean, canGoForward: Boolean) -> Unit,
+    onExternalIntentRequested: (Uri) -> Unit
 ): WebView {
     val webView = WebView(context).apply {
         layoutParams = ViewGroup.LayoutParams(
@@ -540,7 +571,11 @@ private fun createConfiguredWebView(
                         true
                     }
                     "intent" -> {
-                        openExternalIntentUri(context, uri)
+                        if (navigation.hasGesture()) {
+                            onExternalIntentRequested(uri)
+                        } else {
+                            openIntentFallback(context, uri)
+                        }
                         true
                     }
                     else -> true
@@ -586,30 +621,43 @@ private fun openExternalUri(context: Context, uri: Uri) {
 }
 
 private fun openExternalIntentUri(context: Context, uri: Uri) {
-    try {
-        val parsedIntent = Intent.parseUri(uri.toString(), Intent.URI_INTENT_SCHEME)
-        val targetPackage = parsedIntent.`package` ?: parsedIntent.component?.packageName
-        val fallbackUrl = parsedIntent.getStringExtra("browser_fallback_url")
+    val parsedIntent = runCatching {
+        Intent.parseUri(uri.toString(), Intent.URI_INTENT_SCHEME)
+    }.getOrNull() ?: return
+    val fallbackUri = validatedHttpsFallback(parsedIntent)
+    val targetPackage = parsedIntent.`package` ?: parsedIntent.component?.packageName
 
-        if (!targetPackage.isNullOrBlank()) {
-            parsedIntent.apply {
-                addCategory(Intent.CATEGORY_BROWSABLE)
-                component = null
-                selector = null
-                setPackage(targetPackage)
-                removeExtra("browser_fallback_url")
-            }
+    if (!targetPackage.isNullOrBlank()) {
+        parsedIntent.apply {
+            addCategory(Intent.CATEGORY_BROWSABLE)
+            component = null
+            selector = null
+            setPackage(targetPackage)
+            removeExtra("browser_fallback_url")
+        }
+        try {
             context.startActivity(parsedIntent)
             return
+        } catch (_: ActivityNotFoundException) {
+            // Fall through to the validated HTTPS fallback.
+        } catch (_: SecurityException) {
+            // Fall through to the validated HTTPS fallback.
         }
-
-        val fallbackUri = fallbackUrl?.let(Uri::parse)
-        if (fallbackUri != null && fallbackUri.scheme.equals("https", ignoreCase = true)) {
-            openExternalUri(context, fallbackUri)
-        }
-    } catch (_: Exception) {
-        // Invalid or unavailable intent links remain blocked.
     }
+
+    fallbackUri?.let { openExternalUri(context, it) }
+}
+
+private fun openIntentFallback(context: Context, uri: Uri) {
+    val parsedIntent = runCatching {
+        Intent.parseUri(uri.toString(), Intent.URI_INTENT_SCHEME)
+    }.getOrNull() ?: return
+    validatedHttpsFallback(parsedIntent)?.let { openExternalUri(context, it) }
+}
+
+private fun validatedHttpsFallback(intent: Intent): Uri? {
+    val fallbackUri = intent.getStringExtra("browser_fallback_url")?.let(Uri::parse) ?: return null
+    return fallbackUri.takeIf { it.scheme.equals("https", ignoreCase = true) }
 }
 
 fun getWebServiceIcon(service: WebAiService): ImageVector {
