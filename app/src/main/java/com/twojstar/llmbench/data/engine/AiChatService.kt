@@ -55,7 +55,7 @@ class AiChatService {
                     AiProvider.CHATGPT -> callOpenAiApi(prompt, effectiveModel, key, systemInstruction)
                     AiProvider.CLAUDE -> callClaudeApi(prompt, effectiveModel, key, systemInstruction)
                     AiProvider.DEEPSEEK -> callOpenAiCompatibleApi("https://api.deepseek.com/chat/completions", prompt, effectiveModel, key, systemInstruction)
-                    AiProvider.KIMI -> callOpenAiCompatibleApi("https://api.moonshot.cn/v1/chat/completions", prompt, effectiveModel, key, systemInstruction)
+                    AiProvider.KIMI -> callOpenAiCompatibleApi("https://api.moonshot.ai/v1/chat/completions", prompt, effectiveModel, key, systemInstruction)
                     AiProvider.ALL -> null
                 }
 
@@ -150,9 +150,6 @@ class AiChatService {
                     }
                 }
             }
-            putJsonObject("generationConfig") {
-                put("temperature", 0.7)
-            }
         }
 
         val body = requestPayload.toString().toRequestBody("application/json".toMediaType())
@@ -179,32 +176,22 @@ class AiChatService {
         }
     }
 
-    // --- OpenAI ChatGPT REST API ---
+    // --- OpenAI Responses API ---
     private fun callOpenAiApi(
         prompt: String,
         model: String,
         apiKey: String,
         systemInstruction: String?
     ): String {
-        val url = "https://api.openai.com/v1/chat/completions"
-
-        val messagesArray = buildJsonArray {
-            if (!systemInstruction.isNullOrBlank()) {
-                addJsonObject {
-                    put("role", "system")
-                    put("content", systemInstruction)
-                }
-            }
-            addJsonObject {
-                put("role", "user")
-                put("content", prompt)
-            }
-        }
+        val url = "https://api.openai.com/v1/responses"
 
         val requestPayload = buildJsonObject {
             put("model", model)
-            put("messages", messagesArray)
-            put("temperature", 0.7)
+            put("input", prompt)
+            put("store", false)
+            if (!systemInstruction.isNullOrBlank()) {
+                put("instructions", systemInstruction)
+            }
         }
 
         val body = requestPayload.toString().toRequestBody("application/json".toMediaType())
@@ -223,12 +210,18 @@ class AiChatService {
             }
 
             val parsed = json.parseToJsonElement(responseBody).jsonObject
-            val choices = parsed["choices"]?.jsonArray
-            val firstChoice = choices?.getOrNull(0)?.jsonObject
-            val message = firstChoice?.get("message")?.jsonObject
-            val content = message?.get("content")?.jsonPrimitive?.contentOrNull
+            val output = parsed["output"]?.jsonArray.orEmpty()
+            val text = output.asSequence()
+                .mapNotNull { it as? JsonObject }
+                .filter { it["type"]?.jsonPrimitive?.contentOrNull == "message" }
+                .flatMap { message -> message["content"]?.jsonArray.orEmpty().asSequence() }
+                .mapNotNull { it as? JsonObject }
+                .firstOrNull { it["type"]?.jsonPrimitive?.contentOrNull == "output_text" }
+                ?.get("text")
+                ?.jsonPrimitive
+                ?.contentOrNull
 
-            return content ?: "Received empty message content from OpenAI."
+            return text ?: "Received empty message content from OpenAI."
         }
     }
 
@@ -306,7 +299,6 @@ class AiChatService {
         val requestPayload = buildJsonObject {
             put("model", model)
             put("messages", messagesArray)
-            put("temperature", 0.7)
         }
 
         val body = requestPayload.toString().toRequestBody("application/json".toMediaType())
@@ -374,10 +366,10 @@ class AiChatService {
                         """
                         ### 🔮 Google Gemini ($model) Analysis
                         
-                        **Multimodal & Context Window Strengths:**
-                        1. **Massive Token Context**: Gemini 3.5 Flash and 3.1 Pro handle up to 2M tokens, allowing whole-codebase repository reasoning in a single prompt.
-                        2. **Native Multimodality**: Native interleaved video, audio, code, and vision ingestion without separate tokenizer pipelines.
-                        3. **Structured Outputs**: Direct OpenAPI schema conformance for function calling and JSON payloads.
+                        **Multimodal & Context Strengths:**
+                        1. **Long-context reasoning**: Designed for large documents, codebases, and multi-step research tasks.
+                        2. **Native multimodality**: Handles text, image, audio, video, and code in one model family.
+                        3. **Structured outputs**: Supports schemas, tool calling, and agentic workflows.
                         
                         *Style Profile applied: Voice '$baseVoice', Initiative '${profile?.collaboration?.initiative ?: "balanced"}'.*
                         """.trimIndent()
@@ -416,20 +408,20 @@ class AiChatService {
                 when {
                     lowerPrompt.contains("compare") || lowerPrompt.contains("difference") -> {
                         """
-                        ### 🟢 OpenAI ChatGPT ($model) Perspective
+                        ### 🟢 OpenAI ($model) Perspective
                         
-                        Here is how ChatGPT approaches conversational intelligence:
+                        Here is how the OpenAI model approaches conversational intelligence:
                         
-                        - **Conversational Fluency**: Tuned for natural, step-by-step dialogue and creative structuring.
-                        - **Instruction Following**: Exceptional adherence to system prompts and behavioral guardrails.
-                        - **Tool Integration**: Code Interpreter, web browsing, and custom GPT actions seamlessly chain tasks.
+                        - **Instruction following**: Strong adherence to explicit system and user constraints.
+                        - **Reasoning and coding**: Designed for multi-step technical and creative work.
+                        - **Tool integration**: Modern API workflows can combine tools, files, and structured outputs.
                         
                         *Active Profile Voice: $baseVoice (concise level: $conciseLvl, technical level: $technicalLvl).*
                         """.trimIndent()
                     }
                     lowerPrompt.contains("code") || lowerPrompt.contains("function") || lowerPrompt.contains("kotlin") -> {
                         """
-                        ### 🟢 OpenAI ChatGPT Code Solution ($model)
+                        ### 🟢 OpenAI Code Solution ($model)
                         
                         Here is a clean and modular solution:
                         
@@ -447,11 +439,11 @@ class AiChatService {
                     }
                     else -> {
                         if (cynicalLvl >= 2) {
-                            "**ChatGPT ($model)**: Regarding '$prompt': Let's skip the corporate marketing speak. If your premise lacks sound architecture, no prompt engineering will save it. Fix the core invariants first."
+                            "**OpenAI ($model)**: Regarding '$prompt': Let's skip the corporate marketing speak. If your premise lacks sound architecture, no prompt engineering will save it. Fix the core invariants first."
                         } else if (conciseLvl >= 2) {
-                            "**ChatGPT ($model)**: Understood. Action items for '$prompt':\n1. Define schema contracts\n2. Stream token chunks\n3. Render message bubbles."
+                            "**OpenAI ($model)**: Understood. Action items for '$prompt':\n1. Define schema contracts\n2. Stream token chunks\n3. Render message bubbles."
                         } else {
-                            "Hi! I'm **ChatGPT** ($model). Regarding '$prompt':\n\nI can help you build, refine, and debug your ideas. I adapt to your chosen tone ('$baseVoice') while keeping solutions practical and conversational. What would you like to explore next?"
+                            "Hi! I'm the **OpenAI** model $model. Regarding '$prompt':\n\nI can help you build, refine, and debug your ideas. I adapt to your chosen tone ('$baseVoice') while keeping solutions practical and conversational. What would you like to explore next?"
                         }
                     }
                 }
@@ -465,9 +457,9 @@ class AiChatService {
                         
                         When examining architectural differences between LLM providers:
                         
-                        1. **Nuance and Artifact Quality**: Claude 3.5 Sonnet excels in subtle linguistic cadence, avoiding conversational fluff while producing rigorous, well-formatted documents.
-                        2. **Refusal Calibration**: Transparent and calibrated refusal mechanics designed to assist safe developer workflows without unwarranted friction.
-                        3. **Complex Code Synthesis**: Superior understanding of complex cross-module dependencies and edge-case error handling.
+                        1. **Nuance and artifact quality**: Strong long-form writing and structured output.
+                        2. **Agentic workflows**: Current Claude models are designed for coding, tools, and sustained tasks.
+                        3. **Complex code synthesis**: Handles cross-module dependencies and edge-case analysis.
                         
                         *System Policy: Tone calibrated to '$baseVoice'.*
                         """.trimIndent()
@@ -506,9 +498,9 @@ class AiChatService {
                         ### 🔷 DeepSeek ($model) Analysis
                         
                         **Key Architecture & Strengths:**
-                        1. **DeepSeek-R1 Chain of Thought**: Open-weights reasoning powerhouse with explicit reasoning traces (`<think>...</think>`).
-                        2. **DeepSeek-V3 MoE Architecture**: Ultra-efficient Mixture-of-Experts routing delivering frontier-class coding and math at extreme compute efficiency.
-                        3. **Open Architecture & Native Reasoning**: Exceptional at intricate algorithmic decomposition, competitive programming, and formal logic.
+                        1. **Thinking and non-thinking modes**: Current V4 models support both interaction styles.
+                        2. **Long context**: Built for large coding, research, and reasoning workloads.
+                        3. **API compatibility**: Supports OpenAI-compatible and Anthropic-compatible interfaces.
                         
                         *Style Profile applied: Voice '$baseVoice'.*
                         """.trimIndent()
@@ -553,10 +545,10 @@ class AiChatService {
                         """
                         ### ⚡ Moonshot Kimi ($model) Analysis
                         
-                        **Key Strengths & Long-Context Mastery:**
-                        1. **2 Million Token Context Window**: Kimi (Moonshot AI) processes mammoth PDFs, complete code repositories, and exhaustive documentation without loss of recall.
-                        2. **Research & Synthesis Engine**: Advanced parsing of structured data, research papers, and technical specifications.
-                        3. **Multilingual Precision**: Industry-leading fluency in both Chinese and English technical literature.
+                        **Key Strengths:**
+                        1. **Long-context work**: Designed for large documents, repositories, and sustained conversations.
+                        2. **Multimodal and agent capabilities**: Current Kimi models support modern tool and media workflows.
+                        3. **Coding specialization**: Dedicated code-focused models complement the general Kimi family.
                         
                         *Style Profile applied: Voice '$baseVoice'.*
                         """.trimIndent()
@@ -576,7 +568,7 @@ class AiChatService {
                         ```
                         
                         **Features:**
-                        - Handles ultra-long context streams gracefully.
+                        - Handles long context streams gracefully.
                         - Follows '$baseVoice' style constraints.
                         """.trimIndent()
                     }
@@ -584,7 +576,7 @@ class AiChatService {
                         if (conciseLvl >= 2) {
                             "**Kimi ($model)**: Response to '$prompt': Processing long-context input with precision. Ready to ingest and summarize comprehensive documentation."
                         } else {
-                            "Hello! I am **Kimi** ($model) from Moonshot AI. Regarding '$prompt':\n\nI can read and analyze massive documents, codebases, and conversations with high speed and precision, customized to your '$baseVoice' personality profile. What would you like to process?"
+                            "Hello! I am **Kimi** ($model) from Moonshot AI. Regarding '$prompt':\n\nI can read and analyze large documents, codebases, and conversations, customized to your '$baseVoice' personality profile. What would you like to process?"
                         }
                     }
                 }

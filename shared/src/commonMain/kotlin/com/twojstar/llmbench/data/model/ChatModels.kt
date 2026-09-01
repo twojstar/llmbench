@@ -16,7 +16,7 @@ enum class WebAiService(
         displayName = "Claude.ai",
         shortName = "Claude",
         url = "https://claude.ai",
-        description = "Anthropic Claude Pro / Free account with Projects & Artifacts",
+        description = "Anthropic Claude account chat with Projects & Artifacts",
         brandHexColor = 0xFFD97706 // Warm Amber
     ),
     CHATGPT(
@@ -24,7 +24,7 @@ enum class WebAiService(
         displayName = "ChatGPT",
         shortName = "ChatGPT",
         url = "https://chatgpt.com",
-        description = "OpenAI ChatGPT Plus / Free account with GPTs & Canvas",
+        description = "OpenAI ChatGPT account chat with tools and projects",
         brandHexColor = 0xFF10B981 // Emerald Green
     ),
     GEMINI(
@@ -32,7 +32,7 @@ enum class WebAiService(
         displayName = "Gemini Chat",
         shortName = "Gemini",
         url = "https://gemini.google.com",
-        description = "Google Gemini Advanced / Free account with Workspace tools",
+        description = "Google Gemini account chat with multimodal and Workspace tools",
         brandHexColor = 0xFF0EA5E9 // Sky Blue
     ),
     DEEPSEEK(
@@ -40,15 +40,15 @@ enum class WebAiService(
         displayName = "DeepSeek Chat",
         shortName = "DeepSeek",
         url = "https://chat.deepseek.com",
-        description = "DeepSeek-V3 & DeepSeek-R1 Deep Thinking web interface",
+        description = "DeepSeek web chat with reasoning, coding, and long context",
         brandHexColor = 0xFF2563EB // Deep Blue
     ),
     KIMI(
         id = "kimi",
         displayName = "Kimi AI",
         shortName = "Kimi",
-        url = "https://kimi.moonshot.cn",
-        description = "Moonshot AI Kimi with long-context web search & research",
+        url = "https://www.kimi.com",
+        description = "Moonshot AI Kimi chat with search, files, agents, and long context",
         brandHexColor = 0xFF8B5CF6 // Violet
     );
 
@@ -74,70 +74,78 @@ enum class AiProvider(
         shortName = "All Models",
         defaultModel = "all",
         availableModels = listOf("all"),
-        description = "Send prompt simultaneously to ChatGPT, Gemini, Claude, DeepSeek & Kimi"
+        description = "Send one prompt concurrently to every configured native provider"
     ),
     CLAUDE(
         id = "claude",
         displayName = "Anthropic Claude",
         shortName = "Claude",
-        defaultModel = "claude-3-5-sonnet-20241022",
+        defaultModel = "claude-sonnet-5",
         availableModels = listOf(
-            "claude-3-5-sonnet-20241022",
-            "claude-3-5-haiku-20241022",
-            "claude-3-opus-20240229"
+            "claude-sonnet-5",
+            "claude-fable-5",
+            "claude-opus-5",
+            "claude-haiku-4-5-20251001"
         ),
-        description = "Anthropic's safety-first models renowned for articulate writing, nuanced code analysis & depth"
+        description = "Anthropic models for coding, reasoning, writing, and agentic workflows"
     ),
     CHATGPT(
         id = "chatgpt",
-        displayName = "OpenAI ChatGPT",
-        shortName = "ChatGPT",
-        defaultModel = "gpt-4o",
+        displayName = "OpenAI",
+        shortName = "OpenAI",
+        defaultModel = "gpt-5.6",
         availableModels = listOf(
-            "gpt-4o",
-            "gpt-4o-mini",
-            "gpt-4-turbo",
-            "o3-mini"
+            "gpt-5.6",
+            "gpt-5.5"
         ),
-        description = "OpenAI's flagship intelligence models optimized for versatile conversation and coding"
+        description = "OpenAI GPT models for general text generation, coding, and reasoning"
     ),
     GEMINI(
         id = "gemini",
         displayName = "Google Gemini",
         shortName = "Gemini",
-        defaultModel = "gemini-3.5-flash",
+        defaultModel = "gemini-3.7-flash",
         availableModels = listOf(
+            "gemini-3.7-flash",
+            "gemini-3.6-flash",
             "gemini-3.5-flash",
-            "gemini-3.1-pro-preview",
-            "gemini-flash-latest"
+            "gemini-3.1-pro-preview"
         ),
-        description = "Google's next-gen multimodal foundation models with deep reasoning and long context"
+        description = "Google multimodal models for coding, agents, reasoning, and long context"
     ),
     DEEPSEEK(
         id = "deepseek",
         displayName = "DeepSeek AI",
         shortName = "DeepSeek",
-        defaultModel = "deepseek-chat",
+        defaultModel = "deepseek-v4-flash",
         availableModels = listOf(
-            "deepseek-chat",
-            "deepseek-reasoner"
+            "deepseek-v4-flash",
+            "deepseek-v4-pro"
         ),
-        description = "State-of-the-art reasoning and coding models with deep step-by-step thinking"
+        description = "DeepSeek V4 models with long context, reasoning, coding, and agent capabilities"
     ),
     KIMI(
         id = "kimi",
         displayName = "Moonshot Kimi AI",
         shortName = "Kimi",
-        defaultModel = "moonshot-v1-auto",
+        defaultModel = "kimi-k2.6",
         availableModels = listOf(
-            "moonshot-v1-8k",
-            "moonshot-v1-32k",
-            "moonshot-v1-128k"
+            "kimi-k2.6",
+            "kimi-k3",
+            "kimi-k2.7-code"
         ),
-        description = "Moonshot AI high-capacity long-context conversational assistant"
+        description = "Moonshot AI models for general chat, frontier reasoning, coding, and long context"
     );
 
     companion object {
+        val concreteProviders: List<AiProvider> = listOf(
+            CLAUDE,
+            CHATGPT,
+            GEMINI,
+            DEEPSEEK,
+            KIMI
+        )
+
         fun fromId(id: String): AiProvider {
             return entries.firstOrNull { it.id.equals(id, ignoreCase = true) } ?: CLAUDE
         }

@@ -35,7 +35,7 @@ data class StudioUiState(
     val currentTab: NavigationTab = NavigationTab.WEB_CHATS,
     val snackbarMessage: String? = null,
 
-    // Integrated Multi-Provider AI Chat (ChatGPT, Gemini, Claude)
+    // Integrated Multi-Provider AI Chat
     val chatMessages: List<ModelChatMessage> = emptyList(),
     val selectedChatProvider: AiProvider = AiProvider.ALL,
     val selectedChatModel: String = "all",
@@ -80,13 +80,16 @@ class StudioViewModel : ViewModel() {
     }
 
     private fun initChatWelcome() {
+        val providerLines = AiProvider.concreteProviders.joinToString("\n") { provider ->
+            "• **${provider.displayName}** (`${provider.defaultModel}`)"
+        }
         val welcomeChatMessages = listOf(
             ModelChatMessage(
                 id = "welcome_assistant_intro",
                 sender = "assistant",
                 provider = AiProvider.ALL,
                 modelName = "Multi-Model Hub",
-                text = "Welcome to the **AI Chat Hub**! 🚀\n\nHere you can interact with:\n• **Google Gemini** (`gemini-3.5-flash`, `gemini-3.1-pro-preview`)\n• **OpenAI ChatGPT** (`gpt-4o`, `gpt-4o-mini`, `o3-mini`)\n• **Anthropic Claude** (`claude-3-5-sonnet`, `claude-3-5-haiku`)\n\n✨ **Compare Mode**: Select *'All Models'* to send your prompt to all three models concurrently and compare their reasoning and outputs side-by-side.\n\n⚙️ Tap the **Key icon** in the top bar to connect your live API keys or test anytime in live simulation mode.",
+                text = "Welcome to the **AI Chat Hub**! 🚀\n\nHere you can interact with:\n$providerLines\n\n✨ **Compare Mode**: Select *'All Models'* to send your prompt to every configured native provider concurrently and compare their outputs side-by-side.\n\n⚙️ Tap the **Key icon** in the top bar to connect your live API keys or test anytime in live simulation mode.",
                 activeProfileNotes = listOf("Active System Profile linked from Studio")
             )
         )
@@ -158,7 +161,7 @@ class StudioViewModel : ViewModel() {
         val currentMessages = _uiState.value.chatMessages + userMessage
 
         val providersToRun = if (targetProvider == AiProvider.ALL) {
-            listOf(AiProvider.GEMINI, AiProvider.CHATGPT, AiProvider.CLAUDE, AiProvider.DEEPSEEK, AiProvider.KIMI)
+            AiProvider.concreteProviders
         } else {
             listOf(targetProvider)
         }
@@ -185,7 +188,7 @@ class StudioViewModel : ViewModel() {
             val apiKeys = _uiState.value.apiKeyConfig
 
             if (targetProvider == AiProvider.ALL) {
-                // Run concurrent requests for Gemini, ChatGPT, and Claude
+                // Run concurrent requests for every native provider
                 val tasks = providersToRun.map { provider ->
                     async {
                         val model = provider.defaultModel
