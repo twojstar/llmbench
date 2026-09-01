@@ -39,7 +39,20 @@ private fun generationActivityScript(selectors: List<String>, consumeCompletion:
             }
 
             if (!tracker.observer && document.documentElement) {
-                const update = () => {
+                const nodeTouchesGenerationControl = node => {
+                    if (!(node instanceof Element)) return false;
+                    return selectors.some(selector =>
+                        node.matches(selector) ||
+                        node.querySelector(selector) !== null ||
+                        node.closest(selector) !== null
+                    );
+                };
+                const mutationTouchesGenerationControl = mutation =>
+                    nodeTouchesGenerationControl(mutation.target) ||
+                    Array.from(mutation.addedNodes).some(nodeTouchesGenerationControl) ||
+                    Array.from(mutation.removedNodes).some(nodeTouchesGenerationControl);
+                const update = mutations => {
+                    if (!mutations.some(mutationTouchesGenerationControl)) return;
                     const nextActive = isGenerating();
                     if (tracker.active && !nextActive) tracker.completed = true;
                     tracker.active = nextActive;

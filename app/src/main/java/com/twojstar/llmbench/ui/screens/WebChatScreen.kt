@@ -46,6 +46,8 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -266,6 +268,15 @@ fun WebChatScreen(
                                 border = if (isSelected) BorderStroke(1.5.dp, brandColor) else BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.15f)),
                                 modifier = Modifier
                                     .clickable { activateService(service) }
+                                    .semantics {
+                                        when (activityStatus) {
+                                            WebChatActivityStatus.GENERATING ->
+                                                stateDescription = "Generating response"
+                                            WebChatActivityStatus.UNREAD ->
+                                                stateDescription = "Unread response"
+                                            WebChatActivityStatus.IDLE -> Unit
+                                        }
+                                    }
                                     .testTag("tab_web_service_${service.id}")
                             ) {
                                 Row(
