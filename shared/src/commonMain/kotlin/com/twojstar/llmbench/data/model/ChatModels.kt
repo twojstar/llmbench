@@ -50,6 +50,14 @@ enum class WebAiService(
         url = "https://www.kimi.com",
         description = "Moonshot AI Kimi chat with search, files, agents, and long context",
         brandHexColor = 0xFF8B5CF6 // Violet
+    ),
+    VIBE(
+        id = "vibe",
+        displayName = "Mistral Vibe",
+        shortName = "Vibe",
+        url = "https://chat.mistral.ai",
+        description = "Mistral Vibe account chat, formerly Le Chat, with work and agent tools",
+        brandHexColor = 0xFFFF7000 // Mistral Orange
     );
 
     companion object {

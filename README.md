@@ -23,6 +23,7 @@ The first prototype already contains Compose UI, persistent per-provider WebView
 - Gemini
 - DeepSeek
 - Kimi
+- Mistral Vibe (formerly Le Chat)
 - Gemini AI Studio via a browser-backed platform flow rather than embedded OAuth
 
 ### Native / free-provider layer
