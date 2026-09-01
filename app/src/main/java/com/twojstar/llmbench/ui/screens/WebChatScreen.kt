@@ -55,6 +55,7 @@ import com.twojstar.llmbench.data.model.WebAiService
 import com.twojstar.llmbench.ui.theme.*
 import com.twojstar.llmbench.ui.viewmodel.StudioUiState
 import com.twojstar.llmbench.ui.viewmodel.StudioViewModel
+import com.twojstar.llmbench.web.applyProviderWebTweaks
 
 private const val WEBVIEW_LOG_TAG = "LlmBenchWeb"
 private const val MAX_LIVE_WEBVIEWS = 2
@@ -422,6 +423,7 @@ fun WebChatScreen(
                         factory = { ctx ->
                             createConfiguredWebView(
                                 context = ctx,
+                                service = service,
                                 initialUrl = lastKnownUrls[service] ?: service.url,
                                 isDesktop = isDesktopMode,
                                 onUrlChanged = { url ->
@@ -623,6 +625,7 @@ private fun releaseWebView(webView: WebView) {
 @SuppressLint("SetJavaScriptEnabled")
 private fun createConfiguredWebView(
     context: Context,
+    service: WebAiService,
     initialUrl: String,
     isDesktop: Boolean,
     onUrlChanged: (String) -> Unit,
@@ -699,8 +702,9 @@ private fun createConfiguredWebView(
             }
 
             override fun onPageFinished(view: WebView?, url: String?) {
-                url?.let {
-                    onUrlChanged(it)
+                url?.let { pageUrl ->
+                    onUrlChanged(pageUrl)
+                    view?.let { applyProviderWebTweaks(it, service, pageUrl) }
                 }
                 onNavStateChanged(view?.canGoBack() ?: false, view?.canGoForward() ?: false)
                 CookieManager.getInstance().flush()

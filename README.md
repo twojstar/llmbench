@@ -31,7 +31,7 @@ Planned adapters include OpenRouter-compatible services and other free endpoints
 
 ## WebView approach
 
-Account sessions persist, but LlmBench must not keep every heavy provider SPA alive forever. The Android host will use a small LRU pool, pause inactive WebViews and evict them under memory pressure while cookies/session state remain provider-owned. Provider tweaks live in a small, auditable userscript/CSS adapter layer for mobile layout fixes, reduced animation/chrome and provider-specific navigation.
+Account sessions persist, but LlmBench must not keep every heavy provider SPA alive forever. The Android host uses a small LRU pool, pauses inactive WebViews and evicts them under memory pressure while cookies/session state remain provider-owned. Provider tweaks live in a small, auditable in-app registry: scripts are static, scoped to the matching provider host and applied after page load; remote userscript code is never fetched.
 
 LlmBench must not scrape passwords, session cookies, OAuth tokens or other login credentials. Authentication remains between the embedded provider page and that provider.
 
@@ -79,7 +79,7 @@ Backends are optional, not the default. If a feature truly needs one, prefer a t
 - [x] implement reliable provider file uploads through the platform file picker
 - [ ] add Gemini AI Studio through a browser-backed platform flow
 - [ ] add AIHubMix and OpenRouter-compatible free-provider adapters
-- [ ] create a provider-tweak/userscript interface instead of hard-coded WebView hacks
+- [x] create a provider-tweak/userscript interface instead of hard-coded WebView hacks
 - [x] add CI build/lint checks
 - [ ] document which providers work fully, partially, or block embedded login
 
