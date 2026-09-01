@@ -16,7 +16,7 @@ class ProviderWebTweaksTest {
             assertTrue(providerHostMatches(service, "$canonicalHost."))
             assertTrue(providerHostMatches(service, "mobile.$canonicalHost"))
             assertFalse(providerHostMatches(service, "accounts.google.com"))
-            assertFalse(providerHostMatches(service, "not$canonicalHost"))
+            assertFalse(providerHostMatches(service, "not-$canonicalHost.example"))
             assertFalse(providerHostMatches(service, "$canonicalHost.evil.example"))
         }
     }
