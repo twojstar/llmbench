@@ -7,6 +7,8 @@ import android.content.ActivityNotFoundException
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.ComponentCallbacks2
+import android.content.res.Configuration
 import android.content.Intent
 import android.graphics.Bitmap
 import android.net.Uri
@@ -40,6 +42,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -52,6 +57,7 @@ import com.twojstar.llmbench.ui.viewmodel.StudioUiState
 import com.twojstar.llmbench.ui.viewmodel.StudioViewModel
 
 private const val WEBVIEW_LOG_TAG = "LlmBenchWeb"
+private const val MAX_LIVE_WEBVIEWS = 2
 
 /** Hosts account-backed AI services with mobile-first WebView controls. */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -90,20 +96,58 @@ fun WebChatScreen(
         callback.onReceiveValue(selectedUris)
     }
 
-    // Map of persistent WebViews to prevent reloading when switching tabs.
-    val webViewMap = remember { mutableMapOf<WebAiService, WebView>() }
+    var liveServices by remember { mutableStateOf(listOf(selectedService)) }
+    val webViewMap = remember { mutableStateMapOf<WebAiService, WebView>() }
+    val lastKnownUrls = remember { mutableStateMapOf<WebAiService, String>() }
+    val currentSelectedService by rememberUpdatedState(selectedService)
+
+    fun activateService(service: WebAiService) {
+        selectedService = service
+        liveServices = nextWebViewLru(liveServices, service)
+    }
+
+    fun evictInactiveWebViews() {
+        liveServices = listOf(currentSelectedService)
+    }
+
+    val appContext = context.applicationContext
+    DisposableEffect(appContext) {
+        val callbacks = object : ComponentCallbacks2 {
+            @Suppress("DEPRECATION")
+            override fun onTrimMemory(level: Int) {
+                if (level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) {
+                    evictInactiveWebViews()
+                }
+            }
+
+            @Suppress("DEPRECATION")
+            override fun onLowMemory() = evictInactiveWebViews()
+            override fun onConfigurationChanged(newConfig: Configuration) = Unit
+        }
+        appContext.registerComponentCallbacks(callbacks)
+        onDispose { appContext.unregisterComponentCallbacks(callbacks) }
+    }
+
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_START -> webViewMap[currentSelectedService]?.onResume()
+                Lifecycle.Event.ON_STOP -> webViewMap.values.forEach(WebView::onPause)
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
 
     DisposableEffect(webViewMap) {
         onDispose {
             pendingFileCallback.value?.onReceiveValue(null)
             pendingFileCallback.value = null
-            webViewMap.values.forEach { webView ->
-                webView.stopLoading()
-                webView.webChromeClient = null
-                webView.webViewClient = WebViewClient()
-                webView.destroy()
-            }
+            val webViews = webViewMap.values.toList()
             webViewMap.clear()
+            webViews.forEach(::releaseWebView)
         }
     }
 
@@ -147,9 +191,7 @@ fun WebChatScreen(
                                 color = if (isSelected) brandColor.copy(alpha = 0.18f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
                                 border = if (isSelected) BorderStroke(1.5.dp, brandColor) else BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.15f)),
                                 modifier = Modifier
-                                    .clickable {
-                                        selectedService = service
-                                    }
+                                    .clickable { activateService(service) }
                                     .testTag("tab_web_service_${service.id}")
                             ) {
                                 Row(
@@ -366,12 +408,12 @@ fun WebChatScreen(
                 .fillMaxSize()
                 .padding(innerPadding)
         ) {
-            // Container holding all WebViews (one per provider, stacked in a Box)
-            // This maintains sessions, cookies, logins, and prompt state across tab switches without reloading!
-            WebAiService.entries.forEach { service ->
-                val isCurrentService = selectedService == service
+            // Keep only a tiny MRU set of provider WebViews alive. Cookies and storage remain provider-owned.
+            liveServices.forEach { service ->
+                key(service) {
+                    val isCurrentService = selectedService == service
 
-                Box(
+                    Box(
                     modifier = Modifier
                         .fillMaxSize()
                         .then(if (isCurrentService) Modifier else Modifier.size(0.dp))
@@ -380,9 +422,10 @@ fun WebChatScreen(
                         factory = { ctx ->
                             createConfiguredWebView(
                                 context = ctx,
-                                initialUrl = service.url,
+                                initialUrl = lastKnownUrls[service] ?: service.url,
                                 isDesktop = isDesktopMode,
                                 onUrlChanged = { url ->
+                                    lastKnownUrls[service] = url
                                     if (selectedService == service) {
                                         currentUrl = url
                                     }
@@ -433,14 +476,23 @@ fun WebChatScreen(
                         },
                         update = { wv ->
                             if (isCurrentService) {
+                                wv.onResume()
                                 canGoBack = wv.canGoBack()
                                 canGoForward = wv.canGoForward()
                                 wv.url?.let { currentUrl = it }
                                 wv.title?.let { pageTitle = it }
+                            } else {
+                                wv.onPause()
+                            }
+                        },
+                        onRelease = { wv ->
+                            if (webViewMap.remove(service) === wv) {
+                                releaseWebView(wv)
                             }
                         },
                         modifier = Modifier.fillMaxSize()
                     )
+                    }
                 }
             }
         }
@@ -549,6 +601,22 @@ private fun ExternalIntentConfirmationDialog(
             TextButton(onClick = onDismiss) { Text("Stay here") }
         }
     )
+}
+
+internal fun nextWebViewLru(
+    current: List<WebAiService>,
+    selected: WebAiService
+): List<WebAiService> = buildList {
+    add(selected)
+    current.filterTo(this) { it != selected }
+}.take(MAX_LIVE_WEBVIEWS)
+
+private fun releaseWebView(webView: WebView) {
+    webView.onPause()
+    webView.stopLoading()
+    webView.webChromeClient = null
+    webView.webViewClient = WebViewClient()
+    webView.destroy()
 }
 
 /** Builds the least-privileged WebView needed by account-backed providers. */
