@@ -81,4 +81,29 @@ class WebChatActivityTest {
             )
         }
     }
+
+    @Test
+    fun rememberedBackgroundCompletionBecomesUnreadEvenWithoutObservedGeneratingState() {
+        assertEquals(
+            WebChatActivityStatus.UNREAD,
+            nextWebChatActivityStatus(
+                previous = WebChatActivityStatus.IDLE,
+                observation = WebChatGenerationObservation.COMPLETED,
+                isSelected = false
+            )
+        )
+    }
+
+    @Test
+    fun rememberedSelectedCompletionStaysRead() {
+        assertEquals(
+            WebChatActivityStatus.IDLE,
+            nextWebChatActivityStatus(
+                previous = WebChatActivityStatus.IDLE,
+                observation = WebChatGenerationObservation.COMPLETED,
+                isSelected = true
+            )
+        )
+    }
+
 }

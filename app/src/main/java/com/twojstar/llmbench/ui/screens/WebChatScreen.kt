@@ -60,6 +60,7 @@ import com.twojstar.llmbench.ui.theme.*
 import com.twojstar.llmbench.ui.viewmodel.StudioUiState
 import com.twojstar.llmbench.ui.viewmodel.StudioViewModel
 import com.twojstar.llmbench.web.applyProviderWebTweaks
+import com.twojstar.llmbench.web.installProviderGenerationTracker
 import com.twojstar.llmbench.web.probeProviderGenerationActivity
 import kotlinx.coroutines.delay
 
@@ -119,6 +120,19 @@ fun WebChatScreen(
         liveServices = nextServices
     }
 
+    fun probeServiceActivity(service: WebAiService) {
+        val webView = webViewMap[service] ?: return
+        probeProviderGenerationActivity(webView, service) { observation ->
+            if (webViewMap[service] !== webView || service !in liveServices) return@probeProviderGenerationActivity
+            val previous = activityStatuses[service] ?: WebChatActivityStatus.IDLE
+            activityStatuses[service] = nextWebChatActivityStatus(
+                previous = previous,
+                observation = observation,
+                isSelected = currentSelectedService == service
+            )
+        }
+    }
+
     fun activateService(service: WebAiService) {
         selectedService = service
         activityStatuses[service]?.let { status ->
@@ -175,16 +189,7 @@ fun WebChatScreen(
         if (!lifecycleStarted) return@LaunchedEffect
         while (true) {
             liveServices.forEach { service ->
-                val webView = webViewMap[service] ?: return@forEach
-                probeProviderGenerationActivity(webView, service) { observation ->
-                    if (service !in liveServices) return@probeProviderGenerationActivity
-                    val previous = activityStatuses[service] ?: WebChatActivityStatus.IDLE
-                    activityStatuses[service] = nextWebChatActivityStatus(
-                        previous = previous,
-                        observation = observation,
-                        isSelected = currentSelectedService == service
-                    )
-                }
+                probeServiceActivity(service)
             }
             delay(1_200)
         }
@@ -771,7 +776,10 @@ private fun createConfiguredWebView(
             override fun onPageFinished(view: WebView?, url: String?) {
                 url?.let { pageUrl ->
                     onUrlChanged(pageUrl)
-                    view?.let { applyProviderWebTweaks(it, service, pageUrl) }
+                    view?.let { webView ->
+                        applyProviderWebTweaks(webView, service, pageUrl)
+                        installProviderGenerationTracker(webView, service)
+                    }
                 }
                 onNavStateChanged(view?.canGoBack() ?: false, view?.canGoForward() ?: false)
                 CookieManager.getInstance().flush()

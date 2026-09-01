@@ -34,6 +34,26 @@ class ProviderWebActivityTest {
     }
 
     @Test
+    fun localeIndependentGenerationControlsArePreferredWhereVerified() {
+        assertTrue(
+            ProviderWebTweakRegistry.generationSelectors(WebAiService.CLAUDE)
+                .first().contains("data-testid")
+        )
+        assertTrue(
+            ProviderWebTweakRegistry.generationSelectors(WebAiService.GEMINI)
+                .first().contains("data-test-id")
+        )
+        assertFalse(
+            ProviderWebTweakRegistry.generationSelectors(WebAiService.DEEPSEEK)
+                .first().contains("aria-label")
+        )
+        assertFalse(
+            ProviderWebTweakRegistry.generationSelectors(WebAiService.KIMI)
+                .first().contains("aria-label")
+        )
+    }
+
+    @Test
     fun vibeUsesExactStopGenerationLabels() {
         val selectors = ProviderWebTweakRegistry.generationSelectors(WebAiService.VIBE)
         assertTrue(selectors.contains("button[aria-label=\"Stop generation\" i]"))

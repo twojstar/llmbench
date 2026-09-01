@@ -34,24 +34,24 @@ internal object ProviderWebTweakRegistry {
 
     private val providerTweaks = WebAiService.entries.associateWith { listOf(mobileBaseline) }
 
-    // Keep activity probes conservative: exact generation controls only, never broad "contains stop" matches.
+    // Keep activity probes conservative: provider-scoped controls only, preferring locale-independent state.
     private val generationSelectors = mapOf(
         WebAiService.CHATGPT to listOf(
             "[data-testid=\"stop-button\"]"
         ),
         WebAiService.CLAUDE to listOf(
+            "[data-testid=\"stop-button\"]",
             "button[aria-label=\"Stop Response\" i]"
         ),
         WebAiService.GEMINI to listOf(
-            "button[aria-label=\"Stop response\" i]"
+            "[data-test-id=\"send-button-container\"].stop"
         ),
         WebAiService.DEEPSEEK to listOf(
-            "button[aria-label=\"Stop generating\" i]",
-            "[role=\"button\"][aria-label=\"Stop generating\" i]"
+            "div[role=\"button\"]:has(svg[viewBox^=\"0 0 16\"] " +
+                "path[d^=\"M2 4.88C2 3.68009 2 3.08013 2.30557 2.65954\"])"
         ),
         WebAiService.KIMI to listOf(
-            "button[aria-label=\"Stop generating\" i]",
-            "[role=\"button\"][aria-label=\"Stop generating\" i]"
+            "div.send-button-container.stop"
         ),
         WebAiService.VIBE to listOf(
             "button[aria-label=\"Stop generation\" i]",

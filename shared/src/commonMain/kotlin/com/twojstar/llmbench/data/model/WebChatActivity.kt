@@ -9,6 +9,7 @@ enum class WebChatActivityStatus {
 enum class WebChatGenerationObservation {
     IDLE,
     GENERATING,
+    COMPLETED,
     UNKNOWN
 }
 
@@ -18,6 +19,8 @@ fun nextWebChatActivityStatus(
     isSelected: Boolean
 ): WebChatActivityStatus = when (observation) {
     WebChatGenerationObservation.GENERATING -> WebChatActivityStatus.GENERATING
+    WebChatGenerationObservation.COMPLETED ->
+        if (isSelected) WebChatActivityStatus.IDLE else WebChatActivityStatus.UNREAD
     WebChatGenerationObservation.IDLE -> when {
         previous == WebChatActivityStatus.GENERATING && !isSelected -> WebChatActivityStatus.UNREAD
         previous == WebChatActivityStatus.UNREAD && !isSelected -> WebChatActivityStatus.UNREAD

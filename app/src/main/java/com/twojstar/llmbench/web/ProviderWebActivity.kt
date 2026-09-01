@@ -6,11 +6,15 @@ import com.twojstar.llmbench.data.model.WebChatGenerationObservation
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
-private fun generationActivityProbe(selectors: List<String>): String {
+private const val GENERATION_TRACKER_KEY = "__llmbenchGenerationTracker"
+
+private fun generationActivityScript(selectors: List<String>, consumeCompletion: Boolean): String {
     val encodedSelectors = Json.encodeToString(selectors)
     return """
         (() => {
             const selectors = $encodedSelectors;
+            const trackerKey = "$GENERATION_TRACKER_KEY";
+            const signature = JSON.stringify(selectors);
             const isVisible = element => {
                 const style = getComputedStyle(element);
                 return !element.disabled &&
@@ -18,16 +22,65 @@ private fun generationActivityProbe(selectors: List<String>): String {
                     style.visibility !== 'hidden' &&
                     element.getClientRects().length > 0;
             };
-            return selectors.some(selector =>
+            const isGenerating = () => selectors.some(selector =>
                 Array.from(document.querySelectorAll(selector)).some(isVisible)
             );
+
+            let tracker = window[trackerKey];
+            if (!tracker || tracker.signature !== signature) {
+                if (tracker && tracker.observer) tracker.observer.disconnect();
+                tracker = {
+                    signature,
+                    active: isGenerating(),
+                    completed: false,
+                    observer: null
+                };
+                window[trackerKey] = tracker;
+            }
+
+            if (!tracker.observer && document.documentElement) {
+                const update = () => {
+                    const nextActive = isGenerating();
+                    if (tracker.active && !nextActive) tracker.completed = true;
+                    tracker.active = nextActive;
+                };
+                tracker.observer = new MutationObserver(update);
+                tracker.observer.observe(document.documentElement, {
+                    subtree: true,
+                    childList: true,
+                    attributes: true,
+                    attributeFilter: [
+                        'class', 'disabled', 'aria-disabled', 'aria-label',
+                        'data-testid', 'data-test-id', 'hidden', 'style'
+                    ]
+                });
+            }
+
+            const activeNow = isGenerating();
+            if (tracker.active && !activeNow) tracker.completed = true;
+            tracker.active = activeNow;
+            if (tracker.active) return 1;
+            if (tracker.completed) {
+                if ($consumeCompletion) tracker.completed = false;
+                return 2;
+            }
+            return 0;
         })();
     """.trimIndent()
 }
 
+/** Installs an in-page observer so short generation cycles cannot disappear between native polls. */
+internal fun installProviderGenerationTracker(webView: WebView, service: WebAiService) {
+    val pageUrl = webView.url ?: return
+    if (!providerUrlMatches(service, pageUrl)) return
+    val selectors = ProviderWebTweakRegistry.generationSelectors(service)
+    if (selectors.isEmpty()) return
+    webView.evaluateJavascript(generationActivityScript(selectors, consumeCompletion = false), null)
+}
+
 /**
- * Reports only whether a provider-owned page exposes a provider-scoped generation control.
- * It intentionally does not read message text, prompts, credentials, or conversation content.
+ * Reports provider activity without reading message text, prompts, credentials, or conversation content.
+ * A provider-scoped MutationObserver remembers completed generation between native polling intervals.
  */
 internal fun probeProviderGenerationActivity(
     webView: WebView,
@@ -46,11 +99,12 @@ internal fun probeProviderGenerationActivity(
         return
     }
 
-    webView.evaluateJavascript(generationActivityProbe(selectors)) { rawResult ->
+    webView.evaluateJavascript(generationActivityScript(selectors, consumeCompletion = true)) { rawResult ->
         onResult(
             when (rawResult?.trim()) {
-                "true" -> WebChatGenerationObservation.GENERATING
-                "false" -> WebChatGenerationObservation.IDLE
+                "1" -> WebChatGenerationObservation.GENERATING
+                "2" -> WebChatGenerationObservation.COMPLETED
+                "0" -> WebChatGenerationObservation.IDLE
                 else -> WebChatGenerationObservation.UNKNOWN
             }
         )
