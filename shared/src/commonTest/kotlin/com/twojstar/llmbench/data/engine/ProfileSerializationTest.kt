@@ -65,4 +65,25 @@ class ProfileSerializationTest {
         assertContains(yaml, "    \"tone: #1\": 2")
         assertContains(yaml, "    note: \"line1\\n\\\"quoted\\\" \\\\ path\"")
     }
+
+    @Test
+    fun dumpOverlayEscapesYamlControlCharacters() {
+        val id = "del" + 0x7F.toChar() + "nel" + 0x85.toChar() + "c1" + 0x9F.toChar()
+        val yaml = YamlParser.dumpOverlay(ProfileOverlay(id = id))
+
+        assertContains(yaml, "id: \"del\\u007fnel\\u0085c1\\u009f\"")
+    }
+
+    @Test
+    fun dumpProfilePreservesEmptyMappings() {
+        val profile = Profile(
+            personality = Profile().personality.copy(modifiers = emptyMap()),
+            extensions = mapOf("empty" to emptyMap())
+        )
+
+        val yaml = YamlParser.dumpProfile(profile)
+
+        assertContains(yaml, "  modifiers: {}")
+        assertContains(yaml, "  \"empty\": {}")
+    }
 }
