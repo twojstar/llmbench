@@ -644,7 +644,7 @@ private fun createConfiguredWebView(
             ViewGroup.LayoutParams.MATCH_PARENT
         )
 
-        // Web Settings configured for modern SPA web applications (ChatGPT, Claude, Gemini, DeepSeek, Kimi)
+        // Web Settings configured for modern SPA web applications (ChatGPT, Claude, Gemini, DeepSeek, Kimi, Vibe)
         settings.apply {
             javaScriptEnabled = true
             domStorageEnabled = true
@@ -843,5 +843,6 @@ fun getWebServiceIcon(service: WebAiService): ImageVector {
         WebAiService.GEMINI -> Icons.Default.AutoAwesome
         WebAiService.DEEPSEEK -> Icons.Default.Psychology
         WebAiService.KIMI -> Icons.Default.ElectricBolt
+        WebAiService.VIBE -> Icons.Default.Bolt
     }
 }
