@@ -103,78 +103,89 @@ object YamlParser {
     }
 
     /** Serializes an Overlay into YAML (partial overlay format). */
-    fun dumpOverlay(overlay: ProfileOverlay): String {
-        val sb = StringBuilder()
-        sb.appendLine("# Partial overlay. It is intentionally not a complete standalone profile.")
-        sb.textLine("id", overlay.id)
-        overlay.locale?.let { sb.textLine("locale", it) }
+    fun dumpOverlay(overlay: ProfileOverlay): String = buildString {
+        appendLine("# Partial overlay. It is intentionally not a complete standalone profile.")
+        textLine("id", overlay.id)
+        overlay.locale?.let { textLine("locale", it) }
+        appendPersonalityOverlay(overlay)
+        appendCollaborationOverlay(overlay)
+        appendKnowledgeOverlay(overlay)
+        appendOutputOverlay(overlay)
+        appendExtensionOverlay(overlay)
+    }
 
-        val hasPersonality = overlay.personalityBase != null || overlay.personalityIntensity != null ||
+    private fun StringBuilder.appendPersonalityOverlay(overlay: ProfileOverlay) {
+        val present = overlay.personalityBase != null || overlay.personalityIntensity != null ||
             overlay.modifierOverrides.isNotEmpty() || overlay.adaptationOverrides.isNotEmpty()
-        if (hasPersonality) {
-            sb.appendLine()
-            sb.appendLine("personality:")
-            overlay.personalityBase?.let { sb.textLine("base", it, 2) }
-            overlay.personalityIntensity?.let { sb.scalarLine("intensity", it, 2) }
-            if (overlay.modifierOverrides.isNotEmpty()) {
-                sb.appendLine("  modifiers:")
-                overlay.modifierOverrides.forEach { (key, value) ->
-                    sb.scalarLine(yamlQuote(key), value, 4)
-                }
-            }
-            if (overlay.adaptationOverrides.isNotEmpty()) {
-                sb.appendLine("  adaptation:")
-                overlay.adaptationOverrides.forEach { (key, value) ->
-                    sb.scalarLine(yamlQuote(key), value, 4)
-                }
+        if (!present) return
+
+        appendLine()
+        appendLine("personality:")
+        overlay.personalityBase?.let { textLine("base", it, 2) }
+        overlay.personalityIntensity?.let { scalarLine("intensity", it, 2) }
+        if (overlay.modifierOverrides.isNotEmpty()) {
+            appendLine("  modifiers:")
+            overlay.modifierOverrides.forEach { (key, value) ->
+                scalarLine(yamlQuote(key), value, 4)
             }
         }
+        if (overlay.adaptationOverrides.isNotEmpty()) {
+            appendLine("  adaptation:")
+            overlay.adaptationOverrides.forEach { (key, value) ->
+                scalarLine(yamlQuote(key), value, 4)
+            }
+        }
+    }
 
-        val hasCollaboration = overlay.preamble != null || overlay.initiative != null ||
+    private fun StringBuilder.appendCollaborationOverlay(overlay: ProfileOverlay) {
+        val present = overlay.preamble != null || overlay.initiative != null ||
             overlay.verification != null || overlay.questionPolicy != null ||
             overlay.assumptionPolicy != null || overlay.collabBoolOverrides.isNotEmpty()
-        if (hasCollaboration) {
-            sb.appendLine()
-            sb.appendLine("collaboration:")
-            overlay.preamble?.let { sb.textLine("preamble", it, 2) }
-            overlay.initiative?.let { sb.textLine("initiative", it, 2) }
-            overlay.verification?.let { sb.textLine("verification", it, 2) }
-            overlay.questionPolicy?.let { sb.textLine("questionPolicy", it, 2) }
-            overlay.assumptionPolicy?.let { sb.textLine("assumptionPolicy", it, 2) }
-            overlay.collabBoolOverrides.forEach { (key, value) ->
-                sb.scalarLine(yamlQuote(key), value, 2)
-            }
-        }
+        if (!present) return
 
-        if (overlay.knowledgeOverrides.isNotEmpty()) {
-            sb.appendLine()
-            sb.appendLine("knowledge:")
-            overlay.knowledgeOverrides.forEach { (key, value) ->
-                sb.scalarLine(yamlQuote(key), value, 2)
-            }
+        appendLine()
+        appendLine("collaboration:")
+        overlay.preamble?.let { textLine("preamble", it, 2) }
+        overlay.initiative?.let { textLine("initiative", it, 2) }
+        overlay.verification?.let { textLine("verification", it, 2) }
+        overlay.questionPolicy?.let { textLine("questionPolicy", it, 2) }
+        overlay.assumptionPolicy?.let { textLine("assumptionPolicy", it, 2) }
+        overlay.collabBoolOverrides.forEach { (key, value) ->
+            scalarLine(yamlQuote(key), value, 2)
         }
+    }
 
-        val hasOutput = overlay.defaultFormat != null || overlay.maxHeadingDepth != null ||
+    private fun StringBuilder.appendKnowledgeOverlay(overlay: ProfileOverlay) {
+        if (overlay.knowledgeOverrides.isEmpty()) return
+
+        appendLine()
+        appendLine("knowledge:")
+        overlay.knowledgeOverrides.forEach { (key, value) ->
+            scalarLine(yamlQuote(key), value, 2)
+        }
+    }
+
+    private fun StringBuilder.appendOutputOverlay(overlay: ProfileOverlay) {
+        val present = overlay.defaultFormat != null || overlay.maxHeadingDepth != null ||
             overlay.preferShortParagraphs != null || overlay.tables != null ||
             overlay.codeExamples != null || overlay.citations != null
-        if (hasOutput) {
-            sb.appendLine()
-            sb.appendLine("output:")
-            overlay.defaultFormat?.let { sb.textLine("defaultFormat", it, 2) }
-            overlay.maxHeadingDepth?.let { sb.scalarLine("maxHeadingDepth", it, 2) }
-            overlay.preferShortParagraphs?.let { sb.scalarLine("preferShortParagraphs", it, 2) }
-            overlay.tables?.let { sb.textLine("tables", it, 2) }
-            overlay.codeExamples?.let { sb.textLine("codeExamples", it, 2) }
-            overlay.citations?.let { sb.textLine("citations", it, 2) }
-        }
+        if (!present) return
 
-        overlay.customNote?.let { note ->
-            sb.appendLine()
-            sb.appendLine("extensions:")
-            sb.appendLine("  local:")
-            sb.textLine("note", note, 4)
-        }
+        appendLine()
+        appendLine("output:")
+        overlay.defaultFormat?.let { textLine("defaultFormat", it, 2) }
+        overlay.maxHeadingDepth?.let { scalarLine("maxHeadingDepth", it, 2) }
+        overlay.preferShortParagraphs?.let { scalarLine("preferShortParagraphs", it, 2) }
+        overlay.tables?.let { textLine("tables", it, 2) }
+        overlay.codeExamples?.let { textLine("codeExamples", it, 2) }
+        overlay.citations?.let { textLine("citations", it, 2) }
+    }
 
-        return sb.toString()
+    private fun StringBuilder.appendExtensionOverlay(overlay: ProfileOverlay) {
+        val note = overlay.customNote ?: return
+        appendLine()
+        appendLine("extensions:")
+        appendLine("  local:")
+        textLine("note", note, 4)
     }
 }
