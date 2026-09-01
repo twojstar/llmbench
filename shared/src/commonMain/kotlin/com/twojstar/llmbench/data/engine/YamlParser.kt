@@ -6,7 +6,17 @@ import com.twojstar.llmbench.data.model.ProfileOverlay
 object YamlParser {
     private fun yamlQuote(value: String): String = buildString {
         append('"')
-        value.forEach { char ->
+        var index = 0
+        while (index < value.length) {
+            val char = value[index]
+            val next = value.getOrNull(index + 1)
+            if (char.isHighSurrogateCodeUnit() && next?.isLowSurrogateCodeUnit() == true) {
+                append(char)
+                append(next)
+                index += 2
+                continue
+            }
+
             when (char) {
                 '\\' -> append("\\\\")
                 '"' -> append("\\\"")
@@ -15,21 +25,29 @@ object YamlParser {
                 '\t' -> append("\\t")
                 '\b' -> append("\\b")
                 '\u000C' -> append("\\f")
-                else -> if (char.requiresYamlUnicodeEscape()) {
-                    append("\\u")
-                    append(char.code.toString(16).padStart(4, '0'))
-                } else append(char)
+                else -> when {
+                    char.isUnrepresentableYamlCodeUnit() -> append("\\ufffd")
+                    char.requiresYamlUnicodeEscape() -> {
+                        append("\\u")
+                        append(char.code.toString(16).padStart(4, '0'))
+                    }
+                    else -> append(char)
+                }
             }
+            index++
         }
         append('"')
     }
 
+    private fun Char.isHighSurrogateCodeUnit(): Boolean = code in 0xD800..0xDBFF
+
+    private fun Char.isLowSurrogateCodeUnit(): Boolean = code in 0xDC00..0xDFFF
+
+    private fun Char.isUnrepresentableYamlCodeUnit(): Boolean =
+        code in 0xD800..0xDFFF || code == 0xFFFE || code == 0xFFFF
+
     private fun Char.requiresYamlUnicodeEscape(): Boolean =
-        code < 0x20 ||
-            code in 0x7F..0x9F ||
-            code in 0xD800..0xDFFF ||
-            code == 0xFFFE ||
-            code == 0xFFFF
+        code < 0x20 || code in 0x7F..0x9F
 
     private fun StringBuilder.textLine(key: String, value: String, indent: Int = 0) {
         append(" ".repeat(indent)).append(key).append(": ").appendLine(yamlQuote(value))
