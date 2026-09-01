@@ -85,7 +85,9 @@ object ProfileMerger {
         // Extensions
         val mergedExtensions = base.extensions.toMutableMap()
         if (!overlay.customNote.isNullOrBlank()) {
-            mergedExtensions["local"] = mapOf("note" to overlay.customNote)
+            val local = mergedExtensions["local"].orEmpty().toMutableMap()
+            local["note"] = overlay.customNote
+            mergedExtensions["local"] = local
         }
 
         return Profile(
