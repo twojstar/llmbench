@@ -75,7 +75,7 @@ Backends are optional, not the default. If a feature truly needs one, prefer a t
 - [x] normalize app name, namespace and application ID to LlmBench
 - [x] harden WebView security while preserving provider login compatibility
 - [x] migrate portable domain/provider logic to KMP `shared`
-- [ ] add mobile WebView LRU/memory-pressure handling for long chats
+- [x] add mobile WebView LRU/memory-pressure handling for long chats
 - [x] implement reliable provider file uploads through the platform file picker
 - [ ] add Gemini AI Studio through a browser-backed platform flow
 - [ ] add AIHubMix and OpenRouter-compatible free-provider adapters
