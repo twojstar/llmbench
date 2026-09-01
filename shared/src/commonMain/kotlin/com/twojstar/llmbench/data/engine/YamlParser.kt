@@ -15,7 +15,7 @@ object YamlParser {
                 '\t' -> append("\\t")
                 '\b' -> append("\\b")
                 '\u000C' -> append("\\f")
-                else -> if (char.code < 0x20) {
+                else -> if (char.requiresYamlUnicodeEscape()) {
                     append("\\u")
                     append(char.code.toString(16).padStart(4, '0'))
                 } else append(char)
@@ -23,6 +23,13 @@ object YamlParser {
         }
         append('"')
     }
+
+    private fun Char.requiresYamlUnicodeEscape(): Boolean =
+        code < 0x20 ||
+            code in 0x7F..0x9F ||
+            code in 0xD800..0xDFFF ||
+            code == 0xFFFE ||
+            code == 0xFFFF
 
     private fun StringBuilder.textLine(key: String, value: String, indent: Int = 0) {
         append(" ".repeat(indent)).append(key).append(": ").appendLine(yamlQuote(value))
@@ -44,9 +51,13 @@ object YamlParser {
         sb.appendLine("personality:")
         sb.textLine("base", profile.personality.base, 2)
         sb.scalarLine("intensity", profile.personality.intensity, 2)
-        sb.appendLine("  modifiers:")
-        profile.personality.modifiers.forEach { (key, value) ->
-            sb.scalarLine(yamlQuote(key), value, 4)
+        if (profile.personality.modifiers.isEmpty()) {
+            sb.appendLine("  modifiers: {}")
+        } else {
+            sb.appendLine("  modifiers:")
+            profile.personality.modifiers.forEach { (key, value) ->
+                sb.scalarLine(yamlQuote(key), value, 4)
+            }
         }
         sb.appendLine("  adaptation:")
         val adaptation = profile.personality.adaptation
@@ -93,9 +104,13 @@ object YamlParser {
             sb.appendLine()
             sb.appendLine("extensions:")
             profile.extensions.forEach { (extension, values) ->
-                sb.appendLine("  ${yamlQuote(extension)}:")
-                values.forEach { (key, value) ->
-                    sb.textLine(yamlQuote(key), value, 4)
+                if (values.isEmpty()) {
+                    sb.appendLine("  ${yamlQuote(extension)}: {}")
+                } else {
+                    sb.appendLine("  ${yamlQuote(extension)}:")
+                    values.forEach { (key, value) ->
+                        sb.textLine(yamlQuote(key), value, 4)
+                    }
                 }
             }
         }
