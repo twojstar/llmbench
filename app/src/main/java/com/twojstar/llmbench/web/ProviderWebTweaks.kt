@@ -34,6 +34,27 @@ internal object ProviderWebTweakRegistry {
 
     private val providerTweaks = WebAiService.entries.associateWith { listOf(mobileBaseline) }
 
+    // Keep activity probes conservative: exact generation controls only, never broad "contains stop" matches.
+    private val generationSelectors = mapOf(
+        WebAiService.CHATGPT to listOf(
+            "[data-testid=\"stop-button\"]"
+        ),
+        WebAiService.CLAUDE to listOf(
+            "button[aria-label=\"Stop Response\" i]"
+        ),
+        WebAiService.GEMINI to listOf(
+            "button[aria-label=\"Stop response\" i]"
+        ),
+        WebAiService.DEEPSEEK to listOf(
+            "button[aria-label=\"Stop generating\" i]",
+            "[role=\"button\"][aria-label=\"Stop generating\" i]"
+        ),
+        WebAiService.KIMI to listOf(
+            "button[aria-label=\"Stop generating\" i]",
+            "[role=\"button\"][aria-label=\"Stop generating\" i]"
+        )
+    )
+
     fun ownedHosts(service: WebAiService): Set<String> = buildSet {
         URI(service.url).host?.lowercase()?.let(::add)
         addAll(ownedHostAliases[service].orEmpty())
@@ -41,6 +62,9 @@ internal object ProviderWebTweakRegistry {
 
     fun forProvider(service: WebAiService): List<ProviderWebTweak> =
         providerTweaks[service].orEmpty()
+
+    fun generationSelectors(service: WebAiService): List<String> =
+        generationSelectors[service].orEmpty()
 }
 
 internal fun providerHostMatches(service: WebAiService, host: String?): Boolean {

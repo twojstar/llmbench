@@ -1,60 +1,35 @@
 package com.twojstar.llmbench.web
 
-import org.junit.Assert.assertEquals
+import com.twojstar.llmbench.data.model.WebAiService
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ProviderWebActivityTest {
     @Test
-    fun backgroundCompletionBecomesUnread() {
-        assertEquals(
-            WebChatActivityStatus.UNREAD,
-            nextWebChatActivityStatus(
-                previous = WebChatActivityStatus.GENERATING,
-                isGenerating = false,
-                isSelected = false
-            )
-        )
-    }
-
-    @Test
-    fun selectedCompletionBecomesIdle() {
-        assertEquals(
-            WebChatActivityStatus.IDLE,
-            nextWebChatActivityStatus(
-                previous = WebChatActivityStatus.GENERATING,
-                isGenerating = false,
-                isSelected = true
-            )
-        )
-    }
-
-    @Test
-    fun unreadPersistsUntilTabIsOpened() {
-        assertEquals(
-            WebChatActivityStatus.UNREAD,
-            nextWebChatActivityStatus(
-                previous = WebChatActivityStatus.UNREAD,
-                isGenerating = false,
-                isSelected = false
-            )
-        )
-        assertEquals(
-            WebChatActivityStatus.IDLE,
-            markWebChatActivityRead(WebChatActivityStatus.UNREAD)
-        )
-    }
-
-    @Test
-    fun visibleGenerationAlwaysWins() {
-        WebChatActivityStatus.entries.forEach { previous ->
-            assertEquals(
-                WebChatActivityStatus.GENERATING,
-                nextWebChatActivityStatus(
-                    previous = previous,
-                    isGenerating = true,
-                    isSelected = false
-                )
+    fun everyProviderHasAnAuditableGenerationProbe() {
+        WebAiService.entries.forEach { service ->
+            assertTrue(
+                "Missing generation probe for ${service.id}",
+                ProviderWebTweakRegistry.generationSelectors(service).isNotEmpty()
             )
         }
+    }
+
+    @Test
+    fun probesUseExactGenerationControlsInsteadOfBroadStopSubstrings() {
+        WebAiService.entries
+            .flatMap(ProviderWebTweakRegistry::generationSelectors)
+            .forEach { selector ->
+                assertFalse("Broad stop selector: $selector", selector.contains("*="))
+            }
+    }
+
+    @Test
+    fun chatGptUsesItsStableStopButtonTestId() {
+        assertTrue(
+            ProviderWebTweakRegistry.generationSelectors(WebAiService.CHATGPT)
+                .contains("[data-testid=\"stop-button\"]")
+        )
     }
 }

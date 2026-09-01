@@ -52,13 +52,14 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.twojstar.llmbench.data.model.WebAiService
+import com.twojstar.llmbench.data.model.WebChatActivityStatus
+import com.twojstar.llmbench.data.model.markWebChatActivityRead
+import com.twojstar.llmbench.data.model.nextWebChatActivityStatus
+import com.twojstar.llmbench.data.model.webChatActivityStatusAfterEviction
 import com.twojstar.llmbench.ui.theme.*
 import com.twojstar.llmbench.ui.viewmodel.StudioUiState
 import com.twojstar.llmbench.ui.viewmodel.StudioViewModel
-import com.twojstar.llmbench.web.WebChatActivityStatus
 import com.twojstar.llmbench.web.applyProviderWebTweaks
-import com.twojstar.llmbench.web.markWebChatActivityRead
-import com.twojstar.llmbench.web.nextWebChatActivityStatus
 import com.twojstar.llmbench.web.probeProviderGenerationActivity
 import kotlinx.coroutines.delay
 
@@ -108,16 +109,26 @@ fun WebChatScreen(
     val activityStatuses = remember { mutableStateMapOf<WebAiService, WebChatActivityStatus>() }
     val currentSelectedService by rememberUpdatedState(selectedService)
 
+    fun updateLiveServices(nextServices: List<WebAiService>) {
+        val evictedServices = liveServices.filterNot(nextServices.toSet()::contains)
+        evictedServices.forEach { service ->
+            activityStatuses[service]?.let { status ->
+                activityStatuses[service] = webChatActivityStatusAfterEviction(status)
+            }
+        }
+        liveServices = nextServices
+    }
+
     fun activateService(service: WebAiService) {
         selectedService = service
         activityStatuses[service]?.let { status ->
             activityStatuses[service] = markWebChatActivityRead(status)
         }
-        liveServices = nextWebViewLru(liveServices, service)
+        updateLiveServices(nextWebViewLru(liveServices, service))
     }
 
     fun evictInactiveWebViews() {
-        liveServices = listOf(currentSelectedService)
+        updateLiveServices(listOf(currentSelectedService))
     }
 
     val appContext = context.applicationContext
@@ -165,11 +176,12 @@ fun WebChatScreen(
         while (true) {
             liveServices.forEach { service ->
                 val webView = webViewMap[service] ?: return@forEach
-                probeProviderGenerationActivity(webView, service) { isGenerating ->
+                probeProviderGenerationActivity(webView, service) { observation ->
+                    if (service !in liveServices) return@probeProviderGenerationActivity
                     val previous = activityStatuses[service] ?: WebChatActivityStatus.IDLE
                     activityStatuses[service] = nextWebChatActivityStatus(
                         previous = previous,
-                        isGenerating = isGenerating,
+                        observation = observation,
                         isSelected = currentSelectedService == service
                     )
                 }
@@ -530,14 +542,16 @@ fun WebChatScreen(
                             }
                         },
                         update = { wv ->
-                            if (isCurrentService) {
+                            if (isCurrentService && lifecycleStarted) {
                                 wv.onResume()
+                            } else {
+                                wv.onPause()
+                            }
+                            if (isCurrentService) {
                                 canGoBack = wv.canGoBack()
                                 canGoForward = wv.canGoForward()
                                 wv.url?.let { currentUrl = it }
                                 wv.title?.let { pageTitle = it }
-                            } else {
-                                wv.onPause()
                             }
                         },
                         onRelease = { wv ->
