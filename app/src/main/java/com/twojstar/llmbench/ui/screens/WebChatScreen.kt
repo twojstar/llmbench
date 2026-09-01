@@ -113,14 +113,15 @@ fun WebChatScreen(
     val appContext = context.applicationContext
     DisposableEffect(appContext) {
         val callbacks = object : ComponentCallbacks2 {
+            @Suppress("DEPRECATION")
             override fun onTrimMemory(level: Int) {
-                if (level >= ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN) {
+                if (level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) {
                     evictInactiveWebViews()
                 }
             }
 
             @Suppress("DEPRECATION")
-            override fun onLowMemory() = Unit
+            override fun onLowMemory() = evictInactiveWebViews()
             override fun onConfigurationChanged(newConfig: Configuration) = Unit
         }
         appContext.registerComponentCallbacks(callbacks)
@@ -409,9 +410,10 @@ fun WebChatScreen(
         ) {
             // Keep only a tiny MRU set of provider WebViews alive. Cookies and storage remain provider-owned.
             liveServices.forEach { service ->
-                val isCurrentService = selectedService == service
+                key(service) {
+                    val isCurrentService = selectedService == service
 
-                Box(
+                    Box(
                     modifier = Modifier
                         .fillMaxSize()
                         .then(if (isCurrentService) Modifier else Modifier.size(0.dp))
@@ -490,6 +492,7 @@ fun WebChatScreen(
                         },
                         modifier = Modifier.fillMaxSize()
                     )
+                    }
                 }
             }
         }
