@@ -32,4 +32,11 @@ class ProviderWebActivityTest {
                 .contains("[data-testid=\"stop-button\"]")
         )
     }
+
+    @Test
+    fun vibeUsesExactStopGenerationLabels() {
+        val selectors = ProviderWebTweakRegistry.generationSelectors(WebAiService.VIBE)
+        assertTrue(selectors.contains("button[aria-label=\"Stop generation\" i]"))
+        assertTrue(selectors.contains("button[aria-label=\"Stop generating\" i]"))
+    }
 }

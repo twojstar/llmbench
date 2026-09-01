@@ -52,6 +52,10 @@ internal object ProviderWebTweakRegistry {
         WebAiService.KIMI to listOf(
             "button[aria-label=\"Stop generating\" i]",
             "[role=\"button\"][aria-label=\"Stop generating\" i]"
+        ),
+        WebAiService.VIBE to listOf(
+            "button[aria-label=\"Stop generation\" i]",
+            "button[aria-label=\"Stop generating\" i]"
         )
     )
 
