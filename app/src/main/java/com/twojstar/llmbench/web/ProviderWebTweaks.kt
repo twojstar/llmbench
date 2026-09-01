@@ -11,6 +11,8 @@ internal data class ProviderWebTweak(
 )
 
 internal object ProviderWebTweakRegistry {
+    private const val STOP_BUTTON_TEST_ID_SELECTOR = "[data-testid=\"stop-button\"]"
+
     private val mobileBaseline = ProviderWebTweak(
         id = "mobile-baseline",
         css = """
@@ -37,10 +39,10 @@ internal object ProviderWebTweakRegistry {
     // Keep activity probes conservative: provider-scoped controls only, preferring locale-independent state.
     private val generationSelectors = mapOf(
         WebAiService.CHATGPT to listOf(
-            "[data-testid=\"stop-button\"]"
+            STOP_BUTTON_TEST_ID_SELECTOR
         ),
         WebAiService.CLAUDE to listOf(
-            "[data-testid=\"stop-button\"]",
+            STOP_BUTTON_TEST_ID_SELECTOR,
             "button[aria-label=\"Stop Response\" i]"
         ),
         WebAiService.GEMINI to listOf(

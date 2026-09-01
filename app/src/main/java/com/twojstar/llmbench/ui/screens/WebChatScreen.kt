@@ -53,6 +53,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.twojstar.llmbench.data.model.WebAiService
 import com.twojstar.llmbench.data.model.WebChatActivityStatus
+import com.twojstar.llmbench.data.model.WebChatGenerationObservation
 import com.twojstar.llmbench.data.model.markWebChatActivityRead
 import com.twojstar.llmbench.data.model.nextWebChatActivityStatus
 import com.twojstar.llmbench.data.model.webChatActivityStatusAfterEviction
@@ -66,6 +67,17 @@ import kotlinx.coroutines.delay
 
 private const val WEBVIEW_LOG_TAG = "LlmBenchWeb"
 private const val MAX_LIVE_WEBVIEWS = 2
+
+internal fun shouldApplyWebChatObservation(
+    observation: WebChatGenerationObservation,
+    isLiveService: Boolean,
+    isSameWebView: Boolean,
+    hasCurrentWebView: Boolean
+): Boolean {
+    if (isLiveService && isSameWebView) return true
+    return observation == WebChatGenerationObservation.COMPLETED &&
+        (isSameWebView || !hasCurrentWebView)
+}
 
 /** Hosts account-backed AI services with mobile-first WebView controls. */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -123,12 +135,19 @@ fun WebChatScreen(
     fun probeServiceActivity(service: WebAiService) {
         val webView = webViewMap[service] ?: return
         probeProviderGenerationActivity(webView, service) { observation ->
-            if (webViewMap[service] !== webView || service !in liveServices) return@probeProviderGenerationActivity
+            val mappedWebView = webViewMap[service]
+            val shouldApply = shouldApplyWebChatObservation(
+                observation = observation,
+                isLiveService = service in liveServices,
+                isSameWebView = mappedWebView === webView,
+                hasCurrentWebView = mappedWebView != null
+            )
+            if (!shouldApply) return@probeProviderGenerationActivity
             val previous = activityStatuses[service] ?: WebChatActivityStatus.IDLE
             activityStatuses[service] = nextWebChatActivityStatus(
                 previous = previous,
                 observation = observation,
-                isSelected = currentSelectedService == service
+                isSelected = selectedService == service
             )
         }
     }
