@@ -81,6 +81,7 @@ Backends are optional, not the default. If a feature truly needs one, prefer a t
 - [ ] add Gemini AI Studio through a browser-backed platform flow
 - [ ] add AIHubMix and OpenRouter-compatible free-provider adapters
 - [x] create a provider-tweak/userscript interface instead of hard-coded WebView hacks
+- [x] show generating and unread response status on account-backed web tabs
 - [x] add CI build/lint checks
 - [ ] document which providers work fully, partially, or block embedded login
 

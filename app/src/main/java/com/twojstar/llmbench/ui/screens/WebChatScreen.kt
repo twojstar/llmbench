@@ -55,7 +55,12 @@ import com.twojstar.llmbench.data.model.WebAiService
 import com.twojstar.llmbench.ui.theme.*
 import com.twojstar.llmbench.ui.viewmodel.StudioUiState
 import com.twojstar.llmbench.ui.viewmodel.StudioViewModel
+import com.twojstar.llmbench.web.WebChatActivityStatus
 import com.twojstar.llmbench.web.applyProviderWebTweaks
+import com.twojstar.llmbench.web.markWebChatActivityRead
+import com.twojstar.llmbench.web.nextWebChatActivityStatus
+import com.twojstar.llmbench.web.probeProviderGenerationActivity
+import kotlinx.coroutines.delay
 
 private const val WEBVIEW_LOG_TAG = "LlmBenchWeb"
 private const val MAX_LIVE_WEBVIEWS = 2
@@ -100,10 +105,14 @@ fun WebChatScreen(
     var liveServices by remember { mutableStateOf(listOf(selectedService)) }
     val webViewMap = remember { mutableStateMapOf<WebAiService, WebView>() }
     val lastKnownUrls = remember { mutableStateMapOf<WebAiService, String>() }
+    val activityStatuses = remember { mutableStateMapOf<WebAiService, WebChatActivityStatus>() }
     val currentSelectedService by rememberUpdatedState(selectedService)
 
     fun activateService(service: WebAiService) {
         selectedService = service
+        activityStatuses[service]?.let { status ->
+            activityStatuses[service] = markWebChatActivityRead(status)
+        }
         liveServices = nextWebViewLru(liveServices, service)
     }
 
@@ -130,16 +139,43 @@ fun WebChatScreen(
     }
 
     val lifecycleOwner = LocalLifecycleOwner.current
+    var lifecycleStarted by remember(lifecycleOwner) {
+        mutableStateOf(lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED))
+    }
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
-                Lifecycle.Event.ON_START -> webViewMap[currentSelectedService]?.onResume()
-                Lifecycle.Event.ON_STOP -> webViewMap.values.forEach(WebView::onPause)
+                Lifecycle.Event.ON_START -> {
+                    lifecycleStarted = true
+                    webViewMap[currentSelectedService]?.onResume()
+                }
+                Lifecycle.Event.ON_STOP -> {
+                    lifecycleStarted = false
+                    webViewMap.values.forEach(WebView::onPause)
+                }
                 else -> Unit
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    LaunchedEffect(lifecycleStarted, liveServices) {
+        if (!lifecycleStarted) return@LaunchedEffect
+        while (true) {
+            liveServices.forEach { service ->
+                val webView = webViewMap[service] ?: return@forEach
+                probeProviderGenerationActivity(webView, service) { isGenerating ->
+                    val previous = activityStatuses[service] ?: WebChatActivityStatus.IDLE
+                    activityStatuses[service] = nextWebChatActivityStatus(
+                        previous = previous,
+                        isGenerating = isGenerating,
+                        isSelected = currentSelectedService == service
+                    )
+                }
+            }
+            delay(1_200)
+        }
     }
 
     DisposableEffect(webViewMap) {
@@ -186,6 +222,7 @@ fun WebChatScreen(
                         WebAiService.entries.forEach { service ->
                             val isSelected = selectedService == service
                             val brandColor = Color(service.brandHexColor)
+                            val activityStatus = activityStatuses[service] ?: WebChatActivityStatus.IDLE
 
                             Surface(
                                 shape = RoundedCornerShape(20.dp),
@@ -212,6 +249,22 @@ fun WebChatScreen(
                                         fontSize = 12.sp,
                                         color = if (isSelected) brandColor else MaterialTheme.colorScheme.onSurface
                                     )
+                                    when (activityStatus) {
+                                        WebChatActivityStatus.GENERATING -> CircularProgressIndicator(
+                                            modifier = Modifier
+                                                .size(10.dp)
+                                                .testTag("status_web_service_${service.id}_generating"),
+                                            strokeWidth = 1.5.dp,
+                                            color = brandColor
+                                        )
+                                        WebChatActivityStatus.UNREAD -> Box(
+                                            modifier = Modifier
+                                                .size(8.dp)
+                                                .background(brandColor, CircleShape)
+                                                .testTag("status_web_service_${service.id}_unread")
+                                        )
+                                        WebChatActivityStatus.IDLE -> Unit
+                                    }
                                 }
                             }
                         }
