@@ -1,6 +1,5 @@
 package com.twojstar.llmbench.web
 
-import android.net.Uri
 import android.webkit.WebView
 import com.twojstar.llmbench.data.model.WebAiService
 import org.json.JSONObject
@@ -28,22 +27,32 @@ internal object ProviderWebTweakRegistry {
         """.trimIndent()
     )
 
-    private val providerTweaks = mapOf(
-        WebAiService.CLAUDE to listOf(mobileBaseline),
-        WebAiService.CHATGPT to listOf(mobileBaseline),
-        WebAiService.GEMINI to listOf(mobileBaseline),
-        WebAiService.DEEPSEEK to listOf(mobileBaseline),
-        WebAiService.KIMI to listOf(mobileBaseline)
+    // Canonical hosts come from WebAiService.url. Add only verified provider-owned aliases here.
+    private val ownedHostAliases = mapOf(
+        WebAiService.KIMI to setOf("kimi.com")
     )
+
+    private val providerTweaks = WebAiService.entries.associateWith { listOf(mobileBaseline) }
+
+    fun ownedHosts(service: WebAiService): Set<String> = buildSet {
+        URI(service.url).host?.lowercase()?.let(::add)
+        addAll(ownedHostAliases[service].orEmpty())
+    }
 
     fun forProvider(service: WebAiService): List<ProviderWebTweak> =
         providerTweaks[service].orEmpty()
 }
 
 internal fun providerHostMatches(service: WebAiService, host: String?): Boolean {
-    val canonicalHost = URI(service.url).host?.lowercase() ?: return false
     val normalizedHost = host?.trimEnd('.')?.lowercase() ?: return false
-    return normalizedHost == canonicalHost || normalizedHost.endsWith(".$canonicalHost")
+    return ProviderWebTweakRegistry.ownedHosts(service).any { ownedHost ->
+        normalizedHost == ownedHost || normalizedHost.endsWith(".$ownedHost")
+    }
+}
+
+internal fun providerUrlMatches(service: WebAiService, url: String): Boolean {
+    val uri = runCatching { URI(url) }.getOrNull() ?: return false
+    return uri.scheme.equals("https", ignoreCase = true) && providerHostMatches(service, uri.host)
 }
 
 internal fun applyProviderWebTweaks(
@@ -51,15 +60,25 @@ internal fun applyProviderWebTweaks(
     service: WebAiService,
     pageUrl: String
 ) {
-    val host = Uri.parse(pageUrl).host
-    if (!providerHostMatches(service, host)) return
+    if (!providerUrlMatches(service, pageUrl)) return
 
     val providerId = JSONObject.quote(service.id)
+    val allowedHosts = ProviderWebTweakRegistry.ownedHosts(service)
+        .joinToString(prefix = "[", postfix = "]") { JSONObject.quote(it) }
+
     ProviderWebTweakRegistry.forProvider(service).forEach { tweak ->
         val styleId = JSONObject.quote("llmbench-${service.id}-${tweak.id}")
         val css = JSONObject.quote(tweak.css)
         val script = """
             (() => {
+                const allowedHosts = $allowedHosts;
+                let currentHost = location.hostname.toLowerCase();
+                if (currentHost.endsWith('.')) currentHost = currentHost.slice(0, -1);
+                const owned = allowedHosts.some(host =>
+                    currentHost === host || currentHost.endsWith('.' + host)
+                );
+                if (location.protocol !== 'https:' || !owned) return;
+
                 const root = document.documentElement;
                 if (!root) return;
                 root.dataset.llmbenchProvider = $providerId;
