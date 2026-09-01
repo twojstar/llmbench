@@ -1,6 +1,8 @@
 package com.twojstar.llmbench.ui.screens
 
 import android.annotation.SuppressLint
+import android.app.Activity
+import android.content.ContentResolver
 import android.content.ActivityNotFoundException
 import android.content.ClipData
 import android.content.ClipboardManager
@@ -13,6 +15,8 @@ import android.util.Log
 import android.view.ViewGroup
 import android.webkit.*
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -69,12 +73,30 @@ fun WebChatScreen(
     var canGoForward by remember { mutableStateOf(false) }
     var showPromptHelperDialog by remember { mutableStateOf(false) }
     var pendingExternalIntentUri by remember { mutableStateOf<Uri?>(null) }
+    val pendingFileCallback = remember { mutableStateOf<ValueCallback<Array<Uri>>?>(null) }
+
+    val fileChooserLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        val callback = pendingFileCallback.value ?: return@rememberLauncherForActivityResult
+        pendingFileCallback.value = null
+        val resultData = result.data
+        val selectedUris = if (result.resultCode == Activity.RESULT_OK && resultData != null) {
+            WebChromeClient.FileChooserParams.parseResult(result.resultCode, resultData)
+                ?.filter { isAllowedUploadUri(context, it) }
+                ?.toTypedArray()
+                ?.takeIf { it.isNotEmpty() }
+        } else null
+        callback.onReceiveValue(selectedUris)
+    }
 
     // Map of persistent WebViews to prevent reloading when switching tabs.
     val webViewMap = remember { mutableMapOf<WebAiService, WebView>() }
 
     DisposableEffect(webViewMap) {
         onDispose {
+            pendingFileCallback.value?.onReceiveValue(null)
+            pendingFileCallback.value = null
             webViewMap.values.forEach { webView ->
                 webView.stopLoading()
                 webView.webChromeClient = null
@@ -384,6 +406,26 @@ fun WebChatScreen(
                                 },
                                 onExternalIntentRequested = { uri ->
                                     pendingExternalIntentUri = uri
+                                },
+                                onFileChooserRequested = { callback, params ->
+                                    pendingFileCallback.value?.onReceiveValue(null)
+                                    pendingFileCallback.value = callback
+                                    try {
+                                        fileChooserLauncher.launch(params.createIntent())
+                                        true
+                                    } catch (error: ActivityNotFoundException) {
+                                        Log.w(WEBVIEW_LOG_TAG, "No file picker available", error)
+                                        pendingFileCallback.value = null
+                                        callback.onReceiveValue(null)
+                                        viewModel.showSnackbar("No file picker available")
+                                        true
+                                    } catch (error: SecurityException) {
+                                        Log.w(WEBVIEW_LOG_TAG, "File picker launch blocked", error)
+                                        pendingFileCallback.value = null
+                                        callback.onReceiveValue(null)
+                                        viewModel.showSnackbar("File picker was blocked")
+                                        true
+                                    }
                                 }
                             ).also { wv ->
                                 webViewMap[service] = wv
@@ -519,7 +561,11 @@ private fun createConfiguredWebView(
     onTitleChanged: (String) -> Unit,
     onProgressChanged: (Int) -> Unit,
     onNavStateChanged: (canGoBack: Boolean, canGoForward: Boolean) -> Unit,
-    onExternalIntentRequested: (Uri) -> Unit
+    onExternalIntentRequested: (Uri) -> Unit,
+    onFileChooserRequested: (
+        ValueCallback<Array<Uri>>,
+        WebChromeClient.FileChooserParams
+    ) -> Boolean
 ): WebView {
     val webView = WebView(context).apply {
         layoutParams = ViewGroup.LayoutParams(
@@ -564,6 +610,16 @@ private fun createConfiguredWebView(
             override fun onReceivedTitle(view: WebView?, title: String?) {
                 title?.let { onTitleChanged(it) }
             }
+
+            override fun onShowFileChooser(
+                webView: WebView?,
+                filePathCallback: ValueCallback<Array<Uri>>?,
+                fileChooserParams: FileChooserParams?
+            ): Boolean {
+                val callback = filePathCallback ?: return false
+                val params = fileChooserParams ?: return false
+                return onFileChooserRequested(callback, params)
+            }
         }
 
         webViewClient = object : WebViewClient() {
@@ -600,6 +656,16 @@ private fun createConfiguredWebView(
     }
 
     return webView
+}
+
+/** Accepts only externally granted content URIs for provider uploads. */
+private fun isAllowedUploadUri(context: Context, uri: Uri): Boolean {
+    if (!uri.scheme.equals(ContentResolver.SCHEME_CONTENT, ignoreCase = true)) return false
+    val authority = uri.authority ?: return false
+    val appAuthorityPrefix = context.packageName.lowercase()
+    val normalizedAuthority = authority.lowercase()
+    if (normalizedAuthority == appAuthorityPrefix || normalizedAuthority.startsWith("$appAuthorityPrefix.")) return false
+    return true
 }
 
 /** Routes a top-level WebView navigation without granting implicit app-launch authority. */
