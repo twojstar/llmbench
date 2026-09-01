@@ -75,6 +75,13 @@ class ProfileSerializationTest {
     }
 
     @Test
+    fun dumpOverlayPreservesSupplementaryUnicodeCharacters() {
+        val yaml = YamlParser.dumpOverlay(ProfileOverlay(id = "emoji 😀"))
+
+        assertContains(yaml, "id: \"emoji 😀\"")
+    }
+
+    @Test
     fun dumpProfilePreservesEmptyMappings() {
         val profile = Profile(
             personality = Profile().personality.copy(modifiers = emptyMap()),
