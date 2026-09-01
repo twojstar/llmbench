@@ -843,6 +843,6 @@ fun getWebServiceIcon(service: WebAiService): ImageVector {
         WebAiService.GEMINI -> Icons.Default.AutoAwesome
         WebAiService.DEEPSEEK -> Icons.Default.Psychology
         WebAiService.KIMI -> Icons.Default.ElectricBolt
-        WebAiService.VIBE -> Icons.Default.Bolt
+        WebAiService.VIBE -> Icons.Default.Air
     }
 }
