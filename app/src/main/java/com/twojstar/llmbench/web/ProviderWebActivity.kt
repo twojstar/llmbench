@@ -10,16 +10,20 @@ private const val GENERATION_TRACKER_KEY = "__llmbenchGenerationTracker"
 
 private fun generationActivityScript(
     selectors: List<String>,
+    idleSelectors: List<String>,
     consumeCompletion: Boolean,
     selected: Boolean? = null
 ): String {
     val encodedSelectors = Json.encodeToString(selectors)
+    val encodedIdleSelectors = Json.encodeToString(idleSelectors)
     val selectedState = selected?.toString() ?: "null"
     return """
         (() => {
             const selectors = $encodedSelectors;
+            const idleSelectors = $encodedIdleSelectors;
+            const trackedSelectors = selectors.concat(idleSelectors);
             const trackerKey = "$GENERATION_TRACKER_KEY";
-            const signature = JSON.stringify(selectors);
+            const signature = JSON.stringify({ selectors, idleSelectors });
             const selectedState = $selectedState;
             const isVisible = element => {
                 const style = getComputedStyle(element);
@@ -28,10 +32,23 @@ private fun generationActivityScript(
                     style.visibility !== 'hidden' &&
                     element.getClientRects().length > 0;
             };
-            const generationControls = () => selectors.flatMap(selector =>
+            const controlsFor = selectorsToMatch => selectorsToMatch.flatMap(selector =>
                 Array.from(document.querySelectorAll(selector)).filter(isVisible)
             );
-            const isGenerating = () => generationControls().length > 0;
+            const generationControls = () => controlsFor(selectors);
+            const idleControls = () => controlsFor(idleSelectors);
+            const trackedControls = () => controlsFor(trackedSelectors);
+            const isGenerating = () => {
+                const activeControls = generationControls();
+                const inactiveControls = idleControls();
+                return activeControls.some(activeControl => {
+                    const activeSubmit = activeControl.closest('button[type="submit"]');
+                    if (!activeSubmit) return true;
+                    return !inactiveControls.some(idleControl =>
+                        idleControl.closest('button[type="submit"]') === activeSubmit
+                    );
+                });
+            };
 
             let tracker = window[trackerKey];
             if (!tracker || tracker.signature !== signature) {
@@ -42,7 +59,7 @@ private fun generationActivityScript(
                     completed: false,
                     completedWhileSelected: false,
                     selected: selectedState === null ? false : selectedState,
-                    controls: generationControls(),
+                    controls: trackedControls(),
                     observer: null
                 };
                 window[trackerKey] = tracker;
@@ -50,8 +67,8 @@ private fun generationActivityScript(
             if (selectedState !== null) tracker.selected = selectedState;
 
             const refreshActivity = () => {
-                const controls = generationControls();
-                const nextActive = controls.length > 0;
+                const controls = trackedControls();
+                const nextActive = isGenerating();
                 if (tracker.active && !nextActive) {
                     tracker.completedWhileSelected = tracker.completed
                         ? tracker.completedWhileSelected && tracker.selected
@@ -65,7 +82,7 @@ private fun generationActivityScript(
             if (!tracker.observer && document.documentElement) {
                 const nodeTouchesGenerationControl = node => {
                     if (!(node instanceof Element)) return false;
-                    return selectors.some(selector =>
+                    return trackedSelectors.some(selector =>
                         node.matches(selector) ||
                         node.querySelector(selector) !== null ||
                         node.closest(selector) !== null
@@ -123,8 +140,9 @@ internal fun installProviderGenerationTracker(
     if (!providerUrlMatches(service, pageUrl)) return
     val selectors = ProviderWebTweakRegistry.generationSelectors(service)
     if (selectors.isEmpty()) return
+    val idleSelectors = ProviderWebTweakRegistry.generationIdleSelectors(service)
     webView.evaluateJavascript(
-        generationActivityScript(selectors, consumeCompletion = false, selected = isSelected),
+        generationActivityScript(selectors, idleSelectors, consumeCompletion = false, selected = isSelected),
         null
     )
 }
@@ -177,8 +195,9 @@ internal fun probeProviderGenerationActivity(
         onResult(WebChatGenerationObservation.UNKNOWN)
         return
     }
+    val idleSelectors = ProviderWebTweakRegistry.generationIdleSelectors(service)
 
-    webView.evaluateJavascript(generationActivityScript(selectors, consumeCompletion = true)) { rawResult ->
+    webView.evaluateJavascript(generationActivityScript(selectors, idleSelectors, consumeCompletion = true)) { rawResult ->
         onResult(
             when (rawResult?.trim()) {
                 "1" -> WebChatGenerationObservation.GENERATING

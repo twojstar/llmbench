@@ -19,7 +19,10 @@ class ProviderWebActivityTest {
     @Test
     fun probesUsePortableExactGenerationControls() {
         WebAiService.entries
-            .flatMap(ProviderWebTweakRegistry::generationSelectors)
+            .flatMap { service ->
+                ProviderWebTweakRegistry.generationSelectors(service) +
+                    ProviderWebTweakRegistry.generationIdleSelectors(service)
+            }
             .forEach { selector ->
                 assertFalse("Broad stop selector: $selector", selector.contains("*="))
                 assertFalse("Unsupported :has selector: $selector", selector.contains(":has("))
@@ -56,9 +59,12 @@ class ProviderWebActivityTest {
 
     @Test
     fun vibeUsesLocaleIndependentSubmitStopIcon() {
-        val selector = ProviderWebTweakRegistry.generationSelectors(WebAiService.VIBE).single()
-        assertTrue(selector.contains("button[type=\"submit\"]"))
-        assertTrue(selector.endsWith("svg rect"))
-        assertFalse(selector.contains("aria-label"))
+        val activeSelector = ProviderWebTweakRegistry.generationSelectors(WebAiService.VIBE).single()
+        val idleSelector = ProviderWebTweakRegistry.generationIdleSelectors(WebAiService.VIBE).single()
+        assertTrue(activeSelector.contains("button[type=\"submit\"]"))
+        assertTrue(activeSelector.endsWith("svg rect"))
+        assertTrue(idleSelector.contains("path[d^=\"M12 18v4h4v-4h-4ZM16 14v4h4v-4h-4\"]"))
+        assertFalse(activeSelector.contains("aria-label"))
+        assertFalse(idleSelector.contains("aria-label"))
     }
 }

@@ -13,6 +13,8 @@ internal data class ProviderWebTweak(
 internal object ProviderWebTweakRegistry {
     private const val STOP_BUTTON_TEST_ID_SELECTOR = "[data-testid=\"stop-button\"]"
     private const val VIBE_STOP_ICON_SELECTOR = "button[type=\"submit\"] svg rect"
+    private const val VIBE_SEND_ICON_SELECTOR =
+        "button[type=\"submit\"] svg path[d^=\"M12 18v4h4v-4h-4ZM16 14v4h4v-4h-4\"]"
 
     private val mobileBaseline = ProviderWebTweak(
         id = "mobile-baseline",
@@ -71,8 +73,15 @@ internal object ProviderWebTweakRegistry {
     fun forProvider(service: WebAiService): List<ProviderWebTweak> =
         providerTweaks[service].orEmpty()
 
+    private val generationIdleSelectors = mapOf(
+        WebAiService.VIBE to listOf(VIBE_SEND_ICON_SELECTOR)
+    )
+
     fun generationSelectors(service: WebAiService): List<String> =
         generationSelectors[service].orEmpty()
+
+    fun generationIdleSelectors(service: WebAiService): List<String> =
+        generationIdleSelectors[service].orEmpty()
 }
 
 internal fun providerHostMatches(service: WebAiService, host: String?): Boolean {
