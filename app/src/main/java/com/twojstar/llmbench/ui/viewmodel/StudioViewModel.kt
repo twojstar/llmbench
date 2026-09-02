@@ -53,7 +53,12 @@ enum class NavigationTab {
     INSTRUCTIONS,
     YAML,
     PLAYGROUND,
-    SKILLS
+    SKILLS;
+
+    fun belongsToStudioSection(): Boolean = when (this) {
+        STUDIO, INSTRUCTIONS, YAML, PLAYGROUND, SKILLS -> true
+        WEB_CHATS, COMPARE_HUB -> false
+    }
 }
 
 class StudioViewModel : ViewModel() {

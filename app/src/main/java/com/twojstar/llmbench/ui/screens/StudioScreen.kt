@@ -35,6 +35,7 @@ fun StudioScreen(
     onNavigateToInstructions: () -> Unit,
     onNavigateToSkills: () -> Unit,
     onNavigateToYaml: () -> Unit,
+    onNavigateToPlayground: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     var showSaveDialog by remember { mutableStateOf(false) }
@@ -109,6 +110,14 @@ fun StudioScreen(
                             expanded = toolsMenuExpanded,
                             onDismissRequest = { toolsMenuExpanded = false }
                         ) {
+                            DropdownMenuItem(
+                                text = { Text("Profile playground") },
+                                leadingIcon = { Icon(Icons.Default.PlayArrow, contentDescription = null) },
+                                onClick = {
+                                    toolsMenuExpanded = false
+                                    onNavigateToPlayground()
+                                }
+                            )
                             DropdownMenuItem(
                                 text = { Text("Skills browser") },
                                 leadingIcon = { Icon(Icons.Default.LibraryBooks, contentDescription = null) },

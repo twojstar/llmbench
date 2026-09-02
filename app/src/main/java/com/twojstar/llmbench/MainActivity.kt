@@ -21,16 +21,6 @@ import com.twojstar.llmbench.ui.theme.LlmBenchTheme
 import com.twojstar.llmbench.ui.viewmodel.NavigationTab
 import com.twojstar.llmbench.ui.viewmodel.StudioViewModel
 
-internal fun NavigationTab.belongsToStudioSection(): Boolean = when (this) {
-    NavigationTab.STUDIO,
-    NavigationTab.INSTRUCTIONS,
-    NavigationTab.YAML,
-    NavigationTab.PLAYGROUND,
-    NavigationTab.SKILLS -> true
-    NavigationTab.WEB_CHATS,
-    NavigationTab.COMPARE_HUB -> false
-}
-
 internal fun profilePlaygroundDestination(): NavigationTab = NavigationTab.PLAYGROUND
 
 class MainActivity : ComponentActivity() {
@@ -127,7 +117,8 @@ class MainActivity : ComponentActivity() {
                                 uiState = uiState,
                                 onNavigateToInstructions = { viewModel.selectTab(NavigationTab.INSTRUCTIONS) },
                                 onNavigateToSkills = { viewModel.selectTab(NavigationTab.SKILLS) },
-                                onNavigateToYaml = { viewModel.selectTab(NavigationTab.YAML) }
+                                onNavigateToYaml = { viewModel.selectTab(NavigationTab.YAML) },
+                                onNavigateToPlayground = { viewModel.selectTab(profilePlaygroundDestination()) }
                             )
                             NavigationTab.INSTRUCTIONS -> InstructionsScreen(
                                 viewModel = viewModel,
