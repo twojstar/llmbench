@@ -23,6 +23,7 @@ The first prototype already contains Compose UI, persistent per-provider WebView
 - Gemini
 - DeepSeek
 - Kimi
+- Mistral Vibe (formerly Le Chat)
 - Gemini AI Studio via a browser-backed platform flow rather than embedded OAuth
 
 ### Native / free-provider layer
@@ -80,6 +81,7 @@ Backends are optional, not the default. If a feature truly needs one, prefer a t
 - [ ] add Gemini AI Studio through a browser-backed platform flow
 - [ ] add AIHubMix and OpenRouter-compatible free-provider adapters
 - [x] create a provider-tweak/userscript interface instead of hard-coded WebView hacks
+- [x] show generating and unread response status on ChatGPT, Claude, Gemini, DeepSeek and Kimi web tabs; Vibe remains pending a stable locale-independent generation signal
 - [x] add CI build/lint checks
 - [ ] document which providers work fully, partially, or block embedded login
 

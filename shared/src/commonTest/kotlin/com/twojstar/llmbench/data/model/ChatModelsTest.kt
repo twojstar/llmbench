@@ -7,6 +7,12 @@ import kotlin.test.assertTrue
 
 class ChatModelsTest {
     @Test
+    fun vibeWebProviderUsesCanonicalMistralChatEndpoint() {
+        assertEquals("https://chat.mistral.ai", WebAiService.VIBE.url)
+        assertEquals("Vibe", WebAiService.VIBE.shortName)
+    }
+
+    @Test
     fun concreteProviderDefaultsAreSelectable() {
         AiProvider.concreteProviders.forEach { provider ->
             assertTrue(

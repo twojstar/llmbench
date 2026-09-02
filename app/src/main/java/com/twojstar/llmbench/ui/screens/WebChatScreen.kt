@@ -20,18 +20,16 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
-import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
@@ -40,25 +38,62 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.twojstar.llmbench.data.model.WebAiService
+import com.twojstar.llmbench.data.model.WebChatActivityStatus
+import com.twojstar.llmbench.data.model.WebChatGenerationObservation
+import com.twojstar.llmbench.data.model.markWebChatActivityRead
+import com.twojstar.llmbench.data.model.nextWebChatActivityStatus
+import com.twojstar.llmbench.data.model.webChatActivityStatusAfterEviction
 import com.twojstar.llmbench.ui.theme.*
 import com.twojstar.llmbench.ui.viewmodel.StudioUiState
 import com.twojstar.llmbench.ui.viewmodel.StudioViewModel
 import com.twojstar.llmbench.web.applyProviderWebTweaks
+import com.twojstar.llmbench.web.installProviderGenerationTracker
+import com.twojstar.llmbench.web.probeProviderGenerationActivity
+import com.twojstar.llmbench.web.providerUrlMatches
+import com.twojstar.llmbench.web.setProviderGenerationTrackerSelected
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 private const val WEBVIEW_LOG_TAG = "LlmBenchWeb"
 private const val MAX_LIVE_WEBVIEWS = 2
+
+internal fun shouldApplyWebChatObservation(
+    observation: WebChatGenerationObservation,
+    isLiveService: Boolean,
+    isSameWebView: Boolean,
+    hasCurrentWebView: Boolean
+): Boolean {
+    if (isLiveService && isSameWebView) return true
+    val canSurviveEviction = observation == WebChatGenerationObservation.GENERATING ||
+        observation == WebChatGenerationObservation.COMPLETED ||
+        observation == WebChatGenerationObservation.COMPLETED_WHILE_SELECTED
+    return canSurviveEviction && (isSameWebView || !hasCurrentWebView)
+}
+
+internal fun nextObservedWebChatActivityStatus(
+    previous: WebChatActivityStatus,
+    observation: WebChatGenerationObservation,
+    isSelected: Boolean,
+    isLiveService: Boolean
+): WebChatActivityStatus {
+    val nextStatus = nextWebChatActivityStatus(previous, observation, isSelected)
+    return if (isLiveService) nextStatus else webChatActivityStatusAfterEviction(nextStatus)
+}
 
 /** Hosts account-backed AI services with mobile-first WebView controls. */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -70,10 +105,9 @@ fun WebChatScreen(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    var selectedService by remember { mutableStateOf(WebAiService.CLAUDE) }
+    val selectedService by rememberUpdatedState(uiState.selectedWebService)
     var isDesktopMode by remember { mutableStateOf(false) }
     var currentUrl by remember { mutableStateOf(selectedService.url) }
-    var pageTitle by remember { mutableStateOf(selectedService.displayName) }
     var loadingProgress by remember { mutableIntStateOf(0) }
     var isLoading by remember { mutableStateOf(false) }
     var canGoBack by remember { mutableStateOf(false) }
@@ -100,15 +134,78 @@ fun WebChatScreen(
     var liveServices by remember { mutableStateOf(listOf(selectedService)) }
     val webViewMap = remember { mutableStateMapOf<WebAiService, WebView>() }
     val lastKnownUrls = remember { mutableStateMapOf<WebAiService, String>() }
+    val activityStatuses = remember { mutableStateMapOf<WebAiService, WebChatActivityStatus>() }
+    val pendingDesktopReloads = remember { mutableStateMapOf<WebAiService, Boolean>() }
+    val providerFavicons = remember { mutableStateMapOf<WebAiService, Bitmap>() }
     val currentSelectedService by rememberUpdatedState(selectedService)
+    val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
+    val drawerScope = rememberCoroutineScope()
+
+    fun updateLiveServices(nextServices: List<WebAiService>) {
+        val evictedServices = liveServices.filterNot(nextServices.toSet()::contains)
+        evictedServices.forEach { service ->
+            activityStatuses[service]?.let { status ->
+                activityStatuses[service] = webChatActivityStatusAfterEviction(status)
+            }
+        }
+        liveServices = nextServices
+    }
+
+    fun reloadPendingDesktopModeIfSafe(service: WebAiService) {
+        if (service != selectedService || pendingDesktopReloads[service] != true) return
+        if (activityStatuses[service] == WebChatActivityStatus.GENERATING) return
+        val webView = webViewMap[service] ?: return
+        pendingDesktopReloads.remove(service)
+        webView.reload()
+    }
+
+    fun probeServiceActivity(service: WebAiService) {
+        val webView = webViewMap[service] ?: return
+        probeProviderGenerationActivity(webView, service) { observation ->
+            val mappedWebView = webViewMap[service]
+            val shouldApply = shouldApplyWebChatObservation(
+                observation = observation,
+                isLiveService = service in liveServices,
+                isSameWebView = mappedWebView === webView,
+                hasCurrentWebView = mappedWebView != null
+            )
+            if (!shouldApply) return@probeProviderGenerationActivity
+            val previous = activityStatuses[service] ?: WebChatActivityStatus.IDLE
+            activityStatuses[service] = nextObservedWebChatActivityStatus(
+                previous = previous,
+                observation = observation,
+                isSelected = selectedService == service,
+                isLiveService = service in liveServices
+            )
+            reloadPendingDesktopModeIfSafe(service)
+        }
+    }
 
     fun activateService(service: WebAiService) {
-        selectedService = service
-        liveServices = nextWebViewLru(liveServices, service)
+        val previousService = selectedService
+        if (previousService != service) {
+            webViewMap[previousService]?.let { webView ->
+                setProviderGenerationTrackerSelected(webView, previousService, isSelected = false)
+            }
+            webViewMap[service]?.let { webView ->
+                setProviderGenerationTrackerSelected(webView, service, isSelected = true)
+            }
+        }
+        val nextWebView = webViewMap[service]
+        currentUrl = nextWebView?.url ?: lastKnownUrls[service] ?: service.url
+        canGoBack = nextWebView?.canGoBack() ?: false
+        canGoForward = nextWebView?.canGoForward() ?: false
+        loadingProgress = nextWebView?.progress ?: 0
+        isLoading = nextWebView?.let { it.progress < 100 } ?: false
+        viewModel.selectWebService(service)
+        activityStatuses[service]?.let { status ->
+            activityStatuses[service] = markWebChatActivityRead(status)
+        }
+        updateLiveServices(nextWebViewLru(liveServices, service))
     }
 
     fun evictInactiveWebViews() {
-        liveServices = listOf(currentSelectedService)
+        updateLiveServices(listOf(currentSelectedService))
     }
 
     val appContext = context.applicationContext
@@ -129,17 +226,19 @@ fun WebChatScreen(
         onDispose { appContext.unregisterComponentCallbacks(callbacks) }
     }
 
-    val lifecycleOwner = LocalLifecycleOwner.current
-    DisposableEffect(lifecycleOwner) {
-        val observer = LifecycleEventObserver { _, event ->
-            when (event) {
-                Lifecycle.Event.ON_START -> webViewMap[currentSelectedService]?.onResume()
-                Lifecycle.Event.ON_STOP -> webViewMap.values.forEach(WebView::onPause)
-                else -> Unit
+    val lifecycleStarted = rememberWebViewLifecycleStarted(
+        webViewMap = webViewMap,
+        selectedService = currentSelectedService
+    )
+
+    LaunchedEffect(lifecycleStarted, liveServices) {
+        if (!lifecycleStarted) return@LaunchedEffect
+        while (true) {
+            liveServices.forEach { service ->
+                probeServiceActivity(service)
             }
+            delay(1_200)
         }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
     DisposableEffect(webViewMap) {
@@ -154,7 +253,7 @@ fun WebChatScreen(
 
     val activeWebView = webViewMap[selectedService]
 
-    BackHandler(enabled = canGoBack) {
+    BackHandler(enabled = canGoBack && drawerState.currentValue == DrawerValue.Closed) {
         activeWebView?.let {
             if (it.canGoBack()) {
                 it.goBack()
@@ -162,253 +261,61 @@ fun WebChatScreen(
         }
     }
 
-    Scaffold(
-        topBar = {
-            Surface(
-                color = MaterialTheme.colorScheme.surface,
-                tonalElevation = 3.dp,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .statusBarsPadding()
-                ) {
-                    // Top Bar: AI Provider Web Tabs
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .horizontalScroll(rememberScrollState())
-                            .padding(horizontal = 12.dp, vertical = 6.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        WebAiService.entries.forEach { service ->
-                            val isSelected = selectedService == service
-                            val brandColor = Color(service.brandHexColor)
-
-                            Surface(
-                                shape = RoundedCornerShape(20.dp),
-                                color = if (isSelected) brandColor.copy(alpha = 0.18f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
-                                border = if (isSelected) BorderStroke(1.5.dp, brandColor) else BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.15f)),
-                                modifier = Modifier
-                                    .clickable { activateService(service) }
-                                    .testTag("tab_web_service_${service.id}")
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = getWebServiceIcon(service),
-                                        contentDescription = null,
-                                        tint = if (isSelected) brandColor else MaterialTheme.colorScheme.onSurfaceVariant,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                    Text(
-                                        text = service.shortName,
-                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                        fontSize = 12.sp,
-                                        color = if (isSelected) brandColor else MaterialTheme.colorScheme.onSurface
-                                    )
-                                }
-                            }
-                        }
-
-                        // Native Hub Switch button
-                        OutlinedButton(
-                            onClick = onOpenNativeCompare,
-                            shape = RoundedCornerShape(20.dp),
-                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                            modifier = Modifier
-                                .height(34.dp)
-                                .testTag("btn_switch_to_native_hub")
-                        ) {
-                            Icon(
-                                Icons.Default.CompareArrows,
-                                contentDescription = null,
-                                modifier = Modifier.size(14.dp),
-                                tint = AccentCyan
-                            )
-                            Spacer(Modifier.width(4.dp))
-                            Text(
-                                "Compare Hub",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = AccentCyan
-                            )
-                        }
-                    }
-
-                    // Navigation Bar (Back, Forward, Reload, URL & Helpers)
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 12.dp, vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        IconButton(
-                            onClick = { activeWebView?.goBack() },
-                            enabled = canGoBack,
-                            modifier = Modifier.size(32.dp).testTag("btn_web_back")
-                        ) {
-                            Icon(
-                                Icons.AutoMirrored.Filled.ArrowBack,
-                                contentDescription = "Back",
-                                modifier = Modifier.size(18.dp),
-                                tint = if (canGoBack) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f)
-                            )
-                        }
-
-                        IconButton(
-                            onClick = { activeWebView?.goForward() },
-                            enabled = canGoForward,
-                            modifier = Modifier.size(32.dp).testTag("btn_web_forward")
-                        ) {
-                            Icon(
-                                Icons.AutoMirrored.Filled.ArrowForward,
-                                contentDescription = "Forward",
-                                modifier = Modifier.size(18.dp),
-                                tint = if (canGoForward) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f)
-                            )
-                        }
-
-                        IconButton(
-                            onClick = { activeWebView?.reload() },
-                            modifier = Modifier.size(32.dp).testTag("btn_web_reload")
-                        ) {
-                            Icon(
-                                Icons.Default.Refresh,
-                                contentDescription = "Reload",
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
-
-                        IconButton(
-                            onClick = {
-                                activeWebView?.loadUrl(selectedService.url)
-                            },
-                            modifier = Modifier.size(32.dp).testTag("btn_web_home")
-                        ) {
-                            Icon(
-                                Icons.Default.Home,
-                                contentDescription = "Home",
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
-
-                        // URL Pill
-                        Surface(
-                            shape = RoundedCornerShape(12.dp),
-                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(32.dp)
-                                .clickable {
-                                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                    clipboard.setPrimaryClip(ClipData.newPlainText("URL", currentUrl))
-                                    viewModel.showSnackbar("Copied address: $currentUrl")
-                                }
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.padding(horizontal = 8.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Lock,
-                                    contentDescription = "Secure Connection",
-                                    tint = AccentEmerald,
-                                    modifier = Modifier.size(12.dp)
-                                )
-                                Spacer(Modifier.width(4.dp))
-                                Text(
-                                    text = currentUrl.removePrefix("https://").removePrefix("http://"),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    fontSize = 11.sp,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                        }
-
-                        // Studio Prompt Injection / Copy helper
-                        IconButton(
-                            onClick = { showPromptHelperDialog = true },
-                            modifier = Modifier.size(32.dp).testTag("btn_prompt_quick_copy")
-                        ) {
-                            Icon(
-                                Icons.Default.ContentPaste,
-                                contentDescription = "Copy Prompt / Profile",
-                                tint = AccentCyan,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
-
-                        // Desktop mode toggle
-                        IconButton(
-                            onClick = {
-                                isDesktopMode = !isDesktopMode
-                                activeWebView?.let { wv ->
-                                    applyUserAgent(wv, isDesktopMode)
-                                    wv.reload()
-                                }
-                            },
-                            modifier = Modifier.size(32.dp).testTag("btn_toggle_desktop_mode")
-                        ) {
-                            Icon(
-                                imageVector = if (isDesktopMode) Icons.Default.Laptop else Icons.Default.Smartphone,
-                                contentDescription = "Toggle Desktop/Mobile",
-                                tint = if (isDesktopMode) AccentEmerald else MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
-
-                        // Open in external browser
-                        IconButton(
-                            onClick = {
-                                try {
-                                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(currentUrl))
-                                    context.startActivity(intent)
-                                } catch (error: ActivityNotFoundException) {
-                                    Log.w(WEBVIEW_LOG_TAG, "External browser handler unavailable", error)
-                                    viewModel.showSnackbar("Could not launch external browser")
-                                } catch (error: SecurityException) {
-                                    Log.w(WEBVIEW_LOG_TAG, "External browser launch rejected", error)
-                                    viewModel.showSnackbar("Could not launch external browser")
-                                }
-                            },
-                            modifier = Modifier.size(32.dp).testTag("btn_open_external")
-                        ) {
-                            Icon(
-                                Icons.Default.OpenInNew,
-                                contentDescription = "Open in Chrome/Browser",
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
-                    }
-
-                    // Progress Bar
-                    if (isLoading) {
-                        LinearProgressIndicator(
-                            progress = { loadingProgress / 100f },
-                            modifier = Modifier.fillMaxWidth().height(2.dp),
-                            color = Color(selectedService.brandHexColor),
-                            trackColor = Color.Transparent
-                        )
+    ModalNavigationDrawer(
+        drawerState = drawerState,
+        gesturesEnabled = false,
+        drawerContent = {
+            WebProviderDrawer(
+                selectedService = selectedService,
+                activityStatuses = activityStatuses,
+                providerFavicons = providerFavicons,
+                onSelectService = { service ->
+                    activateService(service)
+                    drawerScope.launch { drawerState.close() }
+                },
+                onOpenNativeCompare = {
+                    drawerScope.launch {
+                        drawerState.close()
+                        onOpenNativeCompare()
                     }
                 }
-            }
+            )
         },
         modifier = modifier.fillMaxSize()
-    ) { innerPadding ->
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-        ) {
+    ) {
+        Scaffold(
+            topBar = {
+                WebChatToolbar(
+                    activeWebView = activeWebView,
+                    selectedService = selectedService,
+                    activityStatus = activityStatuses[selectedService] ?: WebChatActivityStatus.IDLE,
+                    providerFavicon = providerFavicons[selectedService],
+                    currentUrl = currentUrl,
+                    canGoBack = canGoBack,
+                    canGoForward = canGoForward,
+                    isDesktopMode = isDesktopMode,
+                    isLoading = isLoading,
+                    loadingProgress = loadingProgress,
+                    onOpenDrawer = { drawerScope.launch { drawerState.open() } },
+                    onShowPromptHelper = { showPromptHelperDialog = true },
+                    onToggleDesktopMode = {
+                        val nextDesktopMode = !isDesktopMode
+                        isDesktopMode = nextDesktopMode
+                        webViewMap.forEach { (service, webView) ->
+                            applyUserAgent(webView, nextDesktopMode)
+                            pendingDesktopReloads[service] = true
+                        }
+                    },
+                    onShowSnackbar = viewModel::showSnackbar
+                )
+            },
+            modifier = Modifier.fillMaxSize()
+        ) { innerPadding ->
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding)
+            ) {
             // Keep only a tiny MRU set of provider WebViews alive. Cookies and storage remain provider-owned.
             liveServices.forEach { service ->
                 key(service) {
@@ -426,16 +333,16 @@ fun WebChatScreen(
                                 service = service,
                                 initialUrl = lastKnownUrls[service] ?: service.url,
                                 isDesktop = isDesktopMode,
+                                isServiceSelected = { selectedService == service },
                                 onUrlChanged = { url ->
                                     lastKnownUrls[service] = url
                                     if (selectedService == service) {
                                         currentUrl = url
                                     }
                                 },
-                                onTitleChanged = { title ->
-                                    if (selectedService == service) {
-                                        pageTitle = title
-                                    }
+                                onTitleChanged = {},
+                                onFaviconChanged = { favicon ->
+                                    providerFavicons[service] = favicon
                                 },
                                 onProgressChanged = { progress ->
                                     if (selectedService == service) {
@@ -474,17 +381,19 @@ fun WebChatScreen(
                                 }
                             ).also { wv ->
                                 webViewMap[service] = wv
+                                pendingDesktopReloads.remove(service)
                             }
                         },
                         update = { wv ->
-                            if (isCurrentService) {
+                            if (isCurrentService && lifecycleStarted) {
                                 wv.onResume()
+                            } else {
+                                wv.onPause()
+                            }
+                            if (isCurrentService) {
                                 canGoBack = wv.canGoBack()
                                 canGoForward = wv.canGoForward()
                                 wv.url?.let { currentUrl = it }
-                                wv.title?.let { pageTitle = it }
-                            } else {
-                                wv.onPause()
                             }
                         },
                         onRelease = { wv ->
@@ -497,6 +406,7 @@ fun WebChatScreen(
                     }
                 }
             }
+        }
         }
     }
 
@@ -575,6 +485,364 @@ fun WebChatScreen(
     }
 }
 
+@Composable
+private fun rememberWebViewLifecycleStarted(
+    webViewMap: Map<WebAiService, WebView>,
+    selectedService: WebAiService
+): Boolean {
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val currentSelectedService by rememberUpdatedState(selectedService)
+    var lifecycleStarted by remember(lifecycleOwner) {
+        mutableStateOf(lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED))
+    }
+
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_START -> {
+                    lifecycleStarted = true
+                    webViewMap[currentSelectedService]?.onResume()
+                }
+                Lifecycle.Event.ON_STOP -> {
+                    lifecycleStarted = false
+                    webViewMap.values.forEach(WebView::onPause)
+                }
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    return lifecycleStarted
+}
+
+@Composable
+private fun WebChatToolbar(
+    activeWebView: WebView?,
+    selectedService: WebAiService,
+    activityStatus: WebChatActivityStatus,
+    providerFavicon: Bitmap?,
+    currentUrl: String,
+    canGoBack: Boolean,
+    canGoForward: Boolean,
+    isDesktopMode: Boolean,
+    isLoading: Boolean,
+    loadingProgress: Int,
+    onOpenDrawer: () -> Unit,
+    onShowPromptHelper: () -> Unit,
+    onToggleDesktopMode: () -> Unit,
+    onShowSnackbar: (String) -> Unit
+) {
+    val context = LocalContext.current
+    val brandColor = Color(selectedService.brandHexColor)
+    var menuExpanded by remember { mutableStateOf(false) }
+
+    Surface(
+        color = MaterialTheme.colorScheme.surface,
+        tonalElevation = 2.dp,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .statusBarsPadding()
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp)
+                    .padding(horizontal = 6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(
+                    onClick = onOpenDrawer,
+                    modifier = Modifier
+                        .size(40.dp)
+                        .testTag("btn_web_provider_drawer")
+                ) {
+                    Icon(Icons.Default.Menu, contentDescription = "Switch AI service")
+                }
+
+                WebProviderIdentityIcon(
+                    service = selectedService,
+                    favicon = providerFavicon,
+                    fallbackTint = brandColor,
+                    size = 20.dp
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text = selectedService.shortName,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Spacer(Modifier.width(8.dp))
+                WebProviderActivityIndicator(selectedService, activityStatus, brandColor)
+                Spacer(Modifier.weight(1f))
+
+                Box {
+                    IconButton(
+                        onClick = { menuExpanded = true },
+                        modifier = Modifier
+                            .size(40.dp)
+                            .testTag("btn_web_more")
+                    ) {
+                        Icon(Icons.Default.MoreVert, contentDescription = "Web chat options")
+                    }
+                    DropdownMenu(
+                        expanded = menuExpanded,
+                        onDismissRequest = { menuExpanded = false }
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("Back") },
+                            leadingIcon = { Icon(Icons.Default.ArrowBack, contentDescription = null) },
+                            enabled = canGoBack,
+                            onClick = {
+                                activeWebView?.goBack()
+                                menuExpanded = false
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Forward") },
+                            leadingIcon = { Icon(Icons.Default.ArrowForward, contentDescription = null) },
+                            enabled = canGoForward,
+                            onClick = {
+                                activeWebView?.goForward()
+                                menuExpanded = false
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Reload") },
+                            leadingIcon = { Icon(Icons.Default.Refresh, contentDescription = null) },
+                            onClick = {
+                                activeWebView?.reload()
+                                menuExpanded = false
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Provider home") },
+                            leadingIcon = { Icon(Icons.Default.Home, contentDescription = null) },
+                            onClick = {
+                                activeWebView?.loadUrl(selectedService.url)
+                                menuExpanded = false
+                            }
+                        )
+                        HorizontalDivider()
+                        DropdownMenuItem(
+                            text = { Text("Copy address") },
+                            leadingIcon = { Icon(Icons.Default.Link, contentDescription = null) },
+                            onClick = {
+                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                clipboard.setPrimaryClip(ClipData.newPlainText("URL", currentUrl))
+                                onShowSnackbar("Copied address")
+                                menuExpanded = false
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Quick prompt / profile") },
+                            leadingIcon = { Icon(Icons.Default.ContentPaste, contentDescription = null) },
+                            onClick = {
+                                menuExpanded = false
+                                onShowPromptHelper()
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text(if (isDesktopMode) "Use mobile site" else "Use desktop site") },
+                            leadingIcon = {
+                                Icon(
+                                    if (isDesktopMode) Icons.Default.Smartphone else Icons.Default.Laptop,
+                                    contentDescription = null
+                                )
+                            },
+                            onClick = {
+                                onToggleDesktopMode()
+                                menuExpanded = false
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Open in browser") },
+                            leadingIcon = { Icon(Icons.Default.OpenInNew, contentDescription = null) },
+                            onClick = {
+                                if (!openExternalUri(context, Uri.parse(currentUrl))) {
+                                    onShowSnackbar("Could not launch external browser")
+                                }
+                                menuExpanded = false
+                            }
+                        )
+                    }
+                }
+            }
+
+            if (isLoading) {
+                LinearProgressIndicator(
+                    progress = { loadingProgress / 100f },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(2.dp),
+                    color = brandColor,
+                    trackColor = Color.Transparent
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun WebProviderDrawer(
+    selectedService: WebAiService,
+    activityStatuses: Map<WebAiService, WebChatActivityStatus>,
+    providerFavicons: Map<WebAiService, Bitmap>,
+    onSelectService: (WebAiService) -> Unit,
+    onOpenNativeCompare: () -> Unit
+) {
+    ModalDrawerSheet(modifier = Modifier.width(292.dp)) {
+        Column(
+            modifier = Modifier
+                .fillMaxHeight()
+                .verticalScroll(rememberScrollState())
+        ) {
+            Text(
+                text = "Chats",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 20.dp, bottom = 10.dp)
+            )
+
+            WebAiService.entries.forEach { service ->
+                WebProviderDrawerItem(
+                    service = service,
+                    isSelected = selectedService == service,
+                    activityStatus = activityStatuses[service] ?: WebChatActivityStatus.IDLE,
+                    favicon = providerFavicons[service],
+                    onSelect = { onSelectService(service) }
+                )
+            }
+
+            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+            NavigationDrawerItem(
+                label = { Text("Compare Hub") },
+                selected = false,
+                onClick = onOpenNativeCompare,
+                icon = {
+                    Icon(
+                        Icons.Default.CompareArrows,
+                        contentDescription = null,
+                        tint = AccentCyan
+                    )
+                },
+                modifier = Modifier
+                    .padding(horizontal = 12.dp)
+                    .testTag("btn_switch_to_native_hub")
+            )
+        }
+    }
+}
+
+@Composable
+private fun WebProviderDrawerItem(
+    service: WebAiService,
+    isSelected: Boolean,
+    activityStatus: WebChatActivityStatus,
+    favicon: Bitmap?,
+    onSelect: () -> Unit
+) {
+    val brandColor = Color(service.brandHexColor)
+    NavigationDrawerItem(
+        label = {
+            Text(
+                text = service.shortName,
+                fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal
+            )
+        },
+        selected = isSelected,
+        onClick = onSelect,
+        icon = {
+            WebProviderIdentityIcon(
+                service = service,
+                favicon = favicon,
+                fallbackTint = if (isSelected) brandColor else MaterialTheme.colorScheme.onSurfaceVariant,
+                size = 24.dp
+            )
+        },
+        badge = {
+            WebProviderActivityIndicator(service, activityStatus, brandColor)
+        },
+        colors = NavigationDrawerItemDefaults.colors(
+            selectedContainerColor = brandColor.copy(alpha = 0.12f),
+            selectedIconColor = brandColor
+        ),
+        modifier = Modifier
+            .padding(horizontal = 12.dp)
+            .semantics {
+                when (activityStatus) {
+                    WebChatActivityStatus.GENERATING -> stateDescription = "Generating response"
+                    WebChatActivityStatus.UNREAD -> stateDescription = "Unread response"
+                    WebChatActivityStatus.PENDING ->
+                        stateDescription = "Response status pending after tab eviction"
+                    WebChatActivityStatus.IDLE -> Unit
+                }
+            }
+            .testTag("tab_web_service_${service.id}")
+    )
+}
+
+@Composable
+private fun WebProviderIdentityIcon(
+    service: WebAiService,
+    favicon: Bitmap?,
+    fallbackTint: Color,
+    size: androidx.compose.ui.unit.Dp
+) {
+    if (favicon != null) {
+        Image(
+            bitmap = favicon.asImageBitmap(),
+            contentDescription = null,
+            modifier = Modifier
+                .size(size)
+                .clip(RoundedCornerShape(5.dp))
+        )
+    } else {
+        Icon(
+            imageVector = getWebServiceIcon(service),
+            contentDescription = null,
+            tint = fallbackTint,
+            modifier = Modifier.size(size)
+        )
+    }
+}
+
+@Composable
+private fun WebProviderActivityIndicator(
+    service: WebAiService,
+    activityStatus: WebChatActivityStatus,
+    brandColor: Color
+) {
+    when (activityStatus) {
+        WebChatActivityStatus.GENERATING -> CircularProgressIndicator(
+            modifier = Modifier
+                .size(10.dp)
+                .testTag("status_web_service_${service.id}_generating"),
+            strokeWidth = 1.5.dp,
+            color = brandColor
+        )
+        WebChatActivityStatus.UNREAD -> Box(
+            modifier = Modifier
+                .size(8.dp)
+                .background(brandColor, CircleShape)
+                .testTag("status_web_service_${service.id}_unread")
+        )
+        WebChatActivityStatus.PENDING -> Box(
+            modifier = Modifier
+                .size(8.dp)
+                .border(1.dp, brandColor, CircleShape)
+                .testTag("status_web_service_${service.id}_pending")
+        )
+        WebChatActivityStatus.IDLE -> Unit
+    }
+}
+
 /** Requires explicit user consent before an intent URI leaves LlmBench. */
 @Composable
 private fun ExternalIntentConfirmationDialog(
@@ -628,8 +896,10 @@ private fun createConfiguredWebView(
     service: WebAiService,
     initialUrl: String,
     isDesktop: Boolean,
+    isServiceSelected: () -> Boolean,
     onUrlChanged: (String) -> Unit,
     onTitleChanged: (String) -> Unit,
+    onFaviconChanged: (Bitmap) -> Unit,
     onProgressChanged: (Int) -> Unit,
     onNavStateChanged: (canGoBack: Boolean, canGoForward: Boolean) -> Unit,
     onExternalIntentRequested: (Uri) -> Unit,
@@ -644,7 +914,7 @@ private fun createConfiguredWebView(
             ViewGroup.LayoutParams.MATCH_PARENT
         )
 
-        // Web Settings configured for modern SPA web applications (ChatGPT, Claude, Gemini, DeepSeek, Kimi)
+        // Web Settings configured for modern SPA web applications (ChatGPT, Claude, Gemini, DeepSeek, Kimi, Vibe)
         settings.apply {
             javaScriptEnabled = true
             domStorageEnabled = true
@@ -682,6 +952,13 @@ private fun createConfiguredWebView(
                 title?.let { onTitleChanged(it) }
             }
 
+            override fun onReceivedIcon(view: WebView?, icon: Bitmap?) {
+                val pageUrl = view?.url ?: return
+                if (icon != null && providerUrlMatches(service, pageUrl)) {
+                    onFaviconChanged(icon)
+                }
+            }
+
             override fun onShowFileChooser(
                 webView: WebView?,
                 filePathCallback: ValueCallback<Array<Uri>>?,
@@ -695,8 +972,11 @@ private fun createConfiguredWebView(
 
         webViewClient = object : WebViewClient() {
             override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
-                url?.let {
-                    onUrlChanged(it)
+                url?.let { pageUrl ->
+                    onUrlChanged(pageUrl)
+                    if (favicon != null && providerUrlMatches(service, pageUrl)) {
+                        onFaviconChanged(favicon)
+                    }
                 }
                 onNavStateChanged(view?.canGoBack() ?: false, view?.canGoForward() ?: false)
             }
@@ -704,7 +984,14 @@ private fun createConfiguredWebView(
             override fun onPageFinished(view: WebView?, url: String?) {
                 url?.let { pageUrl ->
                     onUrlChanged(pageUrl)
-                    view?.let { applyProviderWebTweaks(it, service, pageUrl) }
+                    view?.let { webView ->
+                        applyProviderWebTweaks(webView, service, pageUrl)
+                        installProviderGenerationTracker(
+                            webView,
+                            service,
+                            isSelected = isServiceSelected()
+                        )
+                    }
                 }
                 onNavStateChanged(view?.canGoBack() ?: false, view?.canGoForward() ?: false)
                 CookieManager.getInstance().flush()
@@ -781,17 +1068,17 @@ private fun applyUserAgent(webView: WebView, isDesktop: Boolean) {
 }
 
 /** Delegates an explicitly allowed external URI to a browsable system handler. */
-private fun openExternalUri(context: Context, uri: Uri) {
-    try {
-        val intent = Intent(Intent.ACTION_VIEW, uri).apply {
-            addCategory(Intent.CATEGORY_BROWSABLE)
-        }
-        context.startActivity(intent)
-    } catch (error: ActivityNotFoundException) {
-        Log.w(WEBVIEW_LOG_TAG, "External URI handler unavailable", error)
-    } catch (error: SecurityException) {
-        Log.w(WEBVIEW_LOG_TAG, "External URI launch rejected", error)
+private fun openExternalUri(context: Context, uri: Uri): Boolean {
+    val intent = Intent(Intent.ACTION_VIEW, uri).apply {
+        addCategory(Intent.CATEGORY_BROWSABLE)
     }
+    val error = runCatching { context.startActivity(intent) }.exceptionOrNull() ?: return true
+    when (error) {
+        is ActivityNotFoundException -> Log.w(WEBVIEW_LOG_TAG, "External URI handler unavailable", error)
+        is SecurityException -> Log.w(WEBVIEW_LOG_TAG, "External URI launch rejected", error)
+        else -> throw error
+    }
+    return false
 }
 
 /** Launches a user-confirmed intent URI or falls back to validated HTTPS. */
@@ -843,5 +1130,6 @@ fun getWebServiceIcon(service: WebAiService): ImageVector {
         WebAiService.GEMINI -> Icons.Default.AutoAwesome
         WebAiService.DEEPSEEK -> Icons.Default.Psychology
         WebAiService.KIMI -> Icons.Default.ElectricBolt
+        WebAiService.VIBE -> Icons.Default.Air
     }
 }
