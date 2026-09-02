@@ -20,18 +20,13 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
@@ -67,6 +62,7 @@ import com.twojstar.llmbench.web.installProviderGenerationTracker
 import com.twojstar.llmbench.web.probeProviderGenerationActivity
 import com.twojstar.llmbench.web.setProviderGenerationTrackerSelected
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 private const val WEBVIEW_LOG_TAG = "LlmBenchWeb"
 private const val MAX_LIVE_WEBVIEWS = 2
@@ -136,6 +132,8 @@ fun WebChatScreen(
     val lastKnownUrls = remember { mutableStateMapOf<WebAiService, String>() }
     val activityStatuses = remember { mutableStateMapOf<WebAiService, WebChatActivityStatus>() }
     val currentSelectedService by rememberUpdatedState(selectedService)
+    val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
+    val drawerScope = rememberCoroutineScope()
 
     fun updateLiveServices(nextServices: List<WebAiService>) {
         val evictedServices = liveServices.filterNot(nextServices.toSet()::contains)
@@ -244,54 +242,48 @@ fun WebChatScreen(
 
     Scaffold(
         topBar = {
-            Surface(
-                color = MaterialTheme.colorScheme.surface,
-                tonalElevation = 3.dp,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .statusBarsPadding()
-                ) {
-                    WebProviderTabs(
-                        selectedService = selectedService,
-                        activityStatuses = activityStatuses,
-                        onSelectService = ::activateService,
-                        onOpenNativeCompare = onOpenNativeCompare
-                    )
-
-                    WebNavigationBar(
-                        activeWebView = activeWebView,
-                        selectedService = selectedService,
-                        currentUrl = currentUrl,
-                        canGoBack = canGoBack,
-                        canGoForward = canGoForward,
-                        isDesktopMode = isDesktopMode,
-                        onShowPromptHelper = { showPromptHelperDialog = true },
-                        onDesktopModeChanged = { isDesktopMode = it },
-                        onShowSnackbar = viewModel::showSnackbar
-                    )
-
-                    // Progress Bar
-                    if (isLoading) {
-                        LinearProgressIndicator(
-                            progress = { loadingProgress / 100f },
-                            modifier = Modifier.fillMaxWidth().height(2.dp),
-                            color = Color(selectedService.brandHexColor),
-                            trackColor = Color.Transparent
-                        )
-                    }
-                }
-            }
+            WebChatToolbar(
+                activeWebView = activeWebView,
+                selectedService = selectedService,
+                activityStatus = activityStatuses[selectedService] ?: WebChatActivityStatus.IDLE,
+                currentUrl = currentUrl,
+                canGoBack = canGoBack,
+                canGoForward = canGoForward,
+                isDesktopMode = isDesktopMode,
+                isLoading = isLoading,
+                loadingProgress = loadingProgress,
+                onOpenDrawer = { drawerScope.launch { drawerState.open() } },
+                onShowPromptHelper = { showPromptHelperDialog = true },
+                onDesktopModeChanged = { isDesktopMode = it },
+                onShowSnackbar = viewModel::showSnackbar
+            )
         },
         modifier = modifier.fillMaxSize()
     ) { innerPadding ->
-        Box(
+        ModalNavigationDrawer(
+            drawerState = drawerState,
+            gesturesEnabled = false,
+            drawerContent = {
+                WebProviderDrawer(
+                    selectedService = selectedService,
+                    activityStatuses = activityStatuses,
+                    onSelectService = { service ->
+                        activateService(service)
+                        drawerScope.launch { drawerState.close() }
+                    },
+                    onOpenNativeCompare = {
+                        drawerScope.launch {
+                            drawerState.close()
+                            onOpenNativeCompare()
+                        }
+                    }
+                )
+            },
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
         ) {
+            Box(modifier = Modifier.fillMaxSize()) {
             // Keep only a tiny MRU set of provider WebViews alive. Cookies and storage remain provider-owned.
             liveServices.forEach { service ->
                 key(service) {
@@ -383,6 +375,7 @@ fun WebChatScreen(
                     }
                 }
             }
+        }
         }
     }
 
@@ -494,172 +487,198 @@ private fun rememberWebViewLifecycleStarted(
 }
 
 @Composable
-private fun WebNavigationBar(
+private fun WebChatToolbar(
     activeWebView: WebView?,
     selectedService: WebAiService,
+    activityStatus: WebChatActivityStatus,
     currentUrl: String,
     canGoBack: Boolean,
     canGoForward: Boolean,
     isDesktopMode: Boolean,
+    isLoading: Boolean,
+    loadingProgress: Int,
+    onOpenDrawer: () -> Unit,
     onShowPromptHelper: () -> Unit,
     onDesktopModeChanged: (Boolean) -> Unit,
     onShowSnackbar: (String) -> Unit
 ) {
     val context = LocalContext.current
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(4.dp)
+    val brandColor = Color(selectedService.brandHexColor)
+    var menuExpanded by remember { mutableStateOf(false) }
+
+    Surface(
+        color = MaterialTheme.colorScheme.surface,
+        tonalElevation = 2.dp,
+        modifier = Modifier.fillMaxWidth()
     ) {
-        IconButton(
-            onClick = { activeWebView?.goBack() },
-            enabled = canGoBack,
-            modifier = Modifier.size(32.dp).testTag("btn_web_back")
-        ) {
-            Icon(
-                Icons.AutoMirrored.Filled.ArrowBack,
-                contentDescription = "Back",
-                modifier = Modifier.size(18.dp),
-                tint = if (canGoBack) {
-                    MaterialTheme.colorScheme.onSurface
-                } else {
-                    MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f)
-                }
-            )
-        }
-
-        IconButton(
-            onClick = { activeWebView?.goForward() },
-            enabled = canGoForward,
-            modifier = Modifier.size(32.dp).testTag("btn_web_forward")
-        ) {
-            Icon(
-                Icons.AutoMirrored.Filled.ArrowForward,
-                contentDescription = "Forward",
-                modifier = Modifier.size(18.dp),
-                tint = if (canGoForward) {
-                    MaterialTheme.colorScheme.onSurface
-                } else {
-                    MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f)
-                }
-            )
-        }
-
-        IconButton(
-            onClick = { activeWebView?.reload() },
-            modifier = Modifier.size(32.dp).testTag("btn_web_reload")
-        ) {
-            Icon(Icons.Default.Refresh, contentDescription = "Reload", modifier = Modifier.size(18.dp))
-        }
-
-        IconButton(
-            onClick = { activeWebView?.loadUrl(selectedService.url) },
-            modifier = Modifier.size(32.dp).testTag("btn_web_home")
-        ) {
-            Icon(Icons.Default.Home, contentDescription = "Home", modifier = Modifier.size(18.dp))
-        }
-
-        Surface(
-            shape = RoundedCornerShape(12.dp),
-            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+        Column(
             modifier = Modifier
-                .weight(1f)
-                .height(32.dp)
-                .clickable {
-                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                    clipboard.setPrimaryClip(ClipData.newPlainText("URL", currentUrl))
-                    onShowSnackbar("Copied address: $currentUrl")
-                }
+                .fillMaxWidth()
+                .statusBarsPadding()
         ) {
             Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.padding(horizontal = 8.dp)
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp)
+                    .padding(horizontal = 6.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
+                IconButton(
+                    onClick = onOpenDrawer,
+                    modifier = Modifier
+                        .size(40.dp)
+                        .testTag("btn_web_provider_drawer")
+                ) {
+                    Icon(Icons.Default.Menu, contentDescription = "Switch AI service")
+                }
+
                 Icon(
-                    imageVector = Icons.Default.Lock,
-                    contentDescription = "Secure Connection",
-                    tint = AccentEmerald,
-                    modifier = Modifier.size(12.dp)
+                    imageVector = getWebServiceIcon(selectedService),
+                    contentDescription = null,
+                    tint = brandColor,
+                    modifier = Modifier.size(20.dp)
                 )
-                Spacer(Modifier.width(4.dp))
+                Spacer(Modifier.width(8.dp))
                 Text(
-                    text = currentUrl.removePrefix("https://").removePrefix("http://"),
-                    style = MaterialTheme.typography.bodySmall,
-                    fontSize = 11.sp,
+                    text = selectedService.shortName,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
                     maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    overflow = TextOverflow.Ellipsis
+                )
+                Spacer(Modifier.width(8.dp))
+                WebProviderActivityIndicator(selectedService, activityStatus, brandColor)
+                Spacer(Modifier.weight(1f))
+
+                Box {
+                    IconButton(
+                        onClick = { menuExpanded = true },
+                        modifier = Modifier
+                            .size(40.dp)
+                            .testTag("btn_web_more")
+                    ) {
+                        Icon(Icons.Default.MoreVert, contentDescription = "Web chat options")
+                    }
+                    DropdownMenu(
+                        expanded = menuExpanded,
+                        onDismissRequest = { menuExpanded = false }
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("Back") },
+                            leadingIcon = { Icon(Icons.Default.ArrowBack, contentDescription = null) },
+                            enabled = canGoBack,
+                            onClick = {
+                                activeWebView?.goBack()
+                                menuExpanded = false
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Forward") },
+                            leadingIcon = { Icon(Icons.Default.ArrowForward, contentDescription = null) },
+                            enabled = canGoForward,
+                            onClick = {
+                                activeWebView?.goForward()
+                                menuExpanded = false
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Reload") },
+                            leadingIcon = { Icon(Icons.Default.Refresh, contentDescription = null) },
+                            onClick = {
+                                activeWebView?.reload()
+                                menuExpanded = false
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Provider home") },
+                            leadingIcon = { Icon(Icons.Default.Home, contentDescription = null) },
+                            onClick = {
+                                activeWebView?.loadUrl(selectedService.url)
+                                menuExpanded = false
+                            }
+                        )
+                        HorizontalDivider()
+                        DropdownMenuItem(
+                            text = { Text("Copy address") },
+                            leadingIcon = { Icon(Icons.Default.Link, contentDescription = null) },
+                            onClick = {
+                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                clipboard.setPrimaryClip(ClipData.newPlainText("URL", currentUrl))
+                                onShowSnackbar("Copied address")
+                                menuExpanded = false
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Quick prompt / profile") },
+                            leadingIcon = { Icon(Icons.Default.ContentPaste, contentDescription = null) },
+                            onClick = {
+                                menuExpanded = false
+                                onShowPromptHelper()
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text(if (isDesktopMode) "Use mobile site" else "Use desktop site") },
+                            leadingIcon = {
+                                Icon(
+                                    if (isDesktopMode) Icons.Default.Smartphone else Icons.Default.Laptop,
+                                    contentDescription = null
+                                )
+                            },
+                            onClick = {
+                                val nextDesktopMode = !isDesktopMode
+                                onDesktopModeChanged(nextDesktopMode)
+                                activeWebView?.let { webView ->
+                                    applyUserAgent(webView, nextDesktopMode)
+                                    webView.reload()
+                                }
+                                menuExpanded = false
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Open in browser") },
+                            leadingIcon = { Icon(Icons.Default.OpenInNew, contentDescription = null) },
+                            onClick = {
+                                if (!openExternalUri(context, Uri.parse(currentUrl))) {
+                                    onShowSnackbar("Could not launch external browser")
+                                }
+                                menuExpanded = false
+                            }
+                        )
+                    }
+                }
+            }
+
+            if (isLoading) {
+                LinearProgressIndicator(
+                    progress = { loadingProgress / 100f },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(2.dp),
+                    color = brandColor,
+                    trackColor = Color.Transparent
                 )
             }
-        }
-
-        IconButton(
-            onClick = onShowPromptHelper,
-            modifier = Modifier.size(32.dp).testTag("btn_prompt_quick_copy")
-        ) {
-            Icon(
-                Icons.Default.ContentPaste,
-                contentDescription = "Copy Prompt / Profile",
-                tint = AccentCyan,
-                modifier = Modifier.size(18.dp)
-            )
-        }
-
-        IconButton(
-            onClick = {
-                val nextDesktopMode = !isDesktopMode
-                onDesktopModeChanged(nextDesktopMode)
-                activeWebView?.let { webView ->
-                    applyUserAgent(webView, nextDesktopMode)
-                    webView.reload()
-                }
-            },
-            modifier = Modifier.size(32.dp).testTag("btn_toggle_desktop_mode")
-        ) {
-            Icon(
-                imageVector = if (isDesktopMode) Icons.Default.Laptop else Icons.Default.Smartphone,
-                contentDescription = "Toggle Desktop/Mobile",
-                tint = if (isDesktopMode) AccentEmerald else MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(18.dp)
-            )
-        }
-
-        IconButton(
-            onClick = {
-                if (!openExternalUri(context, Uri.parse(currentUrl))) {
-                    onShowSnackbar("Could not launch external browser")
-                }
-            },
-            modifier = Modifier.size(32.dp).testTag("btn_open_external")
-        ) {
-            Icon(
-                Icons.Default.OpenInNew,
-                contentDescription = "Open in Chrome/Browser",
-                modifier = Modifier.size(18.dp)
-            )
         }
     }
 }
 
 @Composable
-private fun WebProviderTabs(
+private fun WebProviderDrawer(
     selectedService: WebAiService,
     activityStatuses: Map<WebAiService, WebChatActivityStatus>,
     onSelectService: (WebAiService) -> Unit,
     onOpenNativeCompare: () -> Unit
 ) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .horizontalScroll(rememberScrollState())
-            .padding(horizontal = 12.dp, vertical = 6.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
+    ModalDrawerSheet(modifier = Modifier.width(292.dp)) {
+        Text(
+            text = "Chats",
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 20.dp, bottom = 10.dp)
+        )
+
         WebAiService.entries.forEach { service ->
-            WebProviderTab(
+            WebProviderDrawerItem(
                 service = service,
                 isSelected = selectedService == service,
                 activityStatus = activityStatuses[service] ?: WebChatActivityStatus.IDLE,
@@ -667,57 +686,58 @@ private fun WebProviderTabs(
             )
         }
 
-        OutlinedButton(
+        HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+        NavigationDrawerItem(
+            label = { Text("Compare Hub") },
+            selected = false,
             onClick = onOpenNativeCompare,
-            shape = RoundedCornerShape(20.dp),
-            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+            icon = {
+                Icon(
+                    Icons.Default.CompareArrows,
+                    contentDescription = null,
+                    tint = AccentCyan
+                )
+            },
             modifier = Modifier
-                .height(34.dp)
+                .padding(horizontal = 12.dp)
                 .testTag("btn_switch_to_native_hub")
-        ) {
-            Icon(
-                Icons.Default.CompareArrows,
-                contentDescription = null,
-                modifier = Modifier.size(14.dp),
-                tint = AccentCyan
-            )
-            Spacer(Modifier.width(4.dp))
-            Text(
-                "Compare Hub",
-                fontSize = 11.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = AccentCyan
-            )
-        }
+        )
     }
 }
 
-
 @Composable
-private fun WebProviderTab(
+private fun WebProviderDrawerItem(
     service: WebAiService,
     isSelected: Boolean,
     activityStatus: WebChatActivityStatus,
     onSelect: () -> Unit
 ) {
     val brandColor = Color(service.brandHexColor)
-    val backgroundColor = if (isSelected) {
-        brandColor.copy(alpha = 0.18f)
-    } else {
-        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
-    }
-    val tabBorder = if (isSelected) {
-        BorderStroke(1.5.dp, brandColor)
-    } else {
-        BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.15f))
-    }
-
-    Surface(
-        shape = RoundedCornerShape(20.dp),
-        color = backgroundColor,
-        border = tabBorder,
+    NavigationDrawerItem(
+        label = {
+            Text(
+                text = service.shortName,
+                fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal
+            )
+        },
+        selected = isSelected,
+        onClick = onSelect,
+        icon = {
+            Icon(
+                imageVector = getWebServiceIcon(service),
+                contentDescription = null,
+                tint = if (isSelected) brandColor else MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        },
+        badge = {
+            WebProviderActivityIndicator(service, activityStatus, brandColor)
+        },
+        colors = NavigationDrawerItemDefaults.colors(
+            selectedContainerColor = brandColor.copy(alpha = 0.12f),
+            selectedIconColor = brandColor
+        ),
         modifier = Modifier
-            .clickable(onClick = onSelect)
+            .padding(horizontal = 12.dp)
             .semantics {
                 when (activityStatus) {
                     WebChatActivityStatus.GENERATING -> stateDescription = "Generating response"
@@ -728,27 +748,7 @@ private fun WebProviderTab(
                 }
             }
             .testTag("tab_web_service_${service.id}")
-    ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp)
-        ) {
-            Icon(
-                imageVector = getWebServiceIcon(service),
-                contentDescription = null,
-                tint = if (isSelected) brandColor else MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(16.dp)
-            )
-            Text(
-                text = service.shortName,
-                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                fontSize = 12.sp,
-                color = if (isSelected) brandColor else MaterialTheme.colorScheme.onSurface
-            )
-            WebProviderActivityIndicator(service, activityStatus, brandColor)
-        }
-    }
+    )
 }
 
 @Composable
