@@ -11,6 +11,8 @@ internal data class ProviderWebTweak(
 )
 
 internal object ProviderWebTweakRegistry {
+    private const val STOP_BUTTON_TEST_ID_SELECTOR = "[data-testid=\"stop-button\"]"
+
     private val mobileBaseline = ProviderWebTweak(
         id = "mobile-baseline",
         css = """
@@ -34,6 +36,30 @@ internal object ProviderWebTweakRegistry {
 
     private val providerTweaks = WebAiService.entries.associateWith { listOf(mobileBaseline) }
 
+    // Keep activity probes conservative: provider-scoped controls only, preferring locale-independent state.
+    private val generationSelectors = mapOf(
+        WebAiService.CHATGPT to listOf(
+            STOP_BUTTON_TEST_ID_SELECTOR
+        ),
+        WebAiService.CLAUDE to listOf(
+            STOP_BUTTON_TEST_ID_SELECTOR,
+            "button[aria-label=\"Stop Response\" i]"
+        ),
+        WebAiService.GEMINI to listOf(
+            "[data-test-id=\"send-button-container\"].stop"
+        ),
+        WebAiService.DEEPSEEK to listOf(
+            "div[role=\"button\"] svg[viewBox^=\"0 0 16\"] " +
+                "path[d^=\"M2 4.88C2 3.68009 2 3.08013 2.30557 2.65954\"]"
+        ),
+        WebAiService.KIMI to listOf(
+            "div.send-button-container.stop"
+        ),
+        // Vibe currently exposes only localized stop labels. Prefer no badge over a false
+        // locale-dependent signal until a stable provider-owned state hook is verified.
+        WebAiService.VIBE to emptyList()
+    )
+
     fun ownedHosts(service: WebAiService): Set<String> = buildSet {
         URI(service.url).host?.lowercase()?.let(::add)
         addAll(ownedHostAliases[service].orEmpty())
@@ -41,6 +67,9 @@ internal object ProviderWebTweakRegistry {
 
     fun forProvider(service: WebAiService): List<ProviderWebTweak> =
         providerTweaks[service].orEmpty()
+
+    fun generationSelectors(service: WebAiService): List<String> =
+        generationSelectors[service].orEmpty()
 }
 
 internal fun providerHostMatches(service: WebAiService, host: String?): Boolean {
