@@ -72,10 +72,6 @@ import kotlinx.coroutines.launch
 private const val WEBVIEW_LOG_TAG = "LlmBenchWeb"
 private const val MAX_LIVE_WEBVIEWS = 2
 
-internal fun persistWebProviderSelection(viewModel: StudioViewModel, service: WebAiService) {
-    viewModel.selectWebService(service)
-}
-
 internal fun shouldApplyWebChatObservation(
     observation: WebChatGenerationObservation,
     isLiveService: Boolean,
@@ -201,7 +197,7 @@ fun WebChatScreen(
         canGoForward = nextWebView?.canGoForward() ?: false
         loadingProgress = nextWebView?.progress ?: 0
         isLoading = nextWebView?.let { it.progress < 100 } ?: false
-        persistWebProviderSelection(viewModel, service)
+        viewModel.selectWebService(service)
         activityStatuses[service]?.let { status ->
             activityStatuses[service] = markWebChatActivityRead(status)
         }
