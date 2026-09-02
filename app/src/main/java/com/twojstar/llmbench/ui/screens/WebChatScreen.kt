@@ -24,6 +24,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -275,7 +277,14 @@ fun WebChatScreen(
                     loadingProgress = loadingProgress,
                     onOpenDrawer = { drawerScope.launch { drawerState.open() } },
                     onShowPromptHelper = { showPromptHelperDialog = true },
-                    onDesktopModeChanged = { isDesktopMode = it },
+                    onToggleDesktopMode = {
+                        val nextDesktopMode = !isDesktopMode
+                        isDesktopMode = nextDesktopMode
+                        webViewMap.values.forEach { webView ->
+                            applyUserAgent(webView, nextDesktopMode)
+                            webView.reload()
+                        }
+                    },
                     onShowSnackbar = viewModel::showSnackbar
                 )
             },
@@ -501,7 +510,7 @@ private fun WebChatToolbar(
     loadingProgress: Int,
     onOpenDrawer: () -> Unit,
     onShowPromptHelper: () -> Unit,
-    onDesktopModeChanged: (Boolean) -> Unit,
+    onToggleDesktopMode: () -> Unit,
     onShowSnackbar: (String) -> Unit
 ) {
     val context = LocalContext.current
@@ -627,12 +636,7 @@ private fun WebChatToolbar(
                                 )
                             },
                             onClick = {
-                                val nextDesktopMode = !isDesktopMode
-                                onDesktopModeChanged(nextDesktopMode)
-                                activeWebView?.let { webView ->
-                                    applyUserAgent(webView, nextDesktopMode)
-                                    webView.reload()
-                                }
+                                onToggleDesktopMode()
                                 menuExpanded = false
                             }
                         )
@@ -672,38 +676,44 @@ private fun WebProviderDrawer(
     onOpenNativeCompare: () -> Unit
 ) {
     ModalDrawerSheet(modifier = Modifier.width(292.dp)) {
-        Text(
-            text = "Chats",
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.SemiBold,
-            modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 20.dp, bottom = 10.dp)
-        )
+        Column(
+            modifier = Modifier
+                .fillMaxHeight()
+                .verticalScroll(rememberScrollState())
+        ) {
+            Text(
+                text = "Chats",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 20.dp, bottom = 10.dp)
+            )
 
-        WebAiService.entries.forEach { service ->
-            WebProviderDrawerItem(
-                service = service,
-                isSelected = selectedService == service,
-                activityStatus = activityStatuses[service] ?: WebChatActivityStatus.IDLE,
-                onSelect = { onSelectService(service) }
+            WebAiService.entries.forEach { service ->
+                WebProviderDrawerItem(
+                    service = service,
+                    isSelected = selectedService == service,
+                    activityStatus = activityStatuses[service] ?: WebChatActivityStatus.IDLE,
+                    onSelect = { onSelectService(service) }
+                )
+            }
+
+            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+            NavigationDrawerItem(
+                label = { Text("Compare Hub") },
+                selected = false,
+                onClick = onOpenNativeCompare,
+                icon = {
+                    Icon(
+                        Icons.Default.CompareArrows,
+                        contentDescription = null,
+                        tint = AccentCyan
+                    )
+                },
+                modifier = Modifier
+                    .padding(horizontal = 12.dp)
+                    .testTag("btn_switch_to_native_hub")
             )
         }
-
-        HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
-        NavigationDrawerItem(
-            label = { Text("Compare Hub") },
-            selected = false,
-            onClick = onOpenNativeCompare,
-            icon = {
-                Icon(
-                    Icons.Default.CompareArrows,
-                    contentDescription = null,
-                    tint = AccentCyan
-                )
-            },
-            modifier = Modifier
-                .padding(horizontal = 12.dp)
-                .testTag("btn_switch_to_native_hub")
-        )
     }
 }
 
