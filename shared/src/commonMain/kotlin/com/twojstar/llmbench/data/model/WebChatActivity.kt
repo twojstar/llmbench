@@ -3,6 +3,7 @@ package com.twojstar.llmbench.data.model
 enum class WebChatActivityStatus {
     IDLE,
     GENERATING,
+    PENDING,
     UNREAD
 }
 
@@ -26,16 +27,26 @@ fun nextWebChatActivityStatus(
     WebChatGenerationObservation.IDLE -> when {
         previous == WebChatActivityStatus.GENERATING && !isSelected -> WebChatActivityStatus.UNREAD
         previous == WebChatActivityStatus.UNREAD && !isSelected -> WebChatActivityStatus.UNREAD
+        previous == WebChatActivityStatus.PENDING && !isSelected -> WebChatActivityStatus.PENDING
         else -> WebChatActivityStatus.IDLE
     }
     WebChatGenerationObservation.UNKNOWN -> when {
         previous == WebChatActivityStatus.UNREAD && !isSelected -> WebChatActivityStatus.UNREAD
+        previous == WebChatActivityStatus.PENDING && !isSelected -> WebChatActivityStatus.PENDING
         else -> WebChatActivityStatus.IDLE
     }
 }
 
 fun markWebChatActivityRead(status: WebChatActivityStatus): WebChatActivityStatus =
-    if (status == WebChatActivityStatus.UNREAD) WebChatActivityStatus.IDLE else status
+    if (status == WebChatActivityStatus.UNREAD || status == WebChatActivityStatus.PENDING) {
+        WebChatActivityStatus.IDLE
+    } else {
+        status
+    }
 
-fun webChatActivityStatusAfterEviction(status: WebChatActivityStatus): WebChatActivityStatus =
-    if (status == WebChatActivityStatus.UNREAD) WebChatActivityStatus.UNREAD else WebChatActivityStatus.IDLE
+fun webChatActivityStatusAfterEviction(status: WebChatActivityStatus): WebChatActivityStatus = when (status) {
+    WebChatActivityStatus.GENERATING -> WebChatActivityStatus.PENDING
+    WebChatActivityStatus.UNREAD -> WebChatActivityStatus.UNREAD
+    WebChatActivityStatus.PENDING -> WebChatActivityStatus.PENDING
+    WebChatActivityStatus.IDLE -> WebChatActivityStatus.IDLE
+}

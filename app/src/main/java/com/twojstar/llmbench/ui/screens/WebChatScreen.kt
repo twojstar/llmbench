@@ -671,6 +671,8 @@ private fun WebProviderTabs(
                                 stateDescription = "Generating response"
                             WebChatActivityStatus.UNREAD ->
                                 stateDescription = "Unread response"
+                            WebChatActivityStatus.PENDING ->
+                                stateDescription = "Response status pending after tab eviction"
                             WebChatActivityStatus.IDLE -> Unit
                         }
                     }
@@ -706,6 +708,12 @@ private fun WebProviderTabs(
                                 .size(8.dp)
                                 .background(brandColor, CircleShape)
                                 .testTag("status_web_service_${service.id}_unread")
+                        )
+                        WebChatActivityStatus.PENDING -> Box(
+                            modifier = Modifier
+                                .size(8.dp)
+                                .border(1.dp, brandColor, CircleShape)
+                                .testTag("status_web_service_${service.id}_pending")
                         )
                         WebChatActivityStatus.IDLE -> Unit
                     }

@@ -57,14 +57,30 @@ class WebChatActivityTest {
     }
 
     @Test
-    fun evictionClearsGeneratingButPreservesKnownUnread() {
+    fun evictionPreservesUnknownGenerationAsPendingAndKnownUnread() {
         assertEquals(
-            WebChatActivityStatus.IDLE,
+            WebChatActivityStatus.PENDING,
             webChatActivityStatusAfterEviction(WebChatActivityStatus.GENERATING)
         )
         assertEquals(
             WebChatActivityStatus.UNREAD,
             webChatActivityStatusAfterEviction(WebChatActivityStatus.UNREAD)
+        )
+    }
+
+    @Test
+    fun pendingEvictionStatePersistsUntilProviderIsOpened() {
+        assertEquals(
+            WebChatActivityStatus.PENDING,
+            nextWebChatActivityStatus(
+                previous = WebChatActivityStatus.PENDING,
+                observation = WebChatGenerationObservation.UNKNOWN,
+                isSelected = false
+            )
+        )
+        assertEquals(
+            WebChatActivityStatus.IDLE,
+            markWebChatActivityRead(WebChatActivityStatus.PENDING)
         )
     }
 

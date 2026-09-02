@@ -87,7 +87,7 @@ private fun generationActivityScript(
                     attributes: true,
                     attributeFilter: [
                         'class', 'disabled', 'aria-disabled', 'aria-label',
-                        'data-testid', 'data-test-id', 'hidden', 'style'
+                        'data-testid', 'data-test-id', 'hidden', 'style', 'd'
                     ]
                 });
             }
