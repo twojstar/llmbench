@@ -158,6 +158,9 @@ internal fun setProviderGenerationTrackerSelected(
  * Reports provider activity without reading message text, prompts, credentials, or conversation content.
  * A provider-scoped MutationObserver remembers completed generation between native polling intervals.
  */
+internal fun providerGenerationTrackingSupported(service: WebAiService): Boolean =
+    ProviderWebTweakRegistry.generationSelectors(service).isNotEmpty()
+
 internal fun probeProviderGenerationActivity(
     webView: WebView,
     service: WebAiService,

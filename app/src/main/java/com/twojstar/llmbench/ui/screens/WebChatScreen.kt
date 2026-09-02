@@ -65,6 +65,7 @@ import com.twojstar.llmbench.web.applyProviderWebTweaks
 import com.twojstar.llmbench.web.installProviderGenerationTracker
 import com.twojstar.llmbench.web.probeProviderGenerationActivity
 import com.twojstar.llmbench.web.providerUrlMatches
+import com.twojstar.llmbench.web.providerGenerationTrackingSupported
 import com.twojstar.llmbench.web.setProviderGenerationTrackerSelected
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -136,7 +137,7 @@ fun WebChatScreen(
     val lastKnownUrls = remember { mutableStateMapOf<WebAiService, String>() }
     val activityStatuses = remember { mutableStateMapOf<WebAiService, WebChatActivityStatus>() }
     val desktopModes = remember { mutableStateMapOf<WebAiService, Boolean>() }
-    val pendingDesktopReloads = remember { mutableStateMapOf<WebAiService, Boolean>() }
+    val pendingDesktopModes = remember { mutableStateMapOf<WebAiService, Boolean>() }
     val providerFavicons = remember { mutableStateMapOf<WebAiService, Bitmap>() }
     val currentSelectedService by rememberUpdatedState(selectedService)
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
@@ -152,11 +153,20 @@ fun WebChatScreen(
         liveServices = nextServices
     }
 
-    fun reloadPendingDesktopModeIfSafe(service: WebAiService) {
-        if (service != selectedService || pendingDesktopReloads[service] != true) return
-        if (activityStatuses[service] == WebChatActivityStatus.GENERATING) return
+    fun applyPendingDesktopModeIfSafe(
+        service: WebAiService,
+        observation: WebChatGenerationObservation
+    ) {
+        if (service != selectedService) return
+        val nextDesktopMode = pendingDesktopModes[service] ?: return
+        if (observation == WebChatGenerationObservation.GENERATING) return
+        if (observation == WebChatGenerationObservation.UNKNOWN &&
+            providerGenerationTrackingSupported(service)
+        ) return
         val webView = webViewMap[service] ?: return
-        pendingDesktopReloads.remove(service)
+        pendingDesktopModes.remove(service)
+        desktopModes[service] = nextDesktopMode
+        applyUserAgent(webView, nextDesktopMode)
         webView.reload()
     }
 
@@ -178,7 +188,7 @@ fun WebChatScreen(
                 isSelected = selectedService == service,
                 isLiveService = service in liveServices
             )
-            reloadPendingDesktopModeIfSafe(service)
+            applyPendingDesktopModeIfSafe(service, observation)
         }
     }
 
@@ -308,12 +318,13 @@ fun WebChatScreen(
                     onShowPromptHelper = { showPromptHelperDialog = true },
                     onToggleDesktopMode = {
                         val service = selectedService
-                        val nextDesktopMode = !isDesktopMode
-                        desktopModes[service] = nextDesktopMode
-                        webViewMap[service]?.let { webView ->
-                            applyUserAgent(webView, nextDesktopMode)
-                            pendingDesktopReloads[service] = true
-                            reloadPendingDesktopModeIfSafe(service)
+                        val currentMode = pendingDesktopModes[service] ?: isDesktopMode
+                        val nextDesktopMode = !currentMode
+                        if (webViewMap[service] == null) {
+                            desktopModes[service] = nextDesktopMode
+                        } else {
+                            pendingDesktopModes[service] = nextDesktopMode
+                            probeServiceActivity(service)
                         }
                     },
                     onShowSnackbar = viewModel::showSnackbar
@@ -391,7 +402,7 @@ fun WebChatScreen(
                                 }
                             ).also { wv ->
                                 webViewMap[service] = wv
-                                pendingDesktopReloads.remove(service)
+                                pendingDesktopModes.remove(service)
                             }
                         },
                         update = { wv ->
