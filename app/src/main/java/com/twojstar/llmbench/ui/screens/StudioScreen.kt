@@ -33,11 +33,15 @@ fun StudioScreen(
     viewModel: StudioViewModel,
     uiState: StudioUiState,
     onNavigateToInstructions: () -> Unit,
+    onNavigateToSkills: () -> Unit,
+    onNavigateToYaml: () -> Unit,
+    onNavigateToPlayground: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     var showSaveDialog by remember { mutableStateOf(false) }
     var saveOverlayName by remember { mutableStateOf("") }
     var saveOverlayDesc by remember { mutableStateOf("") }
+    var toolsMenuExpanded by remember { mutableStateOf(false) }
 
     var expandedSection by remember { mutableStateOf("personality") } // personality, collaboration, knowledge, output
 
@@ -94,6 +98,43 @@ fun StudioScreen(
                             contentDescription = "Save Overlay",
                             tint = MaterialTheme.colorScheme.primary
                         )
+                    }
+                    Box {
+                        IconButton(
+                            onClick = { toolsMenuExpanded = true },
+                            modifier = Modifier.testTag("btn_studio_tools")
+                        ) {
+                            Icon(Icons.Default.MoreVert, contentDescription = "More Studio tools")
+                        }
+                        DropdownMenu(
+                            expanded = toolsMenuExpanded,
+                            onDismissRequest = { toolsMenuExpanded = false }
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("Profile playground") },
+                                leadingIcon = { Icon(Icons.Default.PlayArrow, contentDescription = null) },
+                                onClick = {
+                                    toolsMenuExpanded = false
+                                    onNavigateToPlayground()
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Skills browser") },
+                                leadingIcon = { Icon(Icons.Default.LibraryBooks, contentDescription = null) },
+                                onClick = {
+                                    toolsMenuExpanded = false
+                                    onNavigateToSkills()
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("YAML editor") },
+                                leadingIcon = { Icon(Icons.Default.Code, contentDescription = null) },
+                                onClick = {
+                                    toolsMenuExpanded = false
+                                    onNavigateToYaml()
+                                }
+                            )
+                        }
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
