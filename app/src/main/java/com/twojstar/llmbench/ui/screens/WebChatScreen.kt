@@ -107,7 +107,6 @@ fun WebChatScreen(
 ) {
     val context = LocalContext.current
     val selectedService by rememberUpdatedState(uiState.selectedWebService)
-    var isDesktopMode by remember { mutableStateOf(false) }
     var currentUrl by remember { mutableStateOf(selectedService.url) }
     var loadingProgress by remember { mutableIntStateOf(0) }
     var isLoading by remember { mutableStateOf(false) }
@@ -136,6 +135,7 @@ fun WebChatScreen(
     val webViewMap = remember { mutableStateMapOf<WebAiService, WebView>() }
     val lastKnownUrls = remember { mutableStateMapOf<WebAiService, String>() }
     val activityStatuses = remember { mutableStateMapOf<WebAiService, WebChatActivityStatus>() }
+    val desktopModes = remember { mutableStateMapOf<WebAiService, Boolean>() }
     val pendingDesktopReloads = remember { mutableStateMapOf<WebAiService, Boolean>() }
     val providerFavicons = remember { mutableStateMapOf<WebAiService, Bitmap>() }
     val currentSelectedService by rememberUpdatedState(selectedService)
@@ -253,6 +253,7 @@ fun WebChatScreen(
     }
 
     val activeWebView = webViewMap[selectedService]
+    val isDesktopMode = desktopModes[selectedService] == true
 
     BackHandler(enabled = canGoBack && drawerState.currentValue == DrawerValue.Closed) {
         activeWebView?.let {
@@ -306,11 +307,13 @@ fun WebChatScreen(
                     onOpenDrawer = { drawerScope.launch { drawerState.open() } },
                     onShowPromptHelper = { showPromptHelperDialog = true },
                     onToggleDesktopMode = {
+                        val service = selectedService
                         val nextDesktopMode = !isDesktopMode
-                        isDesktopMode = nextDesktopMode
-                        webViewMap.forEach { (service, webView) ->
+                        desktopModes[service] = nextDesktopMode
+                        webViewMap[service]?.let { webView ->
                             applyUserAgent(webView, nextDesktopMode)
                             pendingDesktopReloads[service] = true
+                            reloadPendingDesktopModeIfSafe(service)
                         }
                     },
                     onShowSnackbar = viewModel::showSnackbar
@@ -339,7 +342,7 @@ fun WebChatScreen(
                                 context = ctx,
                                 service = service,
                                 initialUrl = lastKnownUrls[service] ?: service.url,
-                                isDesktop = isDesktopMode,
+                                isDesktop = desktopModes[service] == true,
                                 isServiceSelected = { selectedService == service },
                                 onUrlChanged = { url ->
                                     lastKnownUrls[service] = url
