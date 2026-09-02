@@ -23,6 +23,8 @@ import com.twojstar.llmbench.ui.viewmodel.StudioViewModel
 
 internal fun profilePlaygroundDestination(): NavigationTab = NavigationTab.PLAYGROUND
 
+internal fun showPrimaryBottomNavigation(tab: NavigationTab): Boolean = tab != NavigationTab.WEB_CHATS
+
 class MainActivity : ComponentActivity() {
 
     private val viewModel: StudioViewModel by viewModels()
@@ -46,7 +48,7 @@ class MainActivity : ComponentActivity() {
                 Scaffold(
                     snackbarHost = { SnackbarHost(snackbarHostState) },
                     bottomBar = {
-                        NavigationBar(
+                        if (showPrimaryBottomNavigation(uiState.currentTab)) NavigationBar(
                             containerColor = MaterialTheme.colorScheme.surface,
                             tonalElevation = 8.dp,
                             modifier = Modifier
@@ -106,7 +108,8 @@ class MainActivity : ComponentActivity() {
                             NavigationTab.WEB_CHATS -> WebChatScreen(
                                 viewModel = viewModel,
                                 uiState = uiState,
-                                onOpenNativeCompare = { viewModel.selectTab(NavigationTab.COMPARE_HUB) }
+                                onOpenNativeCompare = { viewModel.selectTab(NavigationTab.COMPARE_HUB) },
+                                onOpenStudio = { viewModel.selectTab(NavigationTab.STUDIO) }
                             )
                             NavigationTab.COMPARE_HUB -> ChatScreen(
                                 viewModel = viewModel,
