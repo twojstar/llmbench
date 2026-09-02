@@ -105,7 +105,7 @@ fun WebChatScreen(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    var selectedService by remember { mutableStateOf(WebAiService.CLAUDE) }
+    val selectedService = uiState.selectedWebService
     var isDesktopMode by remember { mutableStateOf(false) }
     var currentUrl by remember { mutableStateOf(selectedService.url) }
     var pageTitle by remember { mutableStateOf(selectedService.displayName) }
@@ -192,7 +192,7 @@ fun WebChatScreen(
                 setProviderGenerationTrackerSelected(webView, service, isSelected = true)
             }
         }
-        selectedService = service
+        viewModel.selectWebService(service)
         activityStatuses[service]?.let { status ->
             activityStatuses[service] = markWebChatActivityRead(status)
         }
