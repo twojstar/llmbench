@@ -1,5 +1,7 @@
 package com.twojstar.llmbench.data.model
 
+import kotlin.time.Clock
+
 import kotlinx.serialization.Serializable
 
 @Serializable
@@ -176,7 +178,7 @@ data class ModelChatMessage(
     val provider: AiProvider? = null,
     val modelName: String? = null,
     val text: String,
-    val timestamp: Long = System.currentTimeMillis(),
+    val timestamp: Long = Clock.System.now().toEpochMilliseconds(),
     val isError: Boolean = false,
     val isSimulated: Boolean = false,
     val latencyMs: Long? = null,
