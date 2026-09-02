@@ -33,6 +33,7 @@ data class StudioUiState(
     val playgroundMessages: List<ChatMessage> = emptyList(),
     val isSimulating: Boolean = false,
     val currentTab: NavigationTab = NavigationTab.WEB_CHATS,
+    val selectedWebService: WebAiService = WebAiService.CLAUDE,
     val snackbarMessage: String? = null,
 
     // Integrated Multi-Provider AI Chat
@@ -103,6 +104,10 @@ class StudioViewModel : ViewModel() {
 
     fun selectTab(tab: NavigationTab) {
         _uiState.update { it.copy(currentTab = tab) }
+    }
+
+    fun selectWebService(service: WebAiService) {
+        _uiState.update { it.copy(selectedWebService = service) }
     }
 
     // --- Chat Screen Actions ---

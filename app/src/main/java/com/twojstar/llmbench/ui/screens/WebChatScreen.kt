@@ -105,10 +105,9 @@ fun WebChatScreen(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    var selectedService by remember { mutableStateOf(WebAiService.CLAUDE) }
+    val selectedService by rememberUpdatedState(uiState.selectedWebService)
     var isDesktopMode by remember { mutableStateOf(false) }
     var currentUrl by remember { mutableStateOf(selectedService.url) }
-    var pageTitle by remember { mutableStateOf(selectedService.displayName) }
     var loadingProgress by remember { mutableIntStateOf(0) }
     var isLoading by remember { mutableStateOf(false) }
     var canGoBack by remember { mutableStateOf(false) }
@@ -192,7 +191,13 @@ fun WebChatScreen(
                 setProviderGenerationTrackerSelected(webView, service, isSelected = true)
             }
         }
-        selectedService = service
+        val nextWebView = webViewMap[service]
+        currentUrl = nextWebView?.url ?: lastKnownUrls[service] ?: service.url
+        canGoBack = nextWebView?.canGoBack() ?: false
+        canGoForward = nextWebView?.canGoForward() ?: false
+        loadingProgress = nextWebView?.progress ?: 0
+        isLoading = nextWebView?.let { it.progress < 100 } ?: false
+        viewModel.selectWebService(service)
         activityStatuses[service]?.let { status ->
             activityStatuses[service] = markWebChatActivityRead(status)
         }
@@ -335,11 +340,7 @@ fun WebChatScreen(
                                         currentUrl = url
                                     }
                                 },
-                                onTitleChanged = { title ->
-                                    if (selectedService == service) {
-                                        pageTitle = title
-                                    }
-                                },
+                                onTitleChanged = {},
                                 onFaviconChanged = { favicon ->
                                     providerFavicons[service] = favicon
                                 },
@@ -393,7 +394,6 @@ fun WebChatScreen(
                                 canGoBack = wv.canGoBack()
                                 canGoForward = wv.canGoForward()
                                 wv.url?.let { currentUrl = it }
-                                wv.title?.let { pageTitle = it }
                             }
                         },
                         onRelease = { wv ->
