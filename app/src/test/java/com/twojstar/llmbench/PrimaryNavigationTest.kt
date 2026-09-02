@@ -2,6 +2,7 @@ package com.twojstar.llmbench
 
 import com.twojstar.llmbench.ui.viewmodel.NavigationTab
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
@@ -21,5 +22,10 @@ class PrimaryNavigationTest {
     fun dailyChatDestinationsRemainIndependent() {
         assertFalse(NavigationTab.WEB_CHATS.belongsToStudioSection())
         assertFalse(NavigationTab.COMPARE_HUB.belongsToStudioSection())
+    }
+
+    @Test
+    fun renderedPromptTestChatOpensProfilePlayground() {
+        assertEquals(NavigationTab.PLAYGROUND, profilePlaygroundDestination())
     }
 }

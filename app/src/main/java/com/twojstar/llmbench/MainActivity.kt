@@ -31,6 +31,8 @@ internal fun NavigationTab.belongsToStudioSection(): Boolean = when (this) {
     NavigationTab.COMPARE_HUB -> false
 }
 
+internal fun profilePlaygroundDestination(): NavigationTab = NavigationTab.PLAYGROUND
+
 class MainActivity : ComponentActivity() {
 
     private val viewModel: StudioViewModel by viewModels()
@@ -130,7 +132,7 @@ class MainActivity : ComponentActivity() {
                             NavigationTab.INSTRUCTIONS -> InstructionsScreen(
                                 viewModel = viewModel,
                                 uiState = uiState,
-                                onNavigateToPlayground = { viewModel.selectTab(NavigationTab.COMPARE_HUB) }
+                                onNavigateToPlayground = { viewModel.selectTab(profilePlaygroundDestination()) }
                             )
                             NavigationTab.YAML -> YamlEditorScreen(
                                 viewModel = viewModel,
