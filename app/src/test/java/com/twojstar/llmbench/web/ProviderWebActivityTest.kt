@@ -58,6 +58,24 @@ class ProviderWebActivityTest {
     }
 
     @Test
+    fun vibeTrackerRejectsIdleFingerprintOnTheSameSubmitControl() {
+        val script = requireNotNull(
+            providerGenerationActivityScript(
+                service = WebAiService.VIBE,
+                consumeCompletion = false
+            )
+        )
+
+        assertTrue(script.contains("button[type=\\\"submit\\\"] svg rect"))
+        assertTrue(script.contains("M12 18v4h4v-4h-4ZM16 14v4h4v-4h-4"))
+        assertTrue(
+            script.contains(
+                "idleControl.closest('button[type=\"submit\"]') === activeSubmit"
+            )
+        )
+    }
+
+    @Test
     fun vibeUsesLocaleIndependentSubmitStopIcon() {
         val activeSelector = ProviderWebTweakRegistry.generationSelectors(WebAiService.VIBE).single()
         val idleSelector = ProviderWebTweakRegistry.generationIdleSelectors(WebAiService.VIBE).single()

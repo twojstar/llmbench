@@ -130,6 +130,22 @@ private fun generationActivityScript(
     """.trimIndent()
 }
 
+
+internal fun providerGenerationActivityScript(
+    service: WebAiService,
+    consumeCompletion: Boolean,
+    selected: Boolean? = null
+): String? {
+    val selectors = ProviderWebTweakRegistry.generationSelectors(service)
+    if (selectors.isEmpty()) return null
+    return generationActivityScript(
+        selectors = selectors,
+        idleSelectors = ProviderWebTweakRegistry.generationIdleSelectors(service),
+        consumeCompletion = consumeCompletion,
+        selected = selected
+    )
+}
+
 /** Installs an in-page observer so short generation cycles cannot disappear between native polls. */
 internal fun installProviderGenerationTracker(
     webView: WebView,
@@ -138,13 +154,12 @@ internal fun installProviderGenerationTracker(
 ) {
     val pageUrl = webView.url ?: return
     if (!providerUrlMatches(service, pageUrl)) return
-    val selectors = ProviderWebTweakRegistry.generationSelectors(service)
-    if (selectors.isEmpty()) return
-    val idleSelectors = ProviderWebTweakRegistry.generationIdleSelectors(service)
-    webView.evaluateJavascript(
-        generationActivityScript(selectors, idleSelectors, consumeCompletion = false, selected = isSelected),
-        null
-    )
+    val script = providerGenerationActivityScript(
+        service = service,
+        consumeCompletion = false,
+        selected = isSelected
+    ) ?: return
+    webView.evaluateJavascript(script, null)
 }
 
 /** Keeps the in-page completion latch aligned with the native provider selection. */
@@ -190,14 +205,13 @@ internal fun probeProviderGenerationActivity(
         return
     }
 
-    val selectors = ProviderWebTweakRegistry.generationSelectors(service)
-    if (selectors.isEmpty()) {
+    val script = providerGenerationActivityScript(service, consumeCompletion = true)
+    if (script == null) {
         onResult(WebChatGenerationObservation.UNKNOWN)
         return
     }
-    val idleSelectors = ProviderWebTweakRegistry.generationIdleSelectors(service)
 
-    webView.evaluateJavascript(generationActivityScript(selectors, idleSelectors, consumeCompletion = true)) { rawResult ->
+    webView.evaluateJavascript(script) { rawResult ->
         onResult(
             when (rawResult?.trim()) {
                 "1" -> WebChatGenerationObservation.GENERATING
