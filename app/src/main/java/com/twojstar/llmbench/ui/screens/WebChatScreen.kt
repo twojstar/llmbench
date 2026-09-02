@@ -647,78 +647,12 @@ private fun WebProviderTabs(
         verticalAlignment = Alignment.CenterVertically
     ) {
         WebAiService.entries.forEach { service ->
-            val isSelected = selectedService == service
-            val brandColor = Color(service.brandHexColor)
-            val activityStatus = activityStatuses[service] ?: WebChatActivityStatus.IDLE
-
-            Surface(
-                shape = RoundedCornerShape(20.dp),
-                color = if (isSelected) {
-                    brandColor.copy(alpha = 0.18f)
-                } else {
-                    MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
-                },
-                border = if (isSelected) {
-                    BorderStroke(1.5.dp, brandColor)
-                } else {
-                    BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.15f))
-                },
-                modifier = Modifier
-                    .clickable { onSelectService(service) }
-                    .semantics {
-                        when (activityStatus) {
-                            WebChatActivityStatus.GENERATING ->
-                                stateDescription = "Generating response"
-                            WebChatActivityStatus.UNREAD ->
-                                stateDescription = "Unread response"
-                            WebChatActivityStatus.PENDING ->
-                                stateDescription = "Response status pending after tab eviction"
-                            WebChatActivityStatus.IDLE -> Unit
-                        }
-                    }
-                    .testTag("tab_web_service_${service.id}")
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp)
-                ) {
-                    Icon(
-                        imageVector = getWebServiceIcon(service),
-                        contentDescription = null,
-                        tint = if (isSelected) brandColor else MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Text(
-                        text = service.shortName,
-                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                        fontSize = 12.sp,
-                        color = if (isSelected) brandColor else MaterialTheme.colorScheme.onSurface
-                    )
-                    when (activityStatus) {
-                        WebChatActivityStatus.GENERATING -> CircularProgressIndicator(
-                            modifier = Modifier
-                                .size(10.dp)
-                                .testTag("status_web_service_${service.id}_generating"),
-                            strokeWidth = 1.5.dp,
-                            color = brandColor
-                        )
-                        WebChatActivityStatus.UNREAD -> Box(
-                            modifier = Modifier
-                                .size(8.dp)
-                                .background(brandColor, CircleShape)
-                                .testTag("status_web_service_${service.id}_unread")
-                        )
-                        WebChatActivityStatus.PENDING -> Box(
-                            modifier = Modifier
-                                .size(8.dp)
-                                .border(1.dp, brandColor, CircleShape)
-                                .testTag("status_web_service_${service.id}_pending")
-                        )
-                        WebChatActivityStatus.IDLE -> Unit
-                    }
-                }
-            }
+            WebProviderTab(
+                service = service,
+                isSelected = selectedService == service,
+                activityStatus = activityStatuses[service] ?: WebChatActivityStatus.IDLE,
+                onSelect = { onSelectService(service) }
+            )
         }
 
         OutlinedButton(
@@ -743,6 +677,95 @@ private fun WebProviderTabs(
                 color = AccentCyan
             )
         }
+    }
+}
+
+
+@Composable
+private fun WebProviderTab(
+    service: WebAiService,
+    isSelected: Boolean,
+    activityStatus: WebChatActivityStatus,
+    onSelect: () -> Unit
+) {
+    val brandColor = Color(service.brandHexColor)
+    val backgroundColor = if (isSelected) {
+        brandColor.copy(alpha = 0.18f)
+    } else {
+        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+    }
+    val tabBorder = if (isSelected) {
+        BorderStroke(1.5.dp, brandColor)
+    } else {
+        BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.15f))
+    }
+
+    Surface(
+        shape = RoundedCornerShape(20.dp),
+        color = backgroundColor,
+        border = tabBorder,
+        modifier = Modifier
+            .clickable(onClick = onSelect)
+            .semantics {
+                when (activityStatus) {
+                    WebChatActivityStatus.GENERATING -> stateDescription = "Generating response"
+                    WebChatActivityStatus.UNREAD -> stateDescription = "Unread response"
+                    WebChatActivityStatus.PENDING ->
+                        stateDescription = "Response status pending after tab eviction"
+                    WebChatActivityStatus.IDLE -> Unit
+                }
+            }
+            .testTag("tab_web_service_${service.id}")
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp)
+        ) {
+            Icon(
+                imageVector = getWebServiceIcon(service),
+                contentDescription = null,
+                tint = if (isSelected) brandColor else MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(16.dp)
+            )
+            Text(
+                text = service.shortName,
+                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                fontSize = 12.sp,
+                color = if (isSelected) brandColor else MaterialTheme.colorScheme.onSurface
+            )
+            WebProviderActivityIndicator(service, activityStatus, brandColor)
+        }
+    }
+}
+
+@Composable
+private fun WebProviderActivityIndicator(
+    service: WebAiService,
+    activityStatus: WebChatActivityStatus,
+    brandColor: Color
+) {
+    when (activityStatus) {
+        WebChatActivityStatus.GENERATING -> CircularProgressIndicator(
+            modifier = Modifier
+                .size(10.dp)
+                .testTag("status_web_service_${service.id}_generating"),
+            strokeWidth = 1.5.dp,
+            color = brandColor
+        )
+        WebChatActivityStatus.UNREAD -> Box(
+            modifier = Modifier
+                .size(8.dp)
+                .background(brandColor, CircleShape)
+                .testTag("status_web_service_${service.id}_unread")
+        )
+        WebChatActivityStatus.PENDING -> Box(
+            modifier = Modifier
+                .size(8.dp)
+                .border(1.dp, brandColor, CircleShape)
+                .testTag("status_web_service_${service.id}_pending")
+        )
+        WebChatActivityStatus.IDLE -> Unit
     }
 }
 
