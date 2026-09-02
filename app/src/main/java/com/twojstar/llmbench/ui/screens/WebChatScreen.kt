@@ -78,9 +78,20 @@ internal fun shouldApplyWebChatObservation(
     hasCurrentWebView: Boolean
 ): Boolean {
     if (isLiveService && isSameWebView) return true
-    val isTerminalCompletion = observation == WebChatGenerationObservation.COMPLETED ||
+    val canSurviveEviction = observation == WebChatGenerationObservation.GENERATING ||
+        observation == WebChatGenerationObservation.COMPLETED ||
         observation == WebChatGenerationObservation.COMPLETED_WHILE_SELECTED
-    return isTerminalCompletion && (isSameWebView || !hasCurrentWebView)
+    return canSurviveEviction && (isSameWebView || !hasCurrentWebView)
+}
+
+internal fun nextObservedWebChatActivityStatus(
+    previous: WebChatActivityStatus,
+    observation: WebChatGenerationObservation,
+    isSelected: Boolean,
+    isLiveService: Boolean
+): WebChatActivityStatus {
+    val nextStatus = nextWebChatActivityStatus(previous, observation, isSelected)
+    return if (isLiveService) nextStatus else webChatActivityStatusAfterEviction(nextStatus)
 }
 
 /** Hosts account-backed AI services with mobile-first WebView controls. */
@@ -148,10 +159,11 @@ fun WebChatScreen(
             )
             if (!shouldApply) return@probeProviderGenerationActivity
             val previous = activityStatuses[service] ?: WebChatActivityStatus.IDLE
-            activityStatuses[service] = nextWebChatActivityStatus(
+            activityStatuses[service] = nextObservedWebChatActivityStatus(
                 previous = previous,
                 observation = observation,
-                isSelected = selectedService == service
+                isSelected = selectedService == service,
+                isLiveService = service in liveServices
             )
         }
     }
