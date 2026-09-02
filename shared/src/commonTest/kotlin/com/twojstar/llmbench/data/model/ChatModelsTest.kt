@@ -13,6 +13,12 @@ class ChatModelsTest {
     }
 
     @Test
+    fun browserPlatformUsesCanonicalAiStudioEndpoint() {
+        assertEquals("https://aistudio.google.com", BrowserAiPlatform.GEMINI_AI_STUDIO.url)
+        assertEquals("AI Studio", BrowserAiPlatform.GEMINI_AI_STUDIO.shortName)
+    }
+
+    @Test
     fun concreteProviderDefaultsAreSelectable() {
         AiProvider.concreteProviders.forEach { provider ->
             assertTrue(

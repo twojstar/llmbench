@@ -26,6 +26,8 @@ The first prototype already contains Compose UI, persistent per-provider WebView
 - Mistral Vibe (formerly Le Chat)
 - Gemini AI Studio via a browser-backed platform flow rather than embedded OAuth
 
+AI Studio intentionally opens in the system browser because Google OAuth policy disallows authorization inside embedded user-agents such as Android WebView.
+
 ### Native / free-provider layer
 
 Planned adapters include OpenRouter-compatible services and other free endpoints such as AIHubMix where their terms and APIs allow it. Provider-specific details belong behind adapters rather than being spread through UI code.
@@ -78,7 +80,7 @@ Backends are optional, not the default. If a feature truly needs one, prefer a t
 - [x] migrate portable domain/provider logic to KMP `shared`
 - [x] add mobile WebView LRU/memory-pressure handling for long chats
 - [x] implement reliable provider file uploads through the platform file picker
-- [ ] add Gemini AI Studio through a browser-backed platform flow
+- [x] add Gemini AI Studio through a browser-backed platform flow
 - [ ] add AIHubMix and OpenRouter-compatible free-provider adapters
 - [x] create a provider-tweak/userscript interface instead of hard-coded WebView hacks
 - [x] show generating and unread response status on ChatGPT, Claude, Gemini, DeepSeek and Kimi web tabs; Vibe remains pending a stable locale-independent generation signal
