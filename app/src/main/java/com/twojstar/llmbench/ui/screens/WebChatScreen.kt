@@ -65,6 +65,7 @@ import com.twojstar.llmbench.ui.viewmodel.StudioViewModel
 import com.twojstar.llmbench.web.applyProviderWebTweaks
 import com.twojstar.llmbench.web.installProviderGenerationTracker
 import com.twojstar.llmbench.web.probeProviderGenerationActivity
+import com.twojstar.llmbench.web.setProviderGenerationTrackerSelected
 import kotlinx.coroutines.delay
 
 private const val WEBVIEW_LOG_TAG = "LlmBenchWeb"
@@ -77,8 +78,9 @@ internal fun shouldApplyWebChatObservation(
     hasCurrentWebView: Boolean
 ): Boolean {
     if (isLiveService && isSameWebView) return true
-    return observation == WebChatGenerationObservation.COMPLETED &&
-        (isSameWebView || !hasCurrentWebView)
+    val isTerminalCompletion = observation == WebChatGenerationObservation.COMPLETED ||
+        observation == WebChatGenerationObservation.COMPLETED_WHILE_SELECTED
+    return isTerminalCompletion && (isSameWebView || !hasCurrentWebView)
 }
 
 /** Hosts account-backed AI services with mobile-first WebView controls. */
@@ -155,6 +157,15 @@ fun WebChatScreen(
     }
 
     fun activateService(service: WebAiService) {
+        val previousService = selectedService
+        if (previousService != service) {
+            webViewMap[previousService]?.let { webView ->
+                setProviderGenerationTrackerSelected(webView, previousService, isSelected = false)
+            }
+            webViewMap[service]?.let { webView ->
+                setProviderGenerationTrackerSelected(webView, service, isSelected = true)
+            }
+        }
         selectedService = service
         activityStatuses[service]?.let { status ->
             activityStatuses[service] = markWebChatActivityRead(status)
@@ -526,6 +537,7 @@ fun WebChatScreen(
                                 service = service,
                                 initialUrl = lastKnownUrls[service] ?: service.url,
                                 isDesktop = isDesktopMode,
+                                isServiceSelected = { selectedService == service },
                                 onUrlChanged = { url ->
                                     lastKnownUrls[service] = url
                                     if (selectedService == service) {
@@ -730,6 +742,7 @@ private fun createConfiguredWebView(
     service: WebAiService,
     initialUrl: String,
     isDesktop: Boolean,
+    isServiceSelected: () -> Boolean,
     onUrlChanged: (String) -> Unit,
     onTitleChanged: (String) -> Unit,
     onProgressChanged: (Int) -> Unit,
@@ -808,7 +821,11 @@ private fun createConfiguredWebView(
                     onUrlChanged(pageUrl)
                     view?.let { webView ->
                         applyProviderWebTweaks(webView, service, pageUrl)
-                        installProviderGenerationTracker(webView, service)
+                        installProviderGenerationTracker(
+                            webView,
+                            service,
+                            isSelected = isServiceSelected()
+                        )
                     }
                 }
                 onNavStateChanged(view?.canGoBack() ?: false, view?.canGoForward() ?: false)

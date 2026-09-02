@@ -106,4 +106,16 @@ class WebChatActivityTest {
         )
     }
 
+    @Test
+    fun completionObservedWhileSelectedStaysReadAfterSwitch() {
+        assertEquals(
+            WebChatActivityStatus.IDLE,
+            nextWebChatActivityStatus(
+                previous = WebChatActivityStatus.GENERATING,
+                observation = WebChatGenerationObservation.COMPLETED_WHILE_SELECTED,
+                isSelected = false
+            )
+        )
+    }
+
 }

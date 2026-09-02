@@ -19,6 +19,18 @@ class WebChatObservationAcceptanceTest {
     }
 
     @Test
+    fun selectedCompletionSurvivesEvictionWithoutBecomingUnread() {
+        assertTrue(
+            shouldApplyWebChatObservation(
+                observation = WebChatGenerationObservation.COMPLETED_WHILE_SELECTED,
+                isLiveService = false,
+                isSameWebView = false,
+                hasCurrentWebView = false
+            )
+        )
+    }
+
+    @Test
     fun completedObservationFromReplacedWebViewIsRejected() {
         assertFalse(
             shouldApplyWebChatObservation(

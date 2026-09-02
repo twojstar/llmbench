@@ -8,13 +8,19 @@ import kotlinx.serialization.json.Json
 
 private const val GENERATION_TRACKER_KEY = "__llmbenchGenerationTracker"
 
-private fun generationActivityScript(selectors: List<String>, consumeCompletion: Boolean): String {
+private fun generationActivityScript(
+    selectors: List<String>,
+    consumeCompletion: Boolean,
+    selected: Boolean? = null
+): String {
     val encodedSelectors = Json.encodeToString(selectors)
+    val selectedState = selected?.toString() ?: "null"
     return """
         (() => {
             const selectors = $encodedSelectors;
             const trackerKey = "$GENERATION_TRACKER_KEY";
             const signature = JSON.stringify(selectors);
+            const selectedState = $selectedState;
             const isVisible = element => {
                 const style = getComputedStyle(element);
                 return !element.disabled &&
@@ -22,9 +28,10 @@ private fun generationActivityScript(selectors: List<String>, consumeCompletion:
                     style.visibility !== 'hidden' &&
                     element.getClientRects().length > 0;
             };
-            const isGenerating = () => selectors.some(selector =>
-                Array.from(document.querySelectorAll(selector)).some(isVisible)
+            const generationControls = () => selectors.flatMap(selector =>
+                Array.from(document.querySelectorAll(selector)).filter(isVisible)
             );
+            const isGenerating = () => generationControls().length > 0;
 
             let tracker = window[trackerKey];
             if (!tracker || tracker.signature !== signature) {
@@ -33,10 +40,27 @@ private fun generationActivityScript(selectors: List<String>, consumeCompletion:
                     signature,
                     active: isGenerating(),
                     completed: false,
+                    completedWhileSelected: false,
+                    selected: selectedState === null ? false : selectedState,
+                    controls: generationControls(),
                     observer: null
                 };
                 window[trackerKey] = tracker;
             }
+            if (selectedState !== null) tracker.selected = selectedState;
+
+            const refreshActivity = () => {
+                const controls = generationControls();
+                const nextActive = controls.length > 0;
+                if (tracker.active && !nextActive) {
+                    tracker.completedWhileSelected = tracker.completed
+                        ? tracker.completedWhileSelected && tracker.selected
+                        : tracker.selected;
+                    tracker.completed = true;
+                }
+                tracker.active = nextActive;
+                tracker.controls = controls;
+            };
 
             if (!tracker.observer && document.documentElement) {
                 const nodeTouchesGenerationControl = node => {
@@ -48,14 +72,13 @@ private fun generationActivityScript(selectors: List<String>, consumeCompletion:
                     );
                 };
                 const mutationTouchesGenerationControl = mutation =>
+                    (mutation.type === 'attributes' && tracker.controls.includes(mutation.target)) ||
                     nodeTouchesGenerationControl(mutation.target) ||
                     Array.from(mutation.addedNodes).some(nodeTouchesGenerationControl) ||
                     Array.from(mutation.removedNodes).some(nodeTouchesGenerationControl);
                 const update = mutations => {
                     if (!mutations.some(mutationTouchesGenerationControl)) return;
-                    const nextActive = isGenerating();
-                    if (tracker.active && !nextActive) tracker.completed = true;
-                    tracker.active = nextActive;
+                    refreshActivity();
                 };
                 tracker.observer = new MutationObserver(update);
                 tracker.observer.observe(document.documentElement, {
@@ -69,13 +92,15 @@ private fun generationActivityScript(selectors: List<String>, consumeCompletion:
                 });
             }
 
-            const activeNow = isGenerating();
-            if (tracker.active && !activeNow) tracker.completed = true;
-            tracker.active = activeNow;
+            refreshActivity();
             if (tracker.active) return 1;
             if (tracker.completed) {
-                if ($consumeCompletion) tracker.completed = false;
-                return 2;
+                const completionResult = tracker.completedWhileSelected ? 3 : 2;
+                if ($consumeCompletion) {
+                    tracker.completed = false;
+                    tracker.completedWhileSelected = false;
+                }
+                return completionResult;
             }
             return 0;
         })();
@@ -83,12 +108,38 @@ private fun generationActivityScript(selectors: List<String>, consumeCompletion:
 }
 
 /** Installs an in-page observer so short generation cycles cannot disappear between native polls. */
-internal fun installProviderGenerationTracker(webView: WebView, service: WebAiService) {
+internal fun installProviderGenerationTracker(
+    webView: WebView,
+    service: WebAiService,
+    isSelected: Boolean
+) {
     val pageUrl = webView.url ?: return
     if (!providerUrlMatches(service, pageUrl)) return
     val selectors = ProviderWebTweakRegistry.generationSelectors(service)
     if (selectors.isEmpty()) return
-    webView.evaluateJavascript(generationActivityScript(selectors, consumeCompletion = false), null)
+    webView.evaluateJavascript(
+        generationActivityScript(selectors, consumeCompletion = false, selected = isSelected),
+        null
+    )
+}
+
+/** Keeps the in-page completion latch aligned with the native provider selection. */
+internal fun setProviderGenerationTrackerSelected(
+    webView: WebView,
+    service: WebAiService,
+    isSelected: Boolean
+) {
+    val pageUrl = webView.url ?: return
+    if (!providerUrlMatches(service, pageUrl)) return
+    webView.evaluateJavascript(
+        """
+            (() => {
+                const tracker = window["$GENERATION_TRACKER_KEY"];
+                if (tracker) tracker.selected = $isSelected;
+            })();
+        """.trimIndent(),
+        null
+    )
 }
 
 /**
@@ -117,6 +168,7 @@ internal fun probeProviderGenerationActivity(
             when (rawResult?.trim()) {
                 "1" -> WebChatGenerationObservation.GENERATING
                 "2" -> WebChatGenerationObservation.COMPLETED
+                "3" -> WebChatGenerationObservation.COMPLETED_WHILE_SELECTED
                 "0" -> WebChatGenerationObservation.IDLE
                 else -> WebChatGenerationObservation.UNKNOWN
             }
