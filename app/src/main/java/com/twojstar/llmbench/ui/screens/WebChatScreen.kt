@@ -20,6 +20,7 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -37,6 +38,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.Lifecycle
@@ -62,6 +64,7 @@ import com.twojstar.llmbench.ui.viewmodel.StudioViewModel
 import com.twojstar.llmbench.web.applyProviderWebTweaks
 import com.twojstar.llmbench.web.installProviderGenerationTracker
 import com.twojstar.llmbench.web.probeProviderGenerationActivity
+import com.twojstar.llmbench.web.providerUrlMatches
 import com.twojstar.llmbench.web.setProviderGenerationTrackerSelected
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -134,6 +137,7 @@ fun WebChatScreen(
     val lastKnownUrls = remember { mutableStateMapOf<WebAiService, String>() }
     val activityStatuses = remember { mutableStateMapOf<WebAiService, WebChatActivityStatus>() }
     val pendingDesktopReloads = remember { mutableStateMapOf<WebAiService, Boolean>() }
+    val providerFavicons = remember { mutableStateMapOf<WebAiService, Bitmap>() }
     val currentSelectedService by rememberUpdatedState(selectedService)
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val drawerScope = rememberCoroutineScope()
@@ -259,6 +263,7 @@ fun WebChatScreen(
             WebProviderDrawer(
                 selectedService = selectedService,
                 activityStatuses = activityStatuses,
+                providerFavicons = providerFavicons,
                 onSelectService = { service ->
                     activateService(service)
                     drawerScope.launch { drawerState.close() }
@@ -279,6 +284,7 @@ fun WebChatScreen(
                     activeWebView = activeWebView,
                     selectedService = selectedService,
                     activityStatus = activityStatuses[selectedService] ?: WebChatActivityStatus.IDLE,
+                    providerFavicon = providerFavicons[selectedService],
                     currentUrl = currentUrl,
                     canGoBack = canGoBack,
                     canGoForward = canGoForward,
@@ -333,6 +339,9 @@ fun WebChatScreen(
                                     if (selectedService == service) {
                                         pageTitle = title
                                     }
+                                },
+                                onFaviconChanged = { favicon ->
+                                    providerFavicons[service] = favicon
                                 },
                                 onProgressChanged = { progress ->
                                     if (selectedService == service) {
@@ -513,6 +522,7 @@ private fun WebChatToolbar(
     activeWebView: WebView?,
     selectedService: WebAiService,
     activityStatus: WebChatActivityStatus,
+    providerFavicon: Bitmap?,
     currentUrl: String,
     canGoBack: Boolean,
     canGoForward: Boolean,
@@ -554,11 +564,11 @@ private fun WebChatToolbar(
                     Icon(Icons.Default.Menu, contentDescription = "Switch AI service")
                 }
 
-                Icon(
-                    imageVector = getWebServiceIcon(selectedService),
-                    contentDescription = null,
-                    tint = brandColor,
-                    modifier = Modifier.size(20.dp)
+                WebProviderIdentityIcon(
+                    service = selectedService,
+                    favicon = providerFavicon,
+                    fallbackTint = brandColor,
+                    size = 20.dp
                 )
                 Spacer(Modifier.width(8.dp))
                 Text(
@@ -683,6 +693,7 @@ private fun WebChatToolbar(
 private fun WebProviderDrawer(
     selectedService: WebAiService,
     activityStatuses: Map<WebAiService, WebChatActivityStatus>,
+    providerFavicons: Map<WebAiService, Bitmap>,
     onSelectService: (WebAiService) -> Unit,
     onOpenNativeCompare: () -> Unit
 ) {
@@ -704,6 +715,7 @@ private fun WebProviderDrawer(
                     service = service,
                     isSelected = selectedService == service,
                     activityStatus = activityStatuses[service] ?: WebChatActivityStatus.IDLE,
+                    favicon = providerFavicons[service],
                     onSelect = { onSelectService(service) }
                 )
             }
@@ -733,6 +745,7 @@ private fun WebProviderDrawerItem(
     service: WebAiService,
     isSelected: Boolean,
     activityStatus: WebChatActivityStatus,
+    favicon: Bitmap?,
     onSelect: () -> Unit
 ) {
     val brandColor = Color(service.brandHexColor)
@@ -746,10 +759,11 @@ private fun WebProviderDrawerItem(
         selected = isSelected,
         onClick = onSelect,
         icon = {
-            Icon(
-                imageVector = getWebServiceIcon(service),
-                contentDescription = null,
-                tint = if (isSelected) brandColor else MaterialTheme.colorScheme.onSurfaceVariant
+            WebProviderIdentityIcon(
+                service = service,
+                favicon = favicon,
+                fallbackTint = if (isSelected) brandColor else MaterialTheme.colorScheme.onSurfaceVariant,
+                size = 24.dp
             )
         },
         badge = {
@@ -772,6 +786,31 @@ private fun WebProviderDrawerItem(
             }
             .testTag("tab_web_service_${service.id}")
     )
+}
+
+@Composable
+private fun WebProviderIdentityIcon(
+    service: WebAiService,
+    favicon: Bitmap?,
+    fallbackTint: Color,
+    size: androidx.compose.ui.unit.Dp
+) {
+    if (favicon != null) {
+        Image(
+            bitmap = favicon.asImageBitmap(),
+            contentDescription = null,
+            modifier = Modifier
+                .size(size)
+                .clip(RoundedCornerShape(5.dp))
+        )
+    } else {
+        Icon(
+            imageVector = getWebServiceIcon(service),
+            contentDescription = null,
+            tint = fallbackTint,
+            modifier = Modifier.size(size)
+        )
+    }
 }
 
 @Composable
@@ -860,6 +899,7 @@ private fun createConfiguredWebView(
     isServiceSelected: () -> Boolean,
     onUrlChanged: (String) -> Unit,
     onTitleChanged: (String) -> Unit,
+    onFaviconChanged: (Bitmap) -> Unit,
     onProgressChanged: (Int) -> Unit,
     onNavStateChanged: (canGoBack: Boolean, canGoForward: Boolean) -> Unit,
     onExternalIntentRequested: (Uri) -> Unit,
@@ -912,6 +952,13 @@ private fun createConfiguredWebView(
                 title?.let { onTitleChanged(it) }
             }
 
+            override fun onReceivedIcon(view: WebView?, icon: Bitmap?) {
+                val pageUrl = view?.url ?: return
+                if (icon != null && providerUrlMatches(service, pageUrl)) {
+                    onFaviconChanged(icon)
+                }
+            }
+
             override fun onShowFileChooser(
                 webView: WebView?,
                 filePathCallback: ValueCallback<Array<Uri>>?,
@@ -925,8 +972,11 @@ private fun createConfiguredWebView(
 
         webViewClient = object : WebViewClient() {
             override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
-                url?.let {
-                    onUrlChanged(it)
+                url?.let { pageUrl ->
+                    onUrlChanged(pageUrl)
+                    if (favicon != null && providerUrlMatches(service, pageUrl)) {
+                        onFaviconChanged(favicon)
+                    }
                 }
                 onNavStateChanged(view?.canGoBack() ?: false, view?.canGoForward() ?: false)
             }
