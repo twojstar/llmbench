@@ -32,7 +32,8 @@ internal class ApiKeyStore(context: Context) {
             claudeKey = json.optString("claude"),
             deepseekKey = json.optString("deepseek"),
             kimiKey = json.optString("kimi"),
-            openRouterKey = json.optString("openrouter")
+            openRouterKey = json.optString("openrouter"),
+            aiHubMixKey = json.optString("aihubmix")
         )
     }.getOrDefault(ApiKeyConfig())
 
@@ -44,6 +45,7 @@ internal class ApiKeyStore(context: Context) {
             .put("deepseek", config.deepseekKey)
             .put("kimi", config.kimiKey)
             .put("openrouter", config.openRouterKey)
+            .put("aihubmix", config.aiHubMixKey)
             .toString()
         val cipher = Cipher.getInstance(TRANSFORMATION)
         cipher.init(Cipher.ENCRYPT_MODE, getOrCreateKey())

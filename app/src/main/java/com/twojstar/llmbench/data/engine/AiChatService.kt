@@ -33,6 +33,9 @@ class AiChatService {
                 "HTTP-Referer" to "https://github.com/twojstar/llmbench",
                 "X-Title" to "LlmBench"
             )
+        ),
+        AiProvider.AIHUBMIX to OpenAiCompatibleProviderConfig(
+            endpointUrl = "https://aihubmix.com/v1/chat/completions"
         )
     )
 
@@ -66,6 +69,7 @@ class AiChatService {
             AiProvider.DEEPSEEK -> Pair(apiKeys.deepseekKey.trim(), apiKeys.deepseekKey.isNotBlank())
             AiProvider.KIMI -> Pair(apiKeys.kimiKey.trim(), apiKeys.kimiKey.isNotBlank())
             AiProvider.OPENROUTER -> Pair(apiKeys.openRouterKey.trim(), apiKeys.openRouterKey.isNotBlank())
+            AiProvider.AIHUBMIX -> Pair(apiKeys.aiHubMixKey.trim(), apiKeys.aiHubMixKey.isNotBlank())
             AiProvider.ALL -> Pair("", false)
         }
 
@@ -76,7 +80,7 @@ class AiChatService {
                     AiProvider.GEMINI -> callGeminiApi(prompt, effectiveModel, key, systemInstruction)
                     AiProvider.CHATGPT -> callOpenAiApi(prompt, effectiveModel, key, systemInstruction)
                     AiProvider.CLAUDE -> callClaudeApi(prompt, effectiveModel, key, systemInstruction)
-                    AiProvider.DEEPSEEK, AiProvider.KIMI, AiProvider.OPENROUTER -> {
+                    AiProvider.DEEPSEEK, AiProvider.KIMI, AiProvider.OPENROUTER, AiProvider.AIHUBMIX -> {
                         val config = checkNotNull(openAiCompatibleProviders[provider])
                         callOpenAiCompatibleApi(
                             config = config,
@@ -652,6 +656,10 @@ class AiChatService {
 
             AiProvider.OPENROUTER -> {
                 "**OpenRouter ($model)**: Free-router simulation for '$prompt'. Add an OpenRouter key to send this through the live `openrouter/free` gateway while keeping it outside the default multi-provider compare."
+            }
+
+            AiProvider.AIHUBMIX -> {
+                "**AIHubMix ($model)**: Free-gateway simulation for '$prompt'. Add an AIHubMix key to use a live subsidized `-free` model while keeping gateway traffic outside the default multi-provider compare."
             }
 
             AiProvider.ALL -> "Multi-provider dispatch."

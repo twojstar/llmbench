@@ -172,6 +172,19 @@ enum class AiProvider(
         availableModels = listOf("openrouter/free"),
         description = "OpenRouter gateway that routes requests across currently available free models",
         participatesInDefaultCompare = false
+    ),
+    AIHUBMIX(
+        id = "aihubmix",
+        displayName = "AIHubMix Free",
+        shortName = "AIHubMix",
+        defaultModel = "hy3-free",
+        availableModels = listOf(
+            "hy3-free",
+            "coding-glm-5.3-free",
+            "coding-glm-5.2-free"
+        ),
+        description = "AIHubMix gateway for subsidized zero-cost model variants",
+        participatesInDefaultCompare = false
     );
 
     companion object {
@@ -192,7 +205,8 @@ data class ApiKeyConfig(
     val claudeKey: String = "",
     val deepseekKey: String = "",
     val kimiKey: String = "",
-    val openRouterKey: String = ""
+    val openRouterKey: String = "",
+    val aiHubMixKey: String = ""
 )
 
 @Serializable
