@@ -12,6 +12,7 @@ internal data class ProviderWebTweak(
 
 internal object ProviderWebTweakRegistry {
     private const val STOP_BUTTON_TEST_ID_SELECTOR = "[data-testid=\"stop-button\"]"
+    private const val VIBE_STOP_ICON_SELECTOR = "button[type=\"submit\"] svg rect"
 
     private val mobileBaseline = ProviderWebTweak(
         id = "mobile-baseline",
@@ -55,9 +56,11 @@ internal object ProviderWebTweakRegistry {
         WebAiService.KIMI to listOf(
             "div.send-button-container.stop"
         ),
-        // Vibe currently exposes only localized stop labels. Prefer no badge over a false
-        // locale-dependent signal until a stable provider-owned state hook is verified.
-        WebAiService.VIBE to emptyList()
+        // Vibe documents its running-task control as a black square. The composer keeps a
+        // submit button while its SVG switches to a rect-based stop icon, avoiding localized labels.
+        WebAiService.VIBE to listOf(
+            VIBE_STOP_ICON_SELECTOR
+        )
     )
 
     fun ownedHosts(service: WebAiService): Set<String> = buildSet {

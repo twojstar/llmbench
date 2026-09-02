@@ -8,8 +8,7 @@ import org.junit.Test
 class ProviderWebActivityTest {
     @Test
     fun everyProviderWithVerifiedStableMarkupHasAnAuditableGenerationProbe() {
-        val supportedProviders = WebAiService.entries.filterNot { it == WebAiService.VIBE }
-        supportedProviders.forEach { service ->
+        WebAiService.entries.forEach { service ->
             assertTrue(
                 "Missing generation probe for ${service.id}",
                 ProviderWebTweakRegistry.generationSelectors(service).isNotEmpty()
@@ -56,7 +55,10 @@ class ProviderWebActivityTest {
     }
 
     @Test
-    fun vibeDoesNotClaimLocaleDependentActivitySupport() {
-        assertTrue(ProviderWebTweakRegistry.generationSelectors(WebAiService.VIBE).isEmpty())
+    fun vibeUsesLocaleIndependentSubmitStopIcon() {
+        val selector = ProviderWebTweakRegistry.generationSelectors(WebAiService.VIBE).single()
+        assertTrue(selector.contains("button[type=\"submit\"]"))
+        assertTrue(selector.endsWith("svg rect"))
+        assertFalse(selector.contains("aria-label"))
     }
 }
