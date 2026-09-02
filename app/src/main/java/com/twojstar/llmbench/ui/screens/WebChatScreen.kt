@@ -960,19 +960,17 @@ private fun applyUserAgent(webView: WebView, isDesktop: Boolean) {
 }
 
 /** Delegates an explicitly allowed external URI to a browsable system handler. */
-private fun openExternalUri(context: Context, uri: Uri): Boolean = try {
+private fun openExternalUri(context: Context, uri: Uri): Boolean {
     val intent = Intent(Intent.ACTION_VIEW, uri).apply {
         addCategory(Intent.CATEGORY_BROWSABLE)
     }
-    context.startActivity(intent)
-    true
-} catch (error: RuntimeException) {
+    val error = runCatching { context.startActivity(intent) }.exceptionOrNull() ?: return true
     when (error) {
         is ActivityNotFoundException -> Log.w(WEBVIEW_LOG_TAG, "External URI handler unavailable", error)
         is SecurityException -> Log.w(WEBVIEW_LOG_TAG, "External URI launch rejected", error)
         else -> throw error
     }
-    false
+    return false
 }
 
 /** Launches a user-confirmed intent URI or falls back to validated HTTPS. */
