@@ -70,6 +70,23 @@ enum class WebAiService(
 }
 
 @Serializable
+enum class BrowserAiPlatform(
+    val id: String,
+    val displayName: String,
+    val shortName: String,
+    val url: String,
+    val description: String
+) {
+    GEMINI_AI_STUDIO(
+        id = "gemini-ai-studio",
+        displayName = "Gemini AI Studio",
+        shortName = "AI Studio",
+        url = "https://aistudio.google.com",
+        description = "Google AI Studio browser platform for model playgrounds, builds, and API tooling"
+    )
+}
+
+@Serializable
 enum class AiProvider(
     val id: String,
     val displayName: String,
