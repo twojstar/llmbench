@@ -259,98 +259,12 @@ fun WebChatScreen(
                         .fillMaxWidth()
                         .statusBarsPadding()
                 ) {
-                    // Top Bar: AI Provider Web Tabs
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .horizontalScroll(rememberScrollState())
-                            .padding(horizontal = 12.dp, vertical = 6.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        WebAiService.entries.forEach { service ->
-                            val isSelected = selectedService == service
-                            val brandColor = Color(service.brandHexColor)
-                            val activityStatus = activityStatuses[service] ?: WebChatActivityStatus.IDLE
-
-                            Surface(
-                                shape = RoundedCornerShape(20.dp),
-                                color = if (isSelected) brandColor.copy(alpha = 0.18f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
-                                border = if (isSelected) BorderStroke(1.5.dp, brandColor) else BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.15f)),
-                                modifier = Modifier
-                                    .clickable { activateService(service) }
-                                    .semantics {
-                                        when (activityStatus) {
-                                            WebChatActivityStatus.GENERATING ->
-                                                stateDescription = "Generating response"
-                                            WebChatActivityStatus.UNREAD ->
-                                                stateDescription = "Unread response"
-                                            WebChatActivityStatus.IDLE -> Unit
-                                        }
-                                    }
-                                    .testTag("tab_web_service_${service.id}")
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = getWebServiceIcon(service),
-                                        contentDescription = null,
-                                        tint = if (isSelected) brandColor else MaterialTheme.colorScheme.onSurfaceVariant,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                    Text(
-                                        text = service.shortName,
-                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                        fontSize = 12.sp,
-                                        color = if (isSelected) brandColor else MaterialTheme.colorScheme.onSurface
-                                    )
-                                    when (activityStatus) {
-                                        WebChatActivityStatus.GENERATING -> CircularProgressIndicator(
-                                            modifier = Modifier
-                                                .size(10.dp)
-                                                .testTag("status_web_service_${service.id}_generating"),
-                                            strokeWidth = 1.5.dp,
-                                            color = brandColor
-                                        )
-                                        WebChatActivityStatus.UNREAD -> Box(
-                                            modifier = Modifier
-                                                .size(8.dp)
-                                                .background(brandColor, CircleShape)
-                                                .testTag("status_web_service_${service.id}_unread")
-                                        )
-                                        WebChatActivityStatus.IDLE -> Unit
-                                    }
-                                }
-                            }
-                        }
-
-                        // Native Hub Switch button
-                        OutlinedButton(
-                            onClick = onOpenNativeCompare,
-                            shape = RoundedCornerShape(20.dp),
-                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                            modifier = Modifier
-                                .height(34.dp)
-                                .testTag("btn_switch_to_native_hub")
-                        ) {
-                            Icon(
-                                Icons.Default.CompareArrows,
-                                contentDescription = null,
-                                modifier = Modifier.size(14.dp),
-                                tint = AccentCyan
-                            )
-                            Spacer(Modifier.width(4.dp))
-                            Text(
-                                "Compare Hub",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = AccentCyan
-                            )
-                        }
-                    }
+                    WebProviderTabs(
+                        selectedService = selectedService,
+                        activityStatuses = activityStatuses,
+                        onSelectService = ::activateService,
+                        onOpenNativeCompare = onOpenNativeCompare
+                    )
 
                     // Navigation Bar (Back, Forward, Reload, URL & Helpers)
                     Row(
@@ -686,6 +600,113 @@ fun WebChatScreen(
                 }
             }
         )
+    }
+}
+
+@Composable
+private fun WebProviderTabs(
+    selectedService: WebAiService,
+    activityStatuses: Map<WebAiService, WebChatActivityStatus>,
+    onSelectService: (WebAiService) -> Unit,
+    onOpenNativeCompare: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState())
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        WebAiService.entries.forEach { service ->
+            val isSelected = selectedService == service
+            val brandColor = Color(service.brandHexColor)
+            val activityStatus = activityStatuses[service] ?: WebChatActivityStatus.IDLE
+
+            Surface(
+                shape = RoundedCornerShape(20.dp),
+                color = if (isSelected) {
+                    brandColor.copy(alpha = 0.18f)
+                } else {
+                    MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+                },
+                border = if (isSelected) {
+                    BorderStroke(1.5.dp, brandColor)
+                } else {
+                    BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.15f))
+                },
+                modifier = Modifier
+                    .clickable { onSelectService(service) }
+                    .semantics {
+                        when (activityStatus) {
+                            WebChatActivityStatus.GENERATING ->
+                                stateDescription = "Generating response"
+                            WebChatActivityStatus.UNREAD ->
+                                stateDescription = "Unread response"
+                            WebChatActivityStatus.IDLE -> Unit
+                        }
+                    }
+                    .testTag("tab_web_service_${service.id}")
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp)
+                ) {
+                    Icon(
+                        imageVector = getWebServiceIcon(service),
+                        contentDescription = null,
+                        tint = if (isSelected) brandColor else MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Text(
+                        text = service.shortName,
+                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                        fontSize = 12.sp,
+                        color = if (isSelected) brandColor else MaterialTheme.colorScheme.onSurface
+                    )
+                    when (activityStatus) {
+                        WebChatActivityStatus.GENERATING -> CircularProgressIndicator(
+                            modifier = Modifier
+                                .size(10.dp)
+                                .testTag("status_web_service_${service.id}_generating"),
+                            strokeWidth = 1.5.dp,
+                            color = brandColor
+                        )
+                        WebChatActivityStatus.UNREAD -> Box(
+                            modifier = Modifier
+                                .size(8.dp)
+                                .background(brandColor, CircleShape)
+                                .testTag("status_web_service_${service.id}_unread")
+                        )
+                        WebChatActivityStatus.IDLE -> Unit
+                    }
+                }
+            }
+        }
+
+        OutlinedButton(
+            onClick = onOpenNativeCompare,
+            shape = RoundedCornerShape(20.dp),
+            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+            modifier = Modifier
+                .height(34.dp)
+                .testTag("btn_switch_to_native_hub")
+        ) {
+            Icon(
+                Icons.Default.CompareArrows,
+                contentDescription = null,
+                modifier = Modifier.size(14.dp),
+                tint = AccentCyan
+            )
+            Spacer(Modifier.width(4.dp))
+            Text(
+                "Compare Hub",
+                fontSize = 11.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = AccentCyan
+            )
+        }
     }
 }
 
