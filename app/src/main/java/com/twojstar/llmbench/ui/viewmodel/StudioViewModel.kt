@@ -1,6 +1,7 @@
 package com.twojstar.llmbench.ui.viewmodel
 
-import androidx.lifecycle.ViewModel
+import android.app.Application
+import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.twojstar.llmbench.data.engine.AiChatService
 import com.twojstar.llmbench.data.engine.InstructionRenderer
@@ -8,6 +9,7 @@ import com.twojstar.llmbench.data.engine.ProfileMerger
 import com.twojstar.llmbench.data.engine.ValidationResult
 import com.twojstar.llmbench.data.engine.YamlParser
 import com.twojstar.llmbench.data.model.*
+import com.twojstar.llmbench.data.security.ApiKeyStore
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.flow.*
@@ -62,14 +64,16 @@ enum class NavigationTab {
     }
 }
 
-class StudioViewModel : ViewModel() {
+class StudioViewModel(application: Application) : AndroidViewModel(application) {
 
     private val aiChatService = AiChatService()
+    private val apiKeyStore = ApiKeyStore(application.applicationContext)
 
     private val _uiState = MutableStateFlow(StudioUiState())
     val uiState: StateFlow<StudioUiState> = _uiState.asStateFlow()
 
     init {
+        _uiState.update { it.copy(apiKeyConfig = apiKeyStore.load()) }
         recompute()
         initPlaygroundWelcome()
         initChatWelcome()
@@ -143,20 +147,22 @@ class StudioViewModel : ViewModel() {
         kimiKey: String = "",
         openRouterKey: String = ""
     ) {
+        val config = ApiKeyConfig(
+            geminiKey = geminiKey.trim(),
+            openAiKey = openAiKey.trim(),
+            claudeKey = claudeKey.trim(),
+            deepseekKey = deepseekKey.trim(),
+            kimiKey = kimiKey.trim(),
+            openRouterKey = openRouterKey.trim()
+        )
+        val stored = apiKeyStore.save(config)
         _uiState.update {
             it.copy(
-                apiKeyConfig = ApiKeyConfig(
-                    geminiKey = geminiKey.trim(),
-                    openAiKey = openAiKey.trim(),
-                    claudeKey = claudeKey.trim(),
-                    deepseekKey = deepseekKey.trim(),
-                    kimiKey = kimiKey.trim(),
-                    openRouterKey = openRouterKey.trim()
-                ),
+                apiKeyConfig = config,
                 showApiKeyDialog = false
             )
         }
-        showSnackbar("API Keys updated successfully.")
+        showSnackbar(if (stored) "API keys stored securely on device." else "API keys updated for this session only.")
     }
 
     fun clearChatHistory() {

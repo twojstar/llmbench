@@ -35,6 +35,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -723,6 +724,7 @@ fun ApiKeySettingsDialog(
                     label = { Text("Google Gemini API Key") },
                     placeholder = { Text("AIzaSy...") },
                     singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
                     leadingIcon = {
                         Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = AccentCyan)
                     },
@@ -737,6 +739,7 @@ fun ApiKeySettingsDialog(
                     label = { Text("OpenAI API Key (ChatGPT)") },
                     placeholder = { Text("sk-...") },
                     singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
                     leadingIcon = {
                         Icon(Icons.Default.SmartToy, contentDescription = null, tint = AccentEmerald)
                     },
@@ -751,6 +754,7 @@ fun ApiKeySettingsDialog(
                     label = { Text("Anthropic Claude API Key") },
                     placeholder = { Text("sk-ant-...") },
                     singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
                     leadingIcon = {
                         Icon(Icons.Default.Flare, contentDescription = null, tint = AccentAmber)
                     },
@@ -765,6 +769,7 @@ fun ApiKeySettingsDialog(
                     label = { Text("DeepSeek API Key") },
                     placeholder = { Text("sk-...") },
                     singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
                     leadingIcon = {
                         Icon(Icons.Default.Psychology, contentDescription = null, tint = Color(0xFF2563EB))
                     },
@@ -779,6 +784,7 @@ fun ApiKeySettingsDialog(
                     label = { Text("Moonshot Kimi API Key") },
                     placeholder = { Text("sk-...") },
                     singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
                     leadingIcon = {
                         Icon(Icons.Default.ElectricBolt, contentDescription = null, tint = Color(0xFF8B5CF6))
                     },
@@ -793,6 +799,7 @@ fun ApiKeySettingsDialog(
                     label = { Text("OpenRouter API Key") },
                     placeholder = { Text("sk-or-v1-...") },
                     singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
                     leadingIcon = {
                         Icon(Icons.Default.Route, contentDescription = null, tint = Color(0xFF6366F1))
                     },
