@@ -109,7 +109,7 @@ fun WebChatScreen(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    val selectedService = uiState.selectedWebService
+    val selectedService by rememberUpdatedState(uiState.selectedWebService)
     var isDesktopMode by remember { mutableStateOf(false) }
     var currentUrl by remember { mutableStateOf(selectedService.url) }
     var loadingProgress by remember { mutableIntStateOf(0) }
@@ -199,8 +199,8 @@ fun WebChatScreen(
         currentUrl = nextWebView?.url ?: lastKnownUrls[service] ?: service.url
         canGoBack = nextWebView?.canGoBack() ?: false
         canGoForward = nextWebView?.canGoForward() ?: false
-        loadingProgress = 0
-        isLoading = false
+        loadingProgress = nextWebView?.progress ?: 0
+        isLoading = nextWebView?.let { it.progress < 100 } ?: false
         persistWebProviderSelection(viewModel, service)
         activityStatuses[service]?.let { status ->
             activityStatuses[service] = markWebChatActivityRead(status)
