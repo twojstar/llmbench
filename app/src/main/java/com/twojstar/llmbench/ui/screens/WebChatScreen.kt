@@ -72,6 +72,10 @@ import kotlinx.coroutines.launch
 private const val WEBVIEW_LOG_TAG = "LlmBenchWeb"
 private const val MAX_LIVE_WEBVIEWS = 2
 
+internal fun persistWebProviderSelection(viewModel: StudioViewModel, service: WebAiService) {
+    viewModel.selectWebService(service)
+}
+
 internal fun shouldApplyWebChatObservation(
     observation: WebChatGenerationObservation,
     isLiveService: Boolean,
@@ -108,7 +112,6 @@ fun WebChatScreen(
     val selectedService = uiState.selectedWebService
     var isDesktopMode by remember { mutableStateOf(false) }
     var currentUrl by remember { mutableStateOf(selectedService.url) }
-    var pageTitle by remember { mutableStateOf(selectedService.displayName) }
     var loadingProgress by remember { mutableIntStateOf(0) }
     var isLoading by remember { mutableStateOf(false) }
     var canGoBack by remember { mutableStateOf(false) }
@@ -192,7 +195,13 @@ fun WebChatScreen(
                 setProviderGenerationTrackerSelected(webView, service, isSelected = true)
             }
         }
-        viewModel.selectWebService(service)
+        val nextWebView = webViewMap[service]
+        currentUrl = nextWebView?.url ?: lastKnownUrls[service] ?: service.url
+        canGoBack = nextWebView?.canGoBack() ?: false
+        canGoForward = nextWebView?.canGoForward() ?: false
+        loadingProgress = 0
+        isLoading = false
+        persistWebProviderSelection(viewModel, service)
         activityStatuses[service]?.let { status ->
             activityStatuses[service] = markWebChatActivityRead(status)
         }
@@ -335,11 +344,7 @@ fun WebChatScreen(
                                         currentUrl = url
                                     }
                                 },
-                                onTitleChanged = { title ->
-                                    if (selectedService == service) {
-                                        pageTitle = title
-                                    }
-                                },
+                                onTitleChanged = {},
                                 onFaviconChanged = { favicon ->
                                     providerFavicons[service] = favicon
                                 },
@@ -393,7 +398,6 @@ fun WebChatScreen(
                                 canGoBack = wv.canGoBack()
                                 canGoForward = wv.canGoForward()
                                 wv.url?.let { currentUrl = it }
-                                wv.title?.let { pageTitle = it }
                             }
                         },
                         onRelease = { wv ->
