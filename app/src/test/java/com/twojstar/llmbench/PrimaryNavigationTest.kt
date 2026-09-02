@@ -25,6 +25,13 @@ class PrimaryNavigationTest {
     }
 
     @Test
+    fun webChatUsesImmersiveNavigationShell() {
+        assertFalse(showPrimaryBottomNavigation(NavigationTab.WEB_CHATS))
+        assertTrue(showPrimaryBottomNavigation(NavigationTab.COMPARE_HUB))
+        assertTrue(showPrimaryBottomNavigation(NavigationTab.STUDIO))
+    }
+
+    @Test
     fun renderedPromptTestChatOpensProfilePlayground() {
         assertEquals(NavigationTab.PLAYGROUND, profilePlaygroundDestination())
     }

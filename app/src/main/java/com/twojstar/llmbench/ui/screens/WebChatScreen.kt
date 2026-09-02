@@ -102,6 +102,7 @@ fun WebChatScreen(
     viewModel: StudioViewModel,
     uiState: StudioUiState,
     onOpenNativeCompare: () -> Unit,
+    onOpenStudio: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -277,6 +278,12 @@ fun WebChatScreen(
                     drawerScope.launch {
                         drawerState.close()
                         onOpenNativeCompare()
+                    }
+                },
+                onOpenStudio = {
+                    drawerScope.launch {
+                        drawerState.close()
+                        onOpenStudio()
                     }
                 }
             )
@@ -695,7 +702,8 @@ private fun WebProviderDrawer(
     activityStatuses: Map<WebAiService, WebChatActivityStatus>,
     providerFavicons: Map<WebAiService, Bitmap>,
     onSelectService: (WebAiService) -> Unit,
-    onOpenNativeCompare: () -> Unit
+    onOpenNativeCompare: () -> Unit,
+    onOpenStudio: () -> Unit
 ) {
     ModalDrawerSheet(modifier = Modifier.width(292.dp)) {
         Column(
@@ -735,6 +743,17 @@ private fun WebProviderDrawer(
                 modifier = Modifier
                     .padding(horizontal = 12.dp)
                     .testTag("btn_switch_to_native_hub")
+            )
+            NavigationDrawerItem(
+                label = { Text("Studio") },
+                selected = false,
+                onClick = onOpenStudio,
+                icon = {
+                    Icon(Icons.Default.Tune, contentDescription = null)
+                },
+                modifier = Modifier
+                    .padding(horizontal = 12.dp)
+                    .testTag("btn_switch_to_studio")
             )
         }
     }
