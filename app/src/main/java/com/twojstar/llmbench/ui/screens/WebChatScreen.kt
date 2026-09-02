@@ -96,6 +96,18 @@ internal fun nextObservedWebChatActivityStatus(
     return if (isLiveService) nextStatus else webChatActivityStatusAfterEviction(nextStatus)
 }
 
+internal fun shouldApplyPendingDesktopMode(
+    observation: WebChatGenerationObservation,
+    trackingSupported: Boolean,
+    isStableOffProviderPage: Boolean
+): Boolean = when {
+    observation == WebChatGenerationObservation.GENERATING -> false
+    observation != WebChatGenerationObservation.UNKNOWN -> true
+    !trackingSupported -> true
+    isStableOffProviderPage -> true
+    else -> false
+}
+
 /** Hosts account-backed AI services with mobile-first WebView controls. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -159,11 +171,17 @@ fun WebChatScreen(
     ) {
         if (service != selectedService) return
         val nextDesktopMode = pendingDesktopModes[service] ?: return
-        if (observation == WebChatGenerationObservation.GENERATING) return
-        if (observation == WebChatGenerationObservation.UNKNOWN &&
-            providerGenerationTrackingSupported(service)
-        ) return
         val webView = webViewMap[service] ?: return
+        val pageUrl = webView.url
+        val isStableOffProviderPage = pageUrl != null &&
+            !providerUrlMatches(service, pageUrl) &&
+            webView.progress >= 100
+        if (!shouldApplyPendingDesktopMode(
+                observation = observation,
+                trackingSupported = providerGenerationTrackingSupported(service),
+                isStableOffProviderPage = isStableOffProviderPage
+            )
+        ) return
         pendingDesktopModes.remove(service)
         desktopModes[service] = nextDesktopMode
         applyUserAgent(webView, nextDesktopMode)
@@ -349,11 +367,13 @@ fun WebChatScreen(
                 ) {
                     AndroidView(
                         factory = { ctx ->
+                            val pendingDesktopMode = pendingDesktopModes[service]
+                            val initialDesktopMode = pendingDesktopMode ?: (desktopModes[service] == true)
                             createConfiguredWebView(
                                 context = ctx,
                                 service = service,
                                 initialUrl = lastKnownUrls[service] ?: service.url,
-                                isDesktop = desktopModes[service] == true,
+                                isDesktop = initialDesktopMode,
                                 isServiceSelected = { selectedService == service },
                                 onUrlChanged = { url ->
                                     lastKnownUrls[service] = url
@@ -402,7 +422,12 @@ fun WebChatScreen(
                                 }
                             ).also { wv ->
                                 webViewMap[service] = wv
-                                pendingDesktopModes.remove(service)
+                                if (pendingDesktopMode != null &&
+                                    pendingDesktopModes[service] == pendingDesktopMode
+                                ) {
+                                    desktopModes[service] = pendingDesktopMode
+                                    pendingDesktopModes.remove(service)
+                                }
                             }
                         },
                         update = { wv ->

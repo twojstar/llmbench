@@ -88,4 +88,37 @@ class WebChatObservationAcceptanceTest {
             )
         )
     }
+
+    @Test
+    fun stableExternalPageCanApplyPendingDisplayMode() {
+        assertTrue(
+            shouldApplyPendingDesktopMode(
+                observation = WebChatGenerationObservation.UNKNOWN,
+                trackingSupported = true,
+                isStableOffProviderPage = true
+            )
+        )
+    }
+
+    @Test
+    fun unknownProviderPageKeepsPendingDisplayModeDeferred() {
+        assertFalse(
+            shouldApplyPendingDesktopMode(
+                observation = WebChatGenerationObservation.UNKNOWN,
+                trackingSupported = true,
+                isStableOffProviderPage = false
+            )
+        )
+    }
+
+    @Test
+    fun generatingPageAlwaysKeepsPendingDisplayModeDeferred() {
+        assertFalse(
+            shouldApplyPendingDesktopMode(
+                observation = WebChatGenerationObservation.GENERATING,
+                trackingSupported = false,
+                isStableOffProviderPage = true
+            )
+        )
+    }
 }
