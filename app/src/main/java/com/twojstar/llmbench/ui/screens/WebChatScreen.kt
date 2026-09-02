@@ -232,7 +232,7 @@ fun WebChatScreen(
 
     val activeWebView = webViewMap[selectedService]
 
-    BackHandler(enabled = canGoBack) {
+    BackHandler(enabled = canGoBack && drawerState.currentValue == DrawerValue.Closed) {
         activeWebView?.let {
             if (it.canGoBack()) {
                 it.goBack()
@@ -240,50 +240,52 @@ fun WebChatScreen(
         }
     }
 
-    Scaffold(
-        topBar = {
-            WebChatToolbar(
-                activeWebView = activeWebView,
+    ModalNavigationDrawer(
+        drawerState = drawerState,
+        gesturesEnabled = false,
+        drawerContent = {
+            WebProviderDrawer(
                 selectedService = selectedService,
-                activityStatus = activityStatuses[selectedService] ?: WebChatActivityStatus.IDLE,
-                currentUrl = currentUrl,
-                canGoBack = canGoBack,
-                canGoForward = canGoForward,
-                isDesktopMode = isDesktopMode,
-                isLoading = isLoading,
-                loadingProgress = loadingProgress,
-                onOpenDrawer = { drawerScope.launch { drawerState.open() } },
-                onShowPromptHelper = { showPromptHelperDialog = true },
-                onDesktopModeChanged = { isDesktopMode = it },
-                onShowSnackbar = viewModel::showSnackbar
+                activityStatuses = activityStatuses,
+                onSelectService = { service ->
+                    activateService(service)
+                    drawerScope.launch { drawerState.close() }
+                },
+                onOpenNativeCompare = {
+                    drawerScope.launch {
+                        drawerState.close()
+                        onOpenNativeCompare()
+                    }
+                }
             )
         },
         modifier = modifier.fillMaxSize()
-    ) { innerPadding ->
-        ModalNavigationDrawer(
-            drawerState = drawerState,
-            gesturesEnabled = false,
-            drawerContent = {
-                WebProviderDrawer(
+    ) {
+        Scaffold(
+            topBar = {
+                WebChatToolbar(
+                    activeWebView = activeWebView,
                     selectedService = selectedService,
-                    activityStatuses = activityStatuses,
-                    onSelectService = { service ->
-                        activateService(service)
-                        drawerScope.launch { drawerState.close() }
-                    },
-                    onOpenNativeCompare = {
-                        drawerScope.launch {
-                            drawerState.close()
-                            onOpenNativeCompare()
-                        }
-                    }
+                    activityStatus = activityStatuses[selectedService] ?: WebChatActivityStatus.IDLE,
+                    currentUrl = currentUrl,
+                    canGoBack = canGoBack,
+                    canGoForward = canGoForward,
+                    isDesktopMode = isDesktopMode,
+                    isLoading = isLoading,
+                    loadingProgress = loadingProgress,
+                    onOpenDrawer = { drawerScope.launch { drawerState.open() } },
+                    onShowPromptHelper = { showPromptHelperDialog = true },
+                    onDesktopModeChanged = { isDesktopMode = it },
+                    onShowSnackbar = viewModel::showSnackbar
                 )
             },
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-        ) {
-            Box(modifier = Modifier.fillMaxSize()) {
+            modifier = Modifier.fillMaxSize()
+        ) { innerPadding ->
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding)
+            ) {
             // Keep only a tiny MRU set of provider WebViews alive. Cookies and storage remain provider-owned.
             liveServices.forEach { service ->
                 key(service) {
