@@ -266,154 +266,17 @@ fun WebChatScreen(
                         onOpenNativeCompare = onOpenNativeCompare
                     )
 
-                    // Navigation Bar (Back, Forward, Reload, URL & Helpers)
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 12.dp, vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        IconButton(
-                            onClick = { activeWebView?.goBack() },
-                            enabled = canGoBack,
-                            modifier = Modifier.size(32.dp).testTag("btn_web_back")
-                        ) {
-                            Icon(
-                                Icons.AutoMirrored.Filled.ArrowBack,
-                                contentDescription = "Back",
-                                modifier = Modifier.size(18.dp),
-                                tint = if (canGoBack) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f)
-                            )
-                        }
-
-                        IconButton(
-                            onClick = { activeWebView?.goForward() },
-                            enabled = canGoForward,
-                            modifier = Modifier.size(32.dp).testTag("btn_web_forward")
-                        ) {
-                            Icon(
-                                Icons.AutoMirrored.Filled.ArrowForward,
-                                contentDescription = "Forward",
-                                modifier = Modifier.size(18.dp),
-                                tint = if (canGoForward) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f)
-                            )
-                        }
-
-                        IconButton(
-                            onClick = { activeWebView?.reload() },
-                            modifier = Modifier.size(32.dp).testTag("btn_web_reload")
-                        ) {
-                            Icon(
-                                Icons.Default.Refresh,
-                                contentDescription = "Reload",
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
-
-                        IconButton(
-                            onClick = {
-                                activeWebView?.loadUrl(selectedService.url)
-                            },
-                            modifier = Modifier.size(32.dp).testTag("btn_web_home")
-                        ) {
-                            Icon(
-                                Icons.Default.Home,
-                                contentDescription = "Home",
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
-
-                        // URL Pill
-                        Surface(
-                            shape = RoundedCornerShape(12.dp),
-                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(32.dp)
-                                .clickable {
-                                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                    clipboard.setPrimaryClip(ClipData.newPlainText("URL", currentUrl))
-                                    viewModel.showSnackbar("Copied address: $currentUrl")
-                                }
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.padding(horizontal = 8.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Lock,
-                                    contentDescription = "Secure Connection",
-                                    tint = AccentEmerald,
-                                    modifier = Modifier.size(12.dp)
-                                )
-                                Spacer(Modifier.width(4.dp))
-                                Text(
-                                    text = currentUrl.removePrefix("https://").removePrefix("http://"),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    fontSize = 11.sp,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                        }
-
-                        // Studio Prompt Injection / Copy helper
-                        IconButton(
-                            onClick = { showPromptHelperDialog = true },
-                            modifier = Modifier.size(32.dp).testTag("btn_prompt_quick_copy")
-                        ) {
-                            Icon(
-                                Icons.Default.ContentPaste,
-                                contentDescription = "Copy Prompt / Profile",
-                                tint = AccentCyan,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
-
-                        // Desktop mode toggle
-                        IconButton(
-                            onClick = {
-                                isDesktopMode = !isDesktopMode
-                                activeWebView?.let { wv ->
-                                    applyUserAgent(wv, isDesktopMode)
-                                    wv.reload()
-                                }
-                            },
-                            modifier = Modifier.size(32.dp).testTag("btn_toggle_desktop_mode")
-                        ) {
-                            Icon(
-                                imageVector = if (isDesktopMode) Icons.Default.Laptop else Icons.Default.Smartphone,
-                                contentDescription = "Toggle Desktop/Mobile",
-                                tint = if (isDesktopMode) AccentEmerald else MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
-
-                        // Open in external browser
-                        IconButton(
-                            onClick = {
-                                try {
-                                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(currentUrl))
-                                    context.startActivity(intent)
-                                } catch (error: ActivityNotFoundException) {
-                                    Log.w(WEBVIEW_LOG_TAG, "External browser handler unavailable", error)
-                                    viewModel.showSnackbar("Could not launch external browser")
-                                } catch (error: SecurityException) {
-                                    Log.w(WEBVIEW_LOG_TAG, "External browser launch rejected", error)
-                                    viewModel.showSnackbar("Could not launch external browser")
-                                }
-                            },
-                            modifier = Modifier.size(32.dp).testTag("btn_open_external")
-                        ) {
-                            Icon(
-                                Icons.Default.OpenInNew,
-                                contentDescription = "Open in Chrome/Browser",
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
-                    }
+                    WebNavigationBar(
+                        activeWebView = activeWebView,
+                        selectedService = selectedService,
+                        currentUrl = currentUrl,
+                        canGoBack = canGoBack,
+                        canGoForward = canGoForward,
+                        isDesktopMode = isDesktopMode,
+                        onShowPromptHelper = { showPromptHelperDialog = true },
+                        onDesktopModeChanged = { isDesktopMode = it },
+                        onShowSnackbar = viewModel::showSnackbar
+                    )
 
                     // Progress Bar
                     if (isLoading) {
@@ -600,6 +463,162 @@ fun WebChatScreen(
                 }
             }
         )
+    }
+}
+
+@Composable
+private fun WebNavigationBar(
+    activeWebView: WebView?,
+    selectedService: WebAiService,
+    currentUrl: String,
+    canGoBack: Boolean,
+    canGoForward: Boolean,
+    isDesktopMode: Boolean,
+    onShowPromptHelper: () -> Unit,
+    onDesktopModeChanged: (Boolean) -> Unit,
+    onShowSnackbar: (String) -> Unit
+) {
+    val context = LocalContext.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        IconButton(
+            onClick = { activeWebView?.goBack() },
+            enabled = canGoBack,
+            modifier = Modifier.size(32.dp).testTag("btn_web_back")
+        ) {
+            Icon(
+                Icons.AutoMirrored.Filled.ArrowBack,
+                contentDescription = "Back",
+                modifier = Modifier.size(18.dp),
+                tint = if (canGoBack) {
+                    MaterialTheme.colorScheme.onSurface
+                } else {
+                    MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f)
+                }
+            )
+        }
+
+        IconButton(
+            onClick = { activeWebView?.goForward() },
+            enabled = canGoForward,
+            modifier = Modifier.size(32.dp).testTag("btn_web_forward")
+        ) {
+            Icon(
+                Icons.AutoMirrored.Filled.ArrowForward,
+                contentDescription = "Forward",
+                modifier = Modifier.size(18.dp),
+                tint = if (canGoForward) {
+                    MaterialTheme.colorScheme.onSurface
+                } else {
+                    MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f)
+                }
+            )
+        }
+
+        IconButton(
+            onClick = { activeWebView?.reload() },
+            modifier = Modifier.size(32.dp).testTag("btn_web_reload")
+        ) {
+            Icon(Icons.Default.Refresh, contentDescription = "Reload", modifier = Modifier.size(18.dp))
+        }
+
+        IconButton(
+            onClick = { activeWebView?.loadUrl(selectedService.url) },
+            modifier = Modifier.size(32.dp).testTag("btn_web_home")
+        ) {
+            Icon(Icons.Default.Home, contentDescription = "Home", modifier = Modifier.size(18.dp))
+        }
+
+        Surface(
+            shape = RoundedCornerShape(12.dp),
+            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+            modifier = Modifier
+                .weight(1f)
+                .height(32.dp)
+                .clickable {
+                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                    clipboard.setPrimaryClip(ClipData.newPlainText("URL", currentUrl))
+                    onShowSnackbar("Copied address: $currentUrl")
+                }
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(horizontal = 8.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Lock,
+                    contentDescription = "Secure Connection",
+                    tint = AccentEmerald,
+                    modifier = Modifier.size(12.dp)
+                )
+                Spacer(Modifier.width(4.dp))
+                Text(
+                    text = currentUrl.removePrefix("https://").removePrefix("http://"),
+                    style = MaterialTheme.typography.bodySmall,
+                    fontSize = 11.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+
+        IconButton(
+            onClick = onShowPromptHelper,
+            modifier = Modifier.size(32.dp).testTag("btn_prompt_quick_copy")
+        ) {
+            Icon(
+                Icons.Default.ContentPaste,
+                contentDescription = "Copy Prompt / Profile",
+                tint = AccentCyan,
+                modifier = Modifier.size(18.dp)
+            )
+        }
+
+        IconButton(
+            onClick = {
+                val nextDesktopMode = !isDesktopMode
+                onDesktopModeChanged(nextDesktopMode)
+                activeWebView?.let { webView ->
+                    applyUserAgent(webView, nextDesktopMode)
+                    webView.reload()
+                }
+            },
+            modifier = Modifier.size(32.dp).testTag("btn_toggle_desktop_mode")
+        ) {
+            Icon(
+                imageVector = if (isDesktopMode) Icons.Default.Laptop else Icons.Default.Smartphone,
+                contentDescription = "Toggle Desktop/Mobile",
+                tint = if (isDesktopMode) AccentEmerald else MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(18.dp)
+            )
+        }
+
+        IconButton(
+            onClick = {
+                try {
+                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(currentUrl)))
+                } catch (error: ActivityNotFoundException) {
+                    Log.w(WEBVIEW_LOG_TAG, "External browser handler unavailable", error)
+                    onShowSnackbar("Could not launch external browser")
+                } catch (error: SecurityException) {
+                    Log.w(WEBVIEW_LOG_TAG, "External browser launch rejected", error)
+                    onShowSnackbar("Could not launch external browser")
+                }
+            },
+            modifier = Modifier.size(32.dp).testTag("btn_open_external")
+        ) {
+            Icon(
+                Icons.Default.OpenInNew,
+                contentDescription = "Open in Chrome/Browser",
+                modifier = Modifier.size(18.dp)
+            )
+        }
     }
 }
 
