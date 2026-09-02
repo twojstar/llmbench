@@ -133,6 +133,7 @@ fun WebChatScreen(
     val webViewMap = remember { mutableStateMapOf<WebAiService, WebView>() }
     val lastKnownUrls = remember { mutableStateMapOf<WebAiService, String>() }
     val activityStatuses = remember { mutableStateMapOf<WebAiService, WebChatActivityStatus>() }
+    val pendingDesktopReloads = remember { mutableStateMapOf<WebAiService, Boolean>() }
     val currentSelectedService by rememberUpdatedState(selectedService)
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val drawerScope = rememberCoroutineScope()
@@ -145,6 +146,14 @@ fun WebChatScreen(
             }
         }
         liveServices = nextServices
+    }
+
+    fun reloadPendingDesktopModeIfSafe(service: WebAiService) {
+        if (service != selectedService || pendingDesktopReloads[service] != true) return
+        if (activityStatuses[service] == WebChatActivityStatus.GENERATING) return
+        val webView = webViewMap[service] ?: return
+        pendingDesktopReloads.remove(service)
+        webView.reload()
     }
 
     fun probeServiceActivity(service: WebAiService) {
@@ -165,6 +174,7 @@ fun WebChatScreen(
                 isSelected = selectedService == service,
                 isLiveService = service in liveServices
             )
+            reloadPendingDesktopModeIfSafe(service)
         }
     }
 
@@ -280,9 +290,9 @@ fun WebChatScreen(
                     onToggleDesktopMode = {
                         val nextDesktopMode = !isDesktopMode
                         isDesktopMode = nextDesktopMode
-                        webViewMap.values.forEach { webView ->
+                        webViewMap.forEach { (service, webView) ->
                             applyUserAgent(webView, nextDesktopMode)
-                            webView.reload()
+                            pendingDesktopReloads[service] = true
                         }
                     },
                     onShowSnackbar = viewModel::showSnackbar
@@ -361,6 +371,7 @@ fun WebChatScreen(
                                 }
                             ).also { wv ->
                                 webViewMap[service] = wv
+                                pendingDesktopReloads.remove(service)
                             }
                         },
                         update = { wv ->
