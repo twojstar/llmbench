@@ -135,7 +135,13 @@ internal fun setProviderGenerationTrackerSelected(
         """
             (() => {
                 const tracker = window["$GENERATION_TRACKER_KEY"];
-                if (tracker) tracker.selected = $isSelected;
+                if (tracker) {
+                    tracker.selected = $isSelected;
+                    if ($isSelected) {
+                        tracker.completed = false;
+                        tracker.completedWhileSelected = false;
+                    }
+                }
             })();
         """.trimIndent(),
         null
