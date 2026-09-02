@@ -71,11 +71,17 @@ private fun generationActivityScript(
                         node.closest(selector) !== null
                     );
                 };
+                const nodeContainsTrackedControl = node =>
+                    node instanceof Element && tracker.controls.some(control =>
+                        node === control || node.contains(control)
+                    );
                 const mutationTouchesGenerationControl = mutation =>
                     (mutation.type === 'attributes' && tracker.controls.includes(mutation.target)) ||
                     nodeTouchesGenerationControl(mutation.target) ||
                     Array.from(mutation.addedNodes).some(nodeTouchesGenerationControl) ||
-                    Array.from(mutation.removedNodes).some(nodeTouchesGenerationControl);
+                    Array.from(mutation.removedNodes).some(node =>
+                        nodeTouchesGenerationControl(node) || nodeContainsTrackedControl(node)
+                    );
                 const update = mutations => {
                     if (!mutations.some(mutationTouchesGenerationControl)) return;
                     refreshActivity();
