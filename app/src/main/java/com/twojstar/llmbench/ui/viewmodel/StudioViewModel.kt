@@ -95,7 +95,7 @@ class StudioViewModel : ViewModel() {
                 sender = "assistant",
                 provider = AiProvider.ALL,
                 modelName = "Multi-Model Hub",
-                text = "Welcome to the **AI Chat Hub**! 🚀\n\nHere you can interact with:\n$providerLines\n\n✨ **Compare Mode**: Select *'All Models'* to send your prompt to every configured native provider concurrently and compare their outputs side-by-side.\n\n⚙️ Tap the **Key icon** in the top bar to connect your live API keys or test anytime in live simulation mode.",
+                text = "Welcome to the **AI Chat Hub**! 🚀\n\nHere you can interact with:\n$providerLines\n\n✨ **Compare Mode**: Select *'All Models'* to send your prompt to every configured direct provider concurrently and compare their outputs side-by-side.\n\n⚙️ Tap the **Key icon** in the top bar to connect your live API keys or test anytime in live simulation mode.",
                 activeProfileNotes = listOf("Active System Profile linked from Studio")
             )
         )
@@ -135,7 +135,14 @@ class StudioViewModel : ViewModel() {
         _uiState.update { it.copy(showApiKeyDialog = show) }
     }
 
-    fun saveApiKeys(geminiKey: String, openAiKey: String, claudeKey: String, deepseekKey: String = "", kimiKey: String = "") {
+    fun saveApiKeys(
+        geminiKey: String,
+        openAiKey: String,
+        claudeKey: String,
+        deepseekKey: String = "",
+        kimiKey: String = "",
+        openRouterKey: String = ""
+    ) {
         _uiState.update {
             it.copy(
                 apiKeyConfig = ApiKeyConfig(
@@ -143,7 +150,8 @@ class StudioViewModel : ViewModel() {
                     openAiKey = openAiKey.trim(),
                     claudeKey = claudeKey.trim(),
                     deepseekKey = deepseekKey.trim(),
-                    kimiKey = kimiKey.trim()
+                    kimiKey = kimiKey.trim(),
+                    openRouterKey = openRouterKey.trim()
                 ),
                 showApiKeyDialog = false
             )

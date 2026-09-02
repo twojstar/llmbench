@@ -44,6 +44,7 @@ class AiChatService {
             AiProvider.CLAUDE -> Pair(apiKeys.claudeKey.trim(), apiKeys.claudeKey.isNotBlank())
             AiProvider.DEEPSEEK -> Pair(apiKeys.deepseekKey.trim(), apiKeys.deepseekKey.isNotBlank())
             AiProvider.KIMI -> Pair(apiKeys.kimiKey.trim(), apiKeys.kimiKey.isNotBlank())
+            AiProvider.OPENROUTER -> Pair(apiKeys.openRouterKey.trim(), apiKeys.openRouterKey.isNotBlank())
             AiProvider.ALL -> Pair("", false)
         }
 
@@ -56,6 +57,17 @@ class AiChatService {
                     AiProvider.CLAUDE -> callClaudeApi(prompt, effectiveModel, key, systemInstruction)
                     AiProvider.DEEPSEEK -> callOpenAiCompatibleApi("https://api.deepseek.com/chat/completions", prompt, effectiveModel, key, systemInstruction)
                     AiProvider.KIMI -> callOpenAiCompatibleApi("https://api.moonshot.ai/v1/chat/completions", prompt, effectiveModel, key, systemInstruction)
+                    AiProvider.OPENROUTER -> callOpenAiCompatibleApi(
+                        endpointUrl = "https://openrouter.ai/api/v1/chat/completions",
+                        prompt = prompt,
+                        model = effectiveModel,
+                        apiKey = key,
+                        systemInstruction = systemInstruction,
+                        extraHeaders = mapOf(
+                            "HTTP-Referer" to "https://github.com/twojstar/llmbench",
+                            "X-Title" to "LlmBench"
+                        )
+                    )
                     AiProvider.ALL -> null
                 }
 
@@ -281,7 +293,8 @@ class AiChatService {
         prompt: String,
         model: String,
         apiKey: String,
-        systemInstruction: String?
+        systemInstruction: String?,
+        extraHeaders: Map<String, String> = emptyMap()
     ): String {
         val messagesArray = buildJsonArray {
             if (!systemInstruction.isNullOrBlank()) {
@@ -302,10 +315,12 @@ class AiChatService {
         }
 
         val body = requestPayload.toString().toRequestBody("application/json".toMediaType())
-        val request = Request.Builder()
+        val requestBuilder = Request.Builder()
             .url(endpointUrl)
             .addHeader("Authorization", "Bearer $apiKey")
             .addHeader("Content-Type", "application/json")
+        extraHeaders.forEach { (name, value) -> requestBuilder.addHeader(name, value) }
+        val request = requestBuilder
             .post(body)
             .build()
 
@@ -580,6 +595,10 @@ class AiChatService {
                         }
                     }
                 }
+            }
+
+            AiProvider.OPENROUTER -> {
+                "**OpenRouter ($model)**: Free-router simulation for '$prompt'. Add an OpenRouter key to send this through the live `openrouter/free` gateway while keeping it outside the default multi-provider compare."
             }
 
             AiProvider.ALL -> "Multi-provider dispatch."

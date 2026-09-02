@@ -29,12 +29,24 @@ class ChatModelsTest {
     }
 
     @Test
-    fun compareProviderListContainsEveryNativeProviderExactlyOnce() {
+    fun defaultCompareUsesDirectProvidersOnly() {
         assertFalse(AiProvider.ALL in AiProvider.concreteProviders)
-        assertEquals(AiProvider.entries.size - 1, AiProvider.concreteProviders.distinct().size)
+        assertFalse(AiProvider.OPENROUTER in AiProvider.concreteProviders)
         assertEquals(
-            AiProvider.entries.filterNot { it == AiProvider.ALL }.toSet(),
+            setOf(
+                AiProvider.CLAUDE,
+                AiProvider.CHATGPT,
+                AiProvider.GEMINI,
+                AiProvider.DEEPSEEK,
+                AiProvider.KIMI
+            ),
             AiProvider.concreteProviders.toSet()
         )
+    }
+
+    @Test
+    fun openRouterDefaultsToFreeModelRouter() {
+        assertEquals("openrouter/free", AiProvider.OPENROUTER.defaultModel)
+        assertTrue(AiProvider.OPENROUTER.defaultModel in AiProvider.OPENROUTER.availableModels)
     }
 }

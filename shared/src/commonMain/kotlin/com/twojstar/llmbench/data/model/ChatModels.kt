@@ -93,7 +93,8 @@ enum class AiProvider(
     val shortName: String,
     val defaultModel: String,
     val availableModels: List<String>,
-    val description: String
+    val description: String,
+    val participatesInDefaultCompare: Boolean = true
 ) {
     ALL(
         id = "all",
@@ -101,7 +102,7 @@ enum class AiProvider(
         shortName = "All Models",
         defaultModel = "all",
         availableModels = listOf("all"),
-        description = "Send one prompt concurrently to every configured native provider"
+        description = "Send one prompt concurrently to every configured direct provider"
     ),
     CLAUDE(
         id = "claude",
@@ -162,16 +163,21 @@ enum class AiProvider(
             "kimi-k2.7-code"
         ),
         description = "Moonshot AI models for general chat, frontier reasoning, coding, and long context"
+    ),
+    OPENROUTER(
+        id = "openrouter",
+        displayName = "OpenRouter Free",
+        shortName = "OpenRouter",
+        defaultModel = "openrouter/free",
+        availableModels = listOf("openrouter/free"),
+        description = "OpenRouter gateway that routes requests across currently available free models",
+        participatesInDefaultCompare = false
     );
 
     companion object {
-        val concreteProviders: List<AiProvider> = listOf(
-            CLAUDE,
-            CHATGPT,
-            GEMINI,
-            DEEPSEEK,
-            KIMI
-        )
+        val concreteProviders: List<AiProvider> = entries.filter {
+            it != ALL && it.participatesInDefaultCompare
+        }
 
         fun fromId(id: String): AiProvider {
             return entries.firstOrNull { it.id.equals(id, ignoreCase = true) } ?: CLAUDE
@@ -185,7 +191,8 @@ data class ApiKeyConfig(
     val openAiKey: String = "",
     val claudeKey: String = "",
     val deepseekKey: String = "",
-    val kimiKey: String = ""
+    val kimiKey: String = "",
+    val openRouterKey: String = ""
 )
 
 @Serializable

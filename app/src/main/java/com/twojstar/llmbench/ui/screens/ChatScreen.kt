@@ -16,7 +16,9 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -155,7 +157,10 @@ fun ChatScreen(
                                     badge = {
                                         val hasAnyKey = uiState.apiKeyConfig.geminiKey.isNotBlank() ||
                                                 uiState.apiKeyConfig.openAiKey.isNotBlank() ||
-                                                uiState.apiKeyConfig.claudeKey.isNotBlank()
+                                                uiState.apiKeyConfig.claudeKey.isNotBlank() ||
+                                                uiState.apiKeyConfig.deepseekKey.isNotBlank() ||
+                                                uiState.apiKeyConfig.kimiKey.isNotBlank() ||
+                                                uiState.apiKeyConfig.openRouterKey.isNotBlank()
                                         if (hasAnyKey) {
                                             Badge(
                                                 containerColor = AccentEmerald,
@@ -352,6 +357,7 @@ fun ChatScreen(
                                     AiProvider.CLAUDE -> "Ask Anthropic Claude..."
                                     AiProvider.DEEPSEEK -> "Ask DeepSeek..."
                                     AiProvider.KIMI -> "Ask Moonshot Kimi..."
+                                    AiProvider.OPENROUTER -> "Ask a free OpenRouter model..."
                                 }
                                 Text(
                                     text = destination,
@@ -448,8 +454,8 @@ fun ChatScreen(
         ApiKeySettingsDialog(
             currentKeys = uiState.apiKeyConfig,
             onDismiss = { viewModel.setShowApiKeyDialog(false) },
-            onSave = { gemini, openAi, claude, deepseek, kimi ->
-                viewModel.saveApiKeys(gemini, openAi, claude, deepseek, kimi)
+            onSave = { gemini, openAi, claude, deepseek, kimi, openRouter ->
+                viewModel.saveApiKeys(gemini, openAi, claude, deepseek, kimi, openRouter)
             }
         )
     }
@@ -670,13 +676,21 @@ fun GeneratingIndicator(activeProviders: Set<AiProvider>) {
 fun ApiKeySettingsDialog(
     currentKeys: com.twojstar.llmbench.data.model.ApiKeyConfig,
     onDismiss: () -> Unit,
-    onSave: (gemini: String, openAi: String, claude: String, deepseek: String, kimi: String) -> Unit
+    onSave: (
+        gemini: String,
+        openAi: String,
+        claude: String,
+        deepseek: String,
+        kimi: String,
+        openRouter: String
+    ) -> Unit
 ) {
     var geminiKey by remember { mutableStateOf(currentKeys.geminiKey) }
     var openAiKey by remember { mutableStateOf(currentKeys.openAiKey) }
     var claudeKey by remember { mutableStateOf(currentKeys.claudeKey) }
     var deepseekKey by remember { mutableStateOf(currentKeys.deepseekKey) }
     var kimiKey by remember { mutableStateOf(currentKeys.kimiKey) }
+    var openRouterKey by remember { mutableStateOf(currentKeys.openRouterKey) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -693,11 +707,12 @@ fun ApiKeySettingsDialog(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
                     .padding(vertical = 4.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 Text(
-                    text = "Enter your API keys to make live requests to Google, OpenAI, and Anthropic. Keys are stored locally on device.",
+                    text = "Enter API keys for direct providers and optional gateways. Keys are stored locally on device.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -771,11 +786,25 @@ fun ApiKeySettingsDialog(
                         .fillMaxWidth()
                         .testTag("input_kimi_api_key")
                 )
+
+                OutlinedTextField(
+                    value = openRouterKey,
+                    onValueChange = { openRouterKey = it },
+                    label = { Text("OpenRouter API Key") },
+                    placeholder = { Text("sk-or-v1-...") },
+                    singleLine = true,
+                    leadingIcon = {
+                        Icon(Icons.Default.Route, contentDescription = null, tint = Color(0xFF6366F1))
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("input_openrouter_api_key")
+                )
             }
         },
         confirmButton = {
             Button(
-                onClick = { onSave(geminiKey, openAiKey, claudeKey, deepseekKey, kimiKey) },
+                onClick = { onSave(geminiKey, openAiKey, claudeKey, deepseekKey, kimiKey, openRouterKey) },
                 colors = ButtonDefaults.buttonColors(containerColor = AccentEmerald),
                 modifier = Modifier.testTag("btn_save_api_keys")
             ) {
@@ -800,6 +829,7 @@ fun getProviderColor(provider: AiProvider): Color {
         AiProvider.CLAUDE -> Color(0xFFF59E0B) // Amber/Terracotta
         AiProvider.DEEPSEEK -> Color(0xFF2563EB) // Deep Blue
         AiProvider.KIMI -> Color(0xFF8B5CF6) // Violet / Electric Blue
+        AiProvider.OPENROUTER -> Color(0xFF6366F1) // Indigo gateway
         AiProvider.ALL -> Color(0xFF8B5CF6) // Purple Multi
     }
 }
@@ -811,6 +841,7 @@ fun getProviderIcon(provider: AiProvider): ImageVector {
         AiProvider.CLAUDE -> Icons.Default.Flare
         AiProvider.DEEPSEEK -> Icons.Default.Psychology
         AiProvider.KIMI -> Icons.Default.ElectricBolt
+        AiProvider.OPENROUTER -> Icons.Default.Route
         AiProvider.ALL -> Icons.Default.Hub
     }
 }
