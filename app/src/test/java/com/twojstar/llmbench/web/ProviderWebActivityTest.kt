@@ -7,8 +7,9 @@ import org.junit.Test
 
 class ProviderWebActivityTest {
     @Test
-    fun everyProviderHasAnAuditableGenerationProbe() {
-        WebAiService.entries.forEach { service ->
+    fun everyProviderWithVerifiedStableMarkupHasAnAuditableGenerationProbe() {
+        val supportedProviders = WebAiService.entries.filterNot { it == WebAiService.VIBE }
+        supportedProviders.forEach { service ->
             assertTrue(
                 "Missing generation probe for ${service.id}",
                 ProviderWebTweakRegistry.generationSelectors(service).isNotEmpty()
@@ -17,11 +18,12 @@ class ProviderWebActivityTest {
     }
 
     @Test
-    fun probesUseExactGenerationControlsInsteadOfBroadStopSubstrings() {
+    fun probesUsePortableExactGenerationControls() {
         WebAiService.entries
             .flatMap(ProviderWebTweakRegistry::generationSelectors)
             .forEach { selector ->
                 assertFalse("Broad stop selector: $selector", selector.contains("*="))
+                assertFalse("Unsupported :has selector: $selector", selector.contains(":has("))
             }
     }
 
@@ -54,9 +56,7 @@ class ProviderWebActivityTest {
     }
 
     @Test
-    fun vibeUsesExactStopGenerationLabels() {
-        val selectors = ProviderWebTweakRegistry.generationSelectors(WebAiService.VIBE)
-        assertTrue(selectors.contains("button[aria-label=\"Stop generation\" i]"))
-        assertTrue(selectors.contains("button[aria-label=\"Stop generating\" i]"))
+    fun vibeDoesNotClaimLocaleDependentActivitySupport() {
+        assertTrue(ProviderWebTweakRegistry.generationSelectors(WebAiService.VIBE).isEmpty())
     }
 }

@@ -49,16 +49,15 @@ internal object ProviderWebTweakRegistry {
             "[data-test-id=\"send-button-container\"].stop"
         ),
         WebAiService.DEEPSEEK to listOf(
-            "div[role=\"button\"]:has(svg[viewBox^=\"0 0 16\"] " +
-                "path[d^=\"M2 4.88C2 3.68009 2 3.08013 2.30557 2.65954\"])"
+            "div[role=\"button\"] svg[viewBox^=\"0 0 16\"] " +
+                "path[d^=\"M2 4.88C2 3.68009 2 3.08013 2.30557 2.65954\"]"
         ),
         WebAiService.KIMI to listOf(
             "div.send-button-container.stop"
         ),
-        WebAiService.VIBE to listOf(
-            "button[aria-label=\"Stop generation\" i]",
-            "button[aria-label=\"Stop generating\" i]"
-        )
+        // Vibe currently exposes only localized stop labels. Prefer no badge over a false
+        // locale-dependent signal until a stable provider-owned state hook is verified.
+        WebAiService.VIBE to emptyList()
     )
 
     fun ownedHosts(service: WebAiService): Set<String> = buildSet {
