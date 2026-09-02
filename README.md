@@ -32,6 +32,24 @@ AI Studio intentionally opens in the system browser because Google OAuth policy 
 
 The native/free-provider layer supports OpenRouter Free and AIHubMix through the shared OpenAI-compatible gateway adapter. Both gateways stay outside the default All Models comparison to avoid duplicate aggregator routing. Provider-specific details belong behind adapters rather than being spread through UI code.
 
+## Provider support matrix
+
+Full means the LlmBench-side integration is implemented; provider-side login or page changes can still affect an embedded web client. Partial calls out a known limitation rather than hiding it.
+
+| Provider / surface | Status | Authentication | Uploads | Activity tracking | Notes |
+| --- | --- | --- | --- | --- | --- |
+| ChatGPT Web | Full | Provider page in WebView | Yes | Generating + unread | Persistent session, provider-scoped mobile/desktop mode |
+| Claude Web | Full | Provider page in WebView | Yes | Generating + unread | Persistent session and provider-scoped tweaks |
+| Gemini Chat Web | Partial | Google sign-in may be blocked in embedded user-agents | Yes | Generating + unread | The chat surface is integrated, but fresh Google OAuth inside WebView is not a supported flow |
+| DeepSeek Web | Full | Provider page in WebView | Yes | Generating + unread | Persistent session |
+| Kimi Web | Full | Provider page in WebView | Yes | Generating + unread | Persistent session |
+| Mistral Vibe Web | Partial | Provider page in WebView | Yes | None | No stable locale-independent generation signal yet, so background completion cannot be marked unread |
+| Gemini AI Studio | Browser-only | System browser | Browser-owned | Browser-owned | Kept out of WebView because Google OAuth forbids authorization in embedded user-agents |
+| OpenRouter Free | Native gateway | API key | N/A | Native request state | Uses openrouter/free; excluded from default All Models compare |
+| AIHubMix Free | Native gateway | API key | N/A | Native request state | Uses explicit -free models; excluded from default All Models compare |
+
+Google documents the embedded-user-agent restriction in its [OAuth 2.0 policies](https://developers.google.com/identity/protocols/oauth2/policies).
+
 ## WebView approach
 
 Account sessions persist, but LlmBench must not keep every heavy provider SPA alive forever. The Android host uses a small LRU pool, pauses inactive WebViews and evicts them under memory pressure while cookies/session state remain provider-owned. Provider tweaks live in a small, auditable in-app registry: scripts are static, scoped to the matching provider host and applied after page load; remote userscript code is never fetched.
@@ -85,7 +103,7 @@ Backends are optional, not the default. If a feature truly needs one, prefer a t
 - [x] create a provider-tweak/userscript interface instead of hard-coded WebView hacks
 - [x] show generating and unread response status on ChatGPT, Claude, Gemini, DeepSeek and Kimi web tabs; Vibe remains pending a stable locale-independent generation signal
 - [x] add CI build/lint checks
-- [ ] document which providers work fully, partially, or block embedded login
+- [x] document which providers work fully, partially, or block embedded login
 
 ## Development
 
