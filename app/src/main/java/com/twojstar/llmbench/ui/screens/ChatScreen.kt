@@ -161,7 +161,8 @@ fun ChatScreen(
                                                 uiState.apiKeyConfig.claudeKey.isNotBlank() ||
                                                 uiState.apiKeyConfig.deepseekKey.isNotBlank() ||
                                                 uiState.apiKeyConfig.kimiKey.isNotBlank() ||
-                                                uiState.apiKeyConfig.openRouterKey.isNotBlank()
+                                                uiState.apiKeyConfig.openRouterKey.isNotBlank() ||
+                                                uiState.apiKeyConfig.aiHubMixKey.isNotBlank()
                                         if (hasAnyKey) {
                                             Badge(
                                                 containerColor = AccentEmerald,
@@ -359,6 +360,7 @@ fun ChatScreen(
                                     AiProvider.DEEPSEEK -> "Ask DeepSeek..."
                                     AiProvider.KIMI -> "Ask Moonshot Kimi..."
                                     AiProvider.OPENROUTER -> "Ask a free OpenRouter model..."
+                                    AiProvider.AIHUBMIX -> "Ask a free AIHubMix model..."
                                 }
                                 Text(
                                     text = destination,
@@ -455,8 +457,8 @@ fun ChatScreen(
         ApiKeySettingsDialog(
             currentKeys = uiState.apiKeyConfig,
             onDismiss = { viewModel.setShowApiKeyDialog(false) },
-            onSave = { gemini, openAi, claude, deepseek, kimi, openRouter ->
-                viewModel.saveApiKeys(gemini, openAi, claude, deepseek, kimi, openRouter)
+            onSave = { gemini, openAi, claude, deepseek, kimi, openRouter, aiHubMix ->
+                viewModel.saveApiKeys(gemini, openAi, claude, deepseek, kimi, openRouter, aiHubMix)
             }
         )
     }
@@ -683,7 +685,8 @@ fun ApiKeySettingsDialog(
         claude: String,
         deepseek: String,
         kimi: String,
-        openRouter: String
+        openRouter: String,
+        aiHubMix: String
     ) -> Unit
 ) {
     var geminiKey by remember { mutableStateOf(currentKeys.geminiKey) }
@@ -692,6 +695,7 @@ fun ApiKeySettingsDialog(
     var deepseekKey by remember { mutableStateOf(currentKeys.deepseekKey) }
     var kimiKey by remember { mutableStateOf(currentKeys.kimiKey) }
     var openRouterKey by remember { mutableStateOf(currentKeys.openRouterKey) }
+    var aiHubMixKey by remember { mutableStateOf(currentKeys.aiHubMixKey) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -807,11 +811,26 @@ fun ApiKeySettingsDialog(
                         .fillMaxWidth()
                         .testTag("input_openrouter_api_key")
                 )
+
+                OutlinedTextField(
+                    value = aiHubMixKey,
+                    onValueChange = { aiHubMixKey = it },
+                    label = { Text("AIHubMix API Key") },
+                    placeholder = { Text("sk-...") },
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    leadingIcon = {
+                        Icon(Icons.Default.Cloud, contentDescription = null, tint = Color(0xFF14B8A6))
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("input_aihubmix_api_key")
+                )
             }
         },
         confirmButton = {
             Button(
-                onClick = { onSave(geminiKey, openAiKey, claudeKey, deepseekKey, kimiKey, openRouterKey) },
+                onClick = { onSave(geminiKey, openAiKey, claudeKey, deepseekKey, kimiKey, openRouterKey, aiHubMixKey) },
                 colors = ButtonDefaults.buttonColors(containerColor = AccentEmerald),
                 modifier = Modifier.testTag("btn_save_api_keys")
             ) {
@@ -837,6 +856,7 @@ fun getProviderColor(provider: AiProvider): Color {
         AiProvider.DEEPSEEK -> Color(0xFF2563EB) // Deep Blue
         AiProvider.KIMI -> Color(0xFF8B5CF6) // Violet / Electric Blue
         AiProvider.OPENROUTER -> Color(0xFF6366F1) // Indigo gateway
+        AiProvider.AIHUBMIX -> Color(0xFF14B8A6) // Teal gateway
         AiProvider.ALL -> Color(0xFF8B5CF6) // Purple Multi
     }
 }
@@ -849,6 +869,7 @@ fun getProviderIcon(provider: AiProvider): ImageVector {
         AiProvider.DEEPSEEK -> Icons.Default.Psychology
         AiProvider.KIMI -> Icons.Default.ElectricBolt
         AiProvider.OPENROUTER -> Icons.Default.Route
+        AiProvider.AIHUBMIX -> Icons.Default.Cloud
         AiProvider.ALL -> Icons.Default.Hub
     }
 }

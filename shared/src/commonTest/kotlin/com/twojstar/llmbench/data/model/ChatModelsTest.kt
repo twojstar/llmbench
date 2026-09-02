@@ -32,6 +32,7 @@ class ChatModelsTest {
     fun defaultCompareUsesDirectProvidersOnly() {
         assertFalse(AiProvider.ALL in AiProvider.concreteProviders)
         assertFalse(AiProvider.OPENROUTER in AiProvider.concreteProviders)
+        assertFalse(AiProvider.AIHUBMIX in AiProvider.concreteProviders)
         assertEquals(
             setOf(
                 AiProvider.CLAUDE,
@@ -48,5 +49,11 @@ class ChatModelsTest {
     fun openRouterDefaultsToFreeModelRouter() {
         assertEquals("openrouter/free", AiProvider.OPENROUTER.defaultModel)
         assertTrue(AiProvider.OPENROUTER.defaultModel in AiProvider.OPENROUTER.availableModels)
+    }
+
+    @Test
+    fun aiHubMixDefaultsToFreeCatalogModel() {
+        assertEquals("hy3-free", AiProvider.AIHUBMIX.defaultModel)
+        assertTrue(AiProvider.AIHUBMIX.availableModels.all { it.endsWith("-free") })
     }
 }

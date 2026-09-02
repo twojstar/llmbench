@@ -145,7 +145,8 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
         claudeKey: String,
         deepseekKey: String = "",
         kimiKey: String = "",
-        openRouterKey: String = ""
+        openRouterKey: String = "",
+        aiHubMixKey: String = ""
     ) {
         val config = ApiKeyConfig(
             geminiKey = geminiKey.trim(),
@@ -153,7 +154,8 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
             claudeKey = claudeKey.trim(),
             deepseekKey = deepseekKey.trim(),
             kimiKey = kimiKey.trim(),
-            openRouterKey = openRouterKey.trim()
+            openRouterKey = openRouterKey.trim(),
+            aiHubMixKey = aiHubMixKey.trim()
         )
         val stored = apiKeyStore.save(config)
         _uiState.update {
