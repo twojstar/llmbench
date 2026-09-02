@@ -15,6 +15,27 @@ import java.util.concurrent.TimeUnit
 
 class AiChatService {
 
+    private data class OpenAiCompatibleProviderConfig(
+        val endpointUrl: String,
+        val extraHeaders: Map<String, String> = emptyMap()
+    )
+
+    private val openAiCompatibleProviders = mapOf(
+        AiProvider.DEEPSEEK to OpenAiCompatibleProviderConfig(
+            endpointUrl = "https://api.deepseek.com/chat/completions"
+        ),
+        AiProvider.KIMI to OpenAiCompatibleProviderConfig(
+            endpointUrl = "https://api.moonshot.ai/v1/chat/completions"
+        ),
+        AiProvider.OPENROUTER to OpenAiCompatibleProviderConfig(
+            endpointUrl = "https://openrouter.ai/api/v1/chat/completions",
+            extraHeaders = mapOf(
+                "HTTP-Referer" to "https://github.com/twojstar/llmbench",
+                "X-Title" to "LlmBench"
+            )
+        )
+    )
+
     private val httpClient: OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(60, TimeUnit.SECONDS)
         .readTimeout(60, TimeUnit.SECONDS)
@@ -44,6 +65,7 @@ class AiChatService {
             AiProvider.CLAUDE -> Pair(apiKeys.claudeKey.trim(), apiKeys.claudeKey.isNotBlank())
             AiProvider.DEEPSEEK -> Pair(apiKeys.deepseekKey.trim(), apiKeys.deepseekKey.isNotBlank())
             AiProvider.KIMI -> Pair(apiKeys.kimiKey.trim(), apiKeys.kimiKey.isNotBlank())
+            AiProvider.OPENROUTER -> Pair(apiKeys.openRouterKey.trim(), apiKeys.openRouterKey.isNotBlank())
             AiProvider.ALL -> Pair("", false)
         }
 
@@ -54,8 +76,18 @@ class AiChatService {
                     AiProvider.GEMINI -> callGeminiApi(prompt, effectiveModel, key, systemInstruction)
                     AiProvider.CHATGPT -> callOpenAiApi(prompt, effectiveModel, key, systemInstruction)
                     AiProvider.CLAUDE -> callClaudeApi(prompt, effectiveModel, key, systemInstruction)
-                    AiProvider.DEEPSEEK -> callOpenAiCompatibleApi("https://api.deepseek.com/chat/completions", prompt, effectiveModel, key, systemInstruction)
-                    AiProvider.KIMI -> callOpenAiCompatibleApi("https://api.moonshot.ai/v1/chat/completions", prompt, effectiveModel, key, systemInstruction)
+                    AiProvider.DEEPSEEK, AiProvider.KIMI, AiProvider.OPENROUTER -> {
+                        val config = checkNotNull(openAiCompatibleProviders[provider])
+                        callOpenAiCompatibleApi(
+                            config = config,
+                            prompt = prompt,
+                            model = effectiveModel,
+                            apiKey = key,
+                            systemInstruction = systemInstruction,
+                            conversationHistory = conversationHistory,
+                            provider = provider
+                        )
+                    }
                     AiProvider.ALL -> null
                 }
 
@@ -275,26 +307,22 @@ class AiChatService {
         }
     }
 
-    // --- OpenAI Compatible API (DeepSeek & Kimi) ---
+    // --- OpenAI-compatible provider/gateway boundary ---
     private fun callOpenAiCompatibleApi(
-        endpointUrl: String,
+        config: OpenAiCompatibleProviderConfig,
         prompt: String,
         model: String,
         apiKey: String,
-        systemInstruction: String?
+        systemInstruction: String?,
+        conversationHistory: List<ModelChatMessage>,
+        provider: AiProvider
     ): String {
-        val messagesArray = buildJsonArray {
-            if (!systemInstruction.isNullOrBlank()) {
-                addJsonObject {
-                    put("role", "system")
-                    put("content", systemInstruction)
-                }
-            }
-            addJsonObject {
-                put("role", "user")
-                put("content", prompt)
-            }
-        }
+        val messagesArray = buildOpenAiCompatibleMessages(
+            prompt = prompt,
+            systemInstruction = systemInstruction,
+            conversationHistory = conversationHistory,
+            provider = provider
+        )
 
         val requestPayload = buildJsonObject {
             put("model", model)
@@ -302,12 +330,12 @@ class AiChatService {
         }
 
         val body = requestPayload.toString().toRequestBody("application/json".toMediaType())
-        val request = Request.Builder()
-            .url(endpointUrl)
+        val requestBuilder = Request.Builder()
+            .url(config.endpointUrl)
             .addHeader("Authorization", "Bearer $apiKey")
             .addHeader("Content-Type", "application/json")
-            .post(body)
-            .build()
+        config.extraHeaders.forEach { (name, value) -> requestBuilder.addHeader(name, value) }
+        val request = requestBuilder.post(body).build()
 
         httpClient.newCall(request).execute().use { response ->
             val responseBody = response.body?.string() ?: throw Exception("Empty response from server")
@@ -323,6 +351,46 @@ class AiChatService {
             val content = message?.get("content")?.jsonPrimitive?.contentOrNull
 
             return content ?: "Received empty message content."
+        }
+    }
+
+    internal fun buildOpenAiCompatibleMessages(
+        prompt: String,
+        systemInstruction: String?,
+        conversationHistory: List<ModelChatMessage>,
+        provider: AiProvider
+    ): JsonArray = buildJsonArray {
+        if (!systemInstruction.isNullOrBlank()) {
+            addJsonObject {
+                put("role", "system")
+                put("content", systemInstruction)
+            }
+        }
+
+        val priorMessages = if (
+            conversationHistory.lastOrNull()?.let { it.sender == "user" && it.text == prompt } == true
+        ) {
+            conversationHistory.dropLast(1)
+        } else {
+            conversationHistory
+        }
+
+        priorMessages.forEach { message ->
+            when {
+                message.sender == "user" -> addJsonObject {
+                    put("role", "user")
+                    put("content", message.text)
+                }
+                message.sender == "assistant" && message.provider == provider -> addJsonObject {
+                    put("role", "assistant")
+                    put("content", message.text)
+                }
+            }
+        }
+
+        addJsonObject {
+            put("role", "user")
+            put("content", prompt)
         }
     }
 
@@ -580,6 +648,10 @@ class AiChatService {
                         }
                     }
                 }
+            }
+
+            AiProvider.OPENROUTER -> {
+                "**OpenRouter ($model)**: Free-router simulation for '$prompt'. Add an OpenRouter key to send this through the live `openrouter/free` gateway while keeping it outside the default multi-provider compare."
             }
 
             AiProvider.ALL -> "Multi-provider dispatch."

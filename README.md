@@ -81,7 +81,7 @@ Backends are optional, not the default. If a feature truly needs one, prefer a t
 - [x] add mobile WebView LRU/memory-pressure handling for long chats
 - [x] implement reliable provider file uploads through the platform file picker
 - [x] add Gemini AI Studio through a browser-backed platform flow
-- [ ] add AIHubMix and OpenRouter-compatible free-provider adapters
+- [ ] add AIHubMix and OpenRouter-compatible free-provider adapters (OpenRouter free router wired; AIHubMix next)
 - [x] create a provider-tweak/userscript interface instead of hard-coded WebView hacks
 - [x] show generating and unread response status on ChatGPT, Claude, Gemini, DeepSeek and Kimi web tabs; Vibe remains pending a stable locale-independent generation signal
 - [x] add CI build/lint checks
@@ -91,7 +91,7 @@ Backends are optional, not the default. If a feature truly needs one, prefer a t
 
 Android targets API 35 with minSdk 26. The shared core uses Kotlin Multiplatform; platform UI remains Compose-first and moves into Compose Multiplatform only where it does not weaken native WebView, upload, authentication or secure-storage behavior.
 
-Mobile UX is a product constraint: long chats must stay responsive, file upload must work, and provider tweaks should reduce wasted chrome/animation without breaking provider pages.
+Mobile UX is a product constraint: long chats must stay responsive, file upload must work, and provider tweaks should reduce wasted chrome/animation without breaking provider pages. Native API keys are encrypted at rest with an Android Keystore-backed AES-GCM key; credentials are never logged or exported.
 
 ## License
 

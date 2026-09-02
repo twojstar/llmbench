@@ -1,6 +1,7 @@
 package com.twojstar.llmbench.ui.viewmodel
 
-import androidx.lifecycle.ViewModel
+import android.app.Application
+import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.twojstar.llmbench.data.engine.AiChatService
 import com.twojstar.llmbench.data.engine.InstructionRenderer
@@ -8,6 +9,7 @@ import com.twojstar.llmbench.data.engine.ProfileMerger
 import com.twojstar.llmbench.data.engine.ValidationResult
 import com.twojstar.llmbench.data.engine.YamlParser
 import com.twojstar.llmbench.data.model.*
+import com.twojstar.llmbench.data.security.ApiKeyStore
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.flow.*
@@ -62,14 +64,16 @@ enum class NavigationTab {
     }
 }
 
-class StudioViewModel : ViewModel() {
+class StudioViewModel(application: Application) : AndroidViewModel(application) {
 
     private val aiChatService = AiChatService()
+    private val apiKeyStore = ApiKeyStore(application.applicationContext)
 
     private val _uiState = MutableStateFlow(StudioUiState())
     val uiState: StateFlow<StudioUiState> = _uiState.asStateFlow()
 
     init {
+        _uiState.update { it.copy(apiKeyConfig = apiKeyStore.load()) }
         recompute()
         initPlaygroundWelcome()
         initChatWelcome()
@@ -95,7 +99,7 @@ class StudioViewModel : ViewModel() {
                 sender = "assistant",
                 provider = AiProvider.ALL,
                 modelName = "Multi-Model Hub",
-                text = "Welcome to the **AI Chat Hub**! 🚀\n\nHere you can interact with:\n$providerLines\n\n✨ **Compare Mode**: Select *'All Models'* to send your prompt to every configured native provider concurrently and compare their outputs side-by-side.\n\n⚙️ Tap the **Key icon** in the top bar to connect your live API keys or test anytime in live simulation mode.",
+                text = "Welcome to the **AI Chat Hub**! 🚀\n\nHere you can interact with:\n$providerLines\n\n✨ **Compare Mode**: Select *'All Models'* to send your prompt to every configured direct provider concurrently and compare their outputs side-by-side.\n\n⚙️ Tap the **Key icon** in the top bar to connect your live API keys or test anytime in live simulation mode.",
                 activeProfileNotes = listOf("Active System Profile linked from Studio")
             )
         )
@@ -135,20 +139,30 @@ class StudioViewModel : ViewModel() {
         _uiState.update { it.copy(showApiKeyDialog = show) }
     }
 
-    fun saveApiKeys(geminiKey: String, openAiKey: String, claudeKey: String, deepseekKey: String = "", kimiKey: String = "") {
+    fun saveApiKeys(
+        geminiKey: String,
+        openAiKey: String,
+        claudeKey: String,
+        deepseekKey: String = "",
+        kimiKey: String = "",
+        openRouterKey: String = ""
+    ) {
+        val config = ApiKeyConfig(
+            geminiKey = geminiKey.trim(),
+            openAiKey = openAiKey.trim(),
+            claudeKey = claudeKey.trim(),
+            deepseekKey = deepseekKey.trim(),
+            kimiKey = kimiKey.trim(),
+            openRouterKey = openRouterKey.trim()
+        )
+        val stored = apiKeyStore.save(config)
         _uiState.update {
             it.copy(
-                apiKeyConfig = ApiKeyConfig(
-                    geminiKey = geminiKey.trim(),
-                    openAiKey = openAiKey.trim(),
-                    claudeKey = claudeKey.trim(),
-                    deepseekKey = deepseekKey.trim(),
-                    kimiKey = kimiKey.trim()
-                ),
+                apiKeyConfig = config,
                 showApiKeyDialog = false
             )
         }
-        showSnackbar("API Keys updated successfully.")
+        showSnackbar(if (stored) "API keys stored securely on device." else "API keys updated for this session only.")
     }
 
     fun clearChatHistory() {
