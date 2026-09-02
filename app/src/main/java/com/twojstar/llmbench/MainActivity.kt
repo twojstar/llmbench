@@ -21,6 +21,16 @@ import com.twojstar.llmbench.ui.theme.LlmBenchTheme
 import com.twojstar.llmbench.ui.viewmodel.NavigationTab
 import com.twojstar.llmbench.ui.viewmodel.StudioViewModel
 
+internal fun NavigationTab.belongsToStudioSection(): Boolean = when (this) {
+    NavigationTab.STUDIO,
+    NavigationTab.INSTRUCTIONS,
+    NavigationTab.YAML,
+    NavigationTab.PLAYGROUND,
+    NavigationTab.SKILLS -> true
+    NavigationTab.WEB_CHATS,
+    NavigationTab.COMPARE_HUB -> false
+}
+
 class MainActivity : ComponentActivity() {
 
     private val viewModel: StudioViewModel by viewModels()
@@ -79,43 +89,17 @@ class MainActivity : ComponentActivity() {
                                 modifier = Modifier.testTag("nav_tab_compare_hub")
                             )
                             NavigationBarItem(
-                                selected = uiState.currentTab == NavigationTab.STUDIO,
+                                selected = uiState.currentTab.belongsToStudioSection(),
                                 onClick = { viewModel.selectTab(NavigationTab.STUDIO) },
                                 icon = { Icon(Icons.Default.Tune, contentDescription = "Studio") },
                                 label = {
                                     Text(
                                         "Studio",
                                         fontSize = 11.sp,
-                                        fontWeight = if (uiState.currentTab == NavigationTab.STUDIO) FontWeight.Bold else FontWeight.Normal
+                                        fontWeight = if (uiState.currentTab.belongsToStudioSection()) FontWeight.Bold else FontWeight.Normal
                                     )
                                 },
                                 modifier = Modifier.testTag("nav_tab_studio")
-                            )
-                            NavigationBarItem(
-                                selected = uiState.currentTab == NavigationTab.INSTRUCTIONS,
-                                onClick = { viewModel.selectTab(NavigationTab.INSTRUCTIONS) },
-                                icon = { Icon(Icons.Default.Terminal, contentDescription = "Instructions") },
-                                label = {
-                                    Text(
-                                        "Prompt",
-                                        fontSize = 11.sp,
-                                        fontWeight = if (uiState.currentTab == NavigationTab.INSTRUCTIONS) FontWeight.Bold else FontWeight.Normal
-                                    )
-                                },
-                                modifier = Modifier.testTag("nav_tab_instructions")
-                            )
-                            NavigationBarItem(
-                                selected = uiState.currentTab == NavigationTab.SKILLS,
-                                onClick = { viewModel.selectTab(NavigationTab.SKILLS) },
-                                icon = { Icon(Icons.Default.LibraryBooks, contentDescription = "Skills") },
-                                label = {
-                                    Text(
-                                        "Skills",
-                                        fontSize = 11.sp,
-                                        fontWeight = if (uiState.currentTab == NavigationTab.SKILLS) FontWeight.Bold else FontWeight.Normal
-                                    )
-                                },
-                                modifier = Modifier.testTag("nav_tab_skills")
                             )
                         }
                     },
@@ -139,7 +123,9 @@ class MainActivity : ComponentActivity() {
                             NavigationTab.STUDIO -> StudioScreen(
                                 viewModel = viewModel,
                                 uiState = uiState,
-                                onNavigateToInstructions = { viewModel.selectTab(NavigationTab.INSTRUCTIONS) }
+                                onNavigateToInstructions = { viewModel.selectTab(NavigationTab.INSTRUCTIONS) },
+                                onNavigateToSkills = { viewModel.selectTab(NavigationTab.SKILLS) },
+                                onNavigateToYaml = { viewModel.selectTab(NavigationTab.YAML) }
                             )
                             NavigationTab.INSTRUCTIONS -> InstructionsScreen(
                                 viewModel = viewModel,
