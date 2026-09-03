@@ -703,12 +703,12 @@ class AiChatService {
         try {
             val text = readSseResponse(response, extractText, isComplete, onTextDelta)
             if (continuation.isActive) continuation.resume(text)
-        } catch (e: IOException) {
+        } catch (e: Exception) {
             if (continuation.isActive) continuation.resumeWithException(e)
         }
     }
 
-    private fun readSseResponse(
+    internal fun readSseResponse(
         response: Response,
         extractText: (JsonObject) -> String?,
         isComplete: (JsonObject) -> Boolean,

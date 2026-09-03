@@ -8,6 +8,11 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.Protocol
+import okhttp3.Request
+import okhttp3.Response
+import okhttp3.ResponseBody.Companion.toResponseBody
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -311,6 +316,33 @@ class AiChatServiceTest {
 
         assertFalse(service.isGeminiStreamComplete(limited))
         assertEquals("Gemini stopped with MAX_TOKENS: token limit reached", service.extractStreamError(limited))
+    }
+
+    @Test
+    fun streamingDeltaCallbackFailurePropagates() {
+        val service = AiChatService()
+        val response = Response.Builder()
+            .request(Request.Builder().url("https://example.test/stream").build())
+            .protocol(Protocol.HTTP_1_1)
+            .code(200)
+            .message("OK")
+            .body(
+                "data: {\"type\":\"response.output_text.delta\",\"delta\":\"hello\"}\n\n"
+                    .toResponseBody("text/event-stream".toMediaType())
+            )
+            .build()
+
+        val result = runCatching {
+            service.readSseResponse(
+                response = response,
+                extractText = service::extractOpenAiStreamText,
+                isComplete = service::isOpenAiStreamComplete,
+                onTextDelta = { error("UI callback failed") }
+            )
+        }
+
+        assertTrue(result.isFailure)
+        assertEquals("UI callback failed", result.exceptionOrNull()?.message)
     }
 
 }
