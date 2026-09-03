@@ -60,17 +60,20 @@ class ProviderWebActivityTest {
 
     @Test
     fun vibeTrackerRejectsIdleFingerprintOnTheSameSubmitControl() {
-        assertTrue(evaluateGenerationControlPredicate(activeSubmitIds = listOf("active")))
+        val activeSubmitId = "active"
+        val otherSubmitId = "other"
+
+        assertTrue(evaluateGenerationControlPredicate(activeSubmitIds = listOf(activeSubmitId)))
         assertFalse(
             evaluateGenerationControlPredicate(
-                activeSubmitIds = listOf("active"),
-                idleSubmitIds = listOf("active")
+                activeSubmitIds = listOf(activeSubmitId),
+                idleSubmitIds = listOf(activeSubmitId)
             )
         )
         assertTrue(
             evaluateGenerationControlPredicate(
-                activeSubmitIds = listOf("active"),
-                idleSubmitIds = listOf("other")
+                activeSubmitIds = listOf(activeSubmitId),
+                idleSubmitIds = listOf(otherSubmitId)
             )
         )
 
