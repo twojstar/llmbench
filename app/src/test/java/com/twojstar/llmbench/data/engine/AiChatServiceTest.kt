@@ -22,6 +22,7 @@ private const val CLAUDE_ANSWER = "claude answer"
 private const val GEMINI_ANSWER = "gemini answer"
 private const val SIMULATED_ANSWER = "simulated answer"
 private const val SYSTEM_PROMPT = "system"
+private const val STREAM_HELLO = "hello"
 
 class AiChatServiceTest {
     @Test
@@ -245,9 +246,9 @@ class AiChatServiceTest {
             """{"type":"content_block_delta","delta":{"type":"text_delta","text":"hello"}}"""
         ).jsonObject
 
-        assertEquals("hello", service.extractGeminiStreamText(gemini))
-        assertEquals("hello", service.extractOpenAiStreamText(openAi))
-        assertEquals("hello", service.extractClaudeStreamText(claude))
+        assertEquals(STREAM_HELLO, service.extractGeminiStreamText(gemini))
+        assertEquals(STREAM_HELLO, service.extractOpenAiStreamText(openAi))
+        assertEquals(STREAM_HELLO, service.extractClaudeStreamText(claude))
     }
 
     @Test

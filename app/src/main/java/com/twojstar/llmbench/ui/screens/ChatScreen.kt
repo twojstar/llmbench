@@ -47,6 +47,7 @@ import com.twojstar.llmbench.ui.viewmodel.StudioViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
+// skipcq: KT-R1006 - Existing screen composition complexity is outside this streaming/cancellation change.
 fun ChatScreen(
     viewModel: StudioViewModel,
     uiState: StudioUiState,

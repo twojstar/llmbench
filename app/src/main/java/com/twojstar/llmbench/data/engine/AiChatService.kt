@@ -33,6 +33,19 @@ private const val JSON_CONTENT_KEY = "content"
 private const val JSON_PARTS_KEY = "parts"
 private const val JSON_TEXT_KEY = "text"
 private const val JSON_MODEL_KEY = "model"
+private const val JSON_PRICING_KEY = "pricing"
+private const val JSON_INPUT_KEY = "input"
+private const val JSON_OUTPUT_KEY = "output"
+private const val JSON_CANDIDATES_KEY = "candidates"
+private const val JSON_SYSTEM_KEY = "system"
+private const val JSON_MESSAGES_KEY = "messages"
+private const val JSON_MAX_TOKENS_KEY = "max_tokens"
+private const val JSON_STORE_KEY = "store"
+private const val JSON_INSTRUCTIONS_KEY = "instructions"
+private const val JSON_MEDIA_TYPE = "application/json"
+private const val HEADER_AUTHORIZATION = "Authorization"
+private const val HEADER_CONTENT_TYPE = "Content-Type"
+private const val HEADER_CONTENT_TYPE_LOWER = "content-type"
 private const val SSE_DATA_PREFIX = "data:"
 private const val SSE_DONE = "[DONE]"
 private const val STREAM_TYPE_KEY = "type"
@@ -112,7 +125,7 @@ class AiChatService {
             else -> ""
         }.trim()
         if (apiKey.isNotBlank()) {
-            requestBuilder.header("Authorization", "Bearer $apiKey")
+            requestBuilder.header(HEADER_AUTHORIZATION, bearerToken(apiKey))
         }
         config.extraHeaders.forEach { (name, value) -> requestBuilder.header(name, value) }
 
@@ -138,7 +151,7 @@ class AiChatService {
             when (provider) {
                 AiProvider.OPENROUTER -> {
                     val id = model["id"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
-                    val pricing = model["pricing"]?.jsonObject
+                    val pricing = model[JSON_PRICING_KEY]?.jsonObject
                     val outputModalities = model["architecture"]?.jsonObject
                         ?.get("output_modalities")?.jsonArray
                         ?.mapNotNull { it.jsonPrimitive.contentOrNull }
@@ -151,11 +164,11 @@ class AiChatService {
                 }
                 AiProvider.AIHUBMIX -> {
                     val id = model["model_id"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
-                    val pricing = model["pricing"]?.jsonObject
+                    val pricing = model[JSON_PRICING_KEY]?.jsonObject
                     GatewayModelCatalogEntry(
                         id = id,
-                        inputPriceUsd = pricing?.get("input").asDoubleOrNull(),
-                        outputPriceUsd = pricing?.get("output").asDoubleOrNull(),
+                        inputPriceUsd = pricing?.get(JSON_INPUT_KEY).asDoubleOrNull(),
+                        outputPriceUsd = pricing?.get(JSON_OUTPUT_KEY).asDoubleOrNull(),
                         supportsTextOutput = model["types"]?.jsonPrimitive?.contentOrNull?.equals("llm", ignoreCase = true) == true
                     )
                 }
@@ -168,6 +181,8 @@ class AiChatService {
         is JsonPrimitive -> contentOrNull?.toDoubleOrNull()
         else -> null
     }
+
+    private fun bearerToken(apiKey: String): String = "Bearer $apiKey"
 
     suspend fun generateResponse(
         prompt: String,
@@ -382,7 +397,7 @@ class AiChatService {
             }
         }
 
-        val body = requestPayload.toString().toRequestBody("application/json".toMediaType())
+        val body = requestPayload.toString().toRequestBody(JSON_MEDIA_TYPE.toMediaType())
         val request = Request.Builder()
             .url(url)
             .post(body)
@@ -396,7 +411,7 @@ class AiChatService {
             }
 
             val parsed = json.parseToJsonElement(responseBody).jsonObject
-            val text = parsed["candidates"]?.jsonArray
+            val text = parsed[JSON_CANDIDATES_KEY]?.jsonArray
                 ?.firstOrNull()?.jsonObject
                 ?.get(JSON_CONTENT_KEY)?.jsonObject
                 ?.get(JSON_PARTS_KEY)?.jsonArray
@@ -421,18 +436,18 @@ class AiChatService {
 
         val requestPayload = buildJsonObject {
             put(JSON_MODEL_KEY, model)
-            put("input", buildOpenAiResponseInput(prompt, conversationHistory, systemInstruction))
-            put("store", false)
+            put(JSON_INPUT_KEY, buildOpenAiResponseInput(prompt, conversationHistory, systemInstruction))
+            put(JSON_STORE_KEY, false)
             if (!systemInstruction.isNullOrBlank()) {
-                put("instructions", systemInstruction)
+                put(JSON_INSTRUCTIONS_KEY, systemInstruction)
             }
         }
 
-        val body = requestPayload.toString().toRequestBody("application/json".toMediaType())
+        val body = requestPayload.toString().toRequestBody(JSON_MEDIA_TYPE.toMediaType())
         val request = Request.Builder()
             .url(url)
-            .addHeader("Authorization", "Bearer $apiKey")
-            .addHeader("Content-Type", "application/json")
+            .addHeader(HEADER_AUTHORIZATION, bearerToken(apiKey))
+            .addHeader(HEADER_CONTENT_TYPE, JSON_MEDIA_TYPE)
             .post(body)
             .build()
 
@@ -444,7 +459,7 @@ class AiChatService {
             }
 
             val parsed = json.parseToJsonElement(responseBody).jsonObject
-            val text = parsed["output"]?.jsonArray.orEmpty().asSequence()
+            val text = parsed[JSON_OUTPUT_KEY]?.jsonArray.orEmpty().asSequence()
                 .mapNotNull { it as? JsonObject }
                 .filter { it[STREAM_TYPE_KEY]?.jsonPrimitive?.contentOrNull == STREAM_MESSAGE_KEY }
                 .flatMap { message -> message[JSON_CONTENT_KEY]?.jsonArray.orEmpty().asSequence() }
@@ -471,19 +486,19 @@ class AiChatService {
 
         val requestPayload = buildJsonObject {
             put(JSON_MODEL_KEY, model)
-            put("max_tokens", 2048)
+            put(JSON_MAX_TOKENS_KEY, 2048)
             if (!systemInstruction.isNullOrBlank()) {
-                put("system", systemInstruction)
+                put(JSON_SYSTEM_KEY, systemInstruction)
             }
-            put("messages", messagesArray)
+            put(JSON_MESSAGES_KEY, messagesArray)
         }
 
-        val body = requestPayload.toString().toRequestBody("application/json".toMediaType())
+        val body = requestPayload.toString().toRequestBody(JSON_MEDIA_TYPE.toMediaType())
         val request = Request.Builder()
             .url(url)
             .addHeader("x-api-key", apiKey)
             .addHeader("anthropic-version", "2023-06-01")
-            .addHeader("content-type", "application/json")
+            .addHeader(HEADER_CONTENT_TYPE_LOWER, JSON_MEDIA_TYPE)
             .post(body)
             .build()
 
@@ -507,7 +522,7 @@ class AiChatService {
     }
 
     internal fun extractGeminiStreamText(event: JsonObject): String? =
-        event["candidates"]?.jsonArray
+        event[JSON_CANDIDATES_KEY]?.jsonArray
             ?.firstOrNull()?.jsonObject
             ?.get(JSON_CONTENT_KEY)?.jsonObject
             ?.get(JSON_PARTS_KEY)?.jsonArray
@@ -553,7 +568,7 @@ class AiChatService {
         }
         val request = Request.Builder()
             .url(url)
-            .post(requestPayload.toString().toRequestBody("application/json".toMediaType()))
+            .post(requestPayload.toString().toRequestBody(JSON_MEDIA_TYPE.toMediaType()))
             .build()
         return executeSse(request, ::extractGeminiStreamText, ::isGeminiStreamComplete, onTextDelta)
             .ifEmpty { "Received empty content response from Gemini." }
@@ -569,16 +584,16 @@ class AiChatService {
     ): String {
         val requestPayload = buildJsonObject {
             put(JSON_MODEL_KEY, model)
-            put("input", buildOpenAiResponseInput(prompt, conversationHistory, systemInstruction))
-            put("store", false)
+            put(JSON_INPUT_KEY, buildOpenAiResponseInput(prompt, conversationHistory, systemInstruction))
+            put(JSON_STORE_KEY, false)
             put("stream", true)
-            if (!systemInstruction.isNullOrBlank()) put("instructions", systemInstruction)
+            if (!systemInstruction.isNullOrBlank()) put(JSON_INSTRUCTIONS_KEY, systemInstruction)
         }
         val request = Request.Builder()
             .url("https://api.openai.com/v1/responses")
-            .addHeader("Authorization", "Bearer $apiKey")
-            .addHeader("Content-Type", "application/json")
-            .post(requestPayload.toString().toRequestBody("application/json".toMediaType()))
+            .addHeader(HEADER_AUTHORIZATION, bearerToken(apiKey))
+            .addHeader(HEADER_CONTENT_TYPE, JSON_MEDIA_TYPE)
+            .post(requestPayload.toString().toRequestBody(JSON_MEDIA_TYPE.toMediaType()))
             .build()
         return executeSse(request, ::extractOpenAiStreamText, ::isOpenAiStreamComplete, onTextDelta)
             .ifEmpty { "Received empty message content from OpenAI." }
@@ -594,24 +609,24 @@ class AiChatService {
     ): String {
         val requestPayload = buildJsonObject {
             put(JSON_MODEL_KEY, model)
-            put("max_tokens", 2048)
+            put(JSON_MAX_TOKENS_KEY, 2048)
             put("stream", true)
-            if (!systemInstruction.isNullOrBlank()) put("system", systemInstruction)
-            put("messages", buildClaudeMessages(prompt, conversationHistory, systemInstruction))
+            if (!systemInstruction.isNullOrBlank()) put(JSON_SYSTEM_KEY, systemInstruction)
+            put(JSON_MESSAGES_KEY, buildClaudeMessages(prompt, conversationHistory, systemInstruction))
         }
         val request = Request.Builder()
             .url("https://api.anthropic.com/v1/messages")
             .addHeader("x-api-key", apiKey)
             .addHeader("anthropic-version", "2023-06-01")
-            .addHeader("content-type", "application/json")
-            .post(requestPayload.toString().toRequestBody("application/json".toMediaType()))
+            .addHeader(HEADER_CONTENT_TYPE_LOWER, JSON_MEDIA_TYPE)
+            .post(requestPayload.toString().toRequestBody(JSON_MEDIA_TYPE.toMediaType()))
             .build()
         return executeSse(request, ::extractClaudeStreamText, ::isClaudeStreamComplete, onTextDelta)
             .ifEmpty { "Received empty content block from Claude." }
     }
 
     internal fun extractStreamError(event: JsonObject): String? {
-        val geminiCandidate = event["candidates"]?.jsonArray?.firstOrNull() as? JsonObject
+        val geminiCandidate = event[JSON_CANDIDATES_KEY]?.jsonArray?.firstOrNull() as? JsonObject
         val geminiFinishReason = geminiCandidate?.get("finishReason")?.jsonPrimitive?.contentOrNull
         if (geminiFinishReason != null && geminiFinishReason != "STOP") {
             val finishMessage = geminiCandidate["finishMessage"]?.jsonPrimitive?.contentOrNull
@@ -645,7 +660,7 @@ class AiChatService {
     }
 
     internal fun isGeminiStreamComplete(event: JsonObject): Boolean =
-        event["candidates"]?.jsonArray
+        event[JSON_CANDIDATES_KEY]?.jsonArray
             ?.firstOrNull()?.jsonObject
             ?.get("finishReason")?.jsonPrimitive?.contentOrNull == "STOP"
 
@@ -783,14 +798,14 @@ class AiChatService {
 
         val requestPayload = buildJsonObject {
             put(JSON_MODEL_KEY, model)
-            put("messages", messagesArray)
+            put(JSON_MESSAGES_KEY, messagesArray)
         }
 
-        val body = requestPayload.toString().toRequestBody("application/json".toMediaType())
+        val body = requestPayload.toString().toRequestBody(JSON_MEDIA_TYPE.toMediaType())
         val requestBuilder = Request.Builder()
             .url(config.endpointUrl)
-            .addHeader("Authorization", "Bearer $apiKey")
-            .addHeader("Content-Type", "application/json")
+            .addHeader(HEADER_AUTHORIZATION, bearerToken(apiKey))
+            .addHeader(HEADER_CONTENT_TYPE, JSON_MEDIA_TYPE)
         config.extraHeaders.forEach { (name, value) -> requestBuilder.addHeader(name, value) }
         val request = requestBuilder.post(body).build()
 
@@ -812,7 +827,7 @@ class AiChatService {
     ): JsonArray = buildJsonArray {
         if (!systemInstruction.isNullOrBlank()) {
             addJsonObject {
-                put(JSON_ROLE_KEY, "system")
+                put(JSON_ROLE_KEY, JSON_SYSTEM_KEY)
                 put(JSON_CONTENT_KEY, systemInstruction)
             }
         }
