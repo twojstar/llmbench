@@ -83,7 +83,7 @@ class ChatModelsTest {
         )
 
         assertEquals(
-            listOf("openrouter/free", "free-a", "free-b"),
+            listOf("free-a", "free-b"),
             freeGatewayModelOptions(AiProvider.OPENROUTER, catalog)
         )
         assertEquals(
