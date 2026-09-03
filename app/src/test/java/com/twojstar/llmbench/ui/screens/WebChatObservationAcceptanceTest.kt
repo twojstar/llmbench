@@ -143,11 +143,6 @@ class WebChatObservationAcceptanceTest {
             )
         )
     }
-    @Test
-    fun liveProviderWithoutTrackingRequiresDisplayModeReloadConfirmation() {
-        assertTrue(shouldConfirmUntrackedDisplayModeReload(hasLiveWebView = true, trackingSupported = false))
-        assertFalse(shouldConfirmUntrackedDisplayModeReload(hasLiveWebView = true, trackingSupported = true))
-        assertFalse(shouldConfirmUntrackedDisplayModeReload(hasLiveWebView = false, trackingSupported = false))
-    }
+
 
 }

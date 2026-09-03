@@ -97,11 +97,6 @@ internal fun nextObservedWebChatActivityStatus(
     return if (isLiveService) nextStatus else webChatActivityStatusAfterEviction(nextStatus)
 }
 
-internal fun shouldConfirmUntrackedDisplayModeReload(
-    hasLiveWebView: Boolean,
-    trackingSupported: Boolean
-): Boolean = hasLiveWebView && !trackingSupported
-
 internal fun shouldApplyPendingDesktopMode(
     observation: WebChatGenerationObservation,
     trackingSupported: Boolean,
@@ -132,9 +127,6 @@ fun WebChatScreen(
     var canGoBack by remember { mutableStateOf(false) }
     var canGoForward by remember { mutableStateOf(false) }
     var showPromptHelperDialog by remember { mutableStateOf(false) }
-    var pendingUntrackedDisplayModeConfirmation by remember {
-        mutableStateOf<Pair<WebAiService, Boolean>?>(null)
-    }
     var pendingExternalIntentUri by remember { mutableStateOf<Uri?>(null) }
     val pendingFileCallback = remember { mutableStateOf<ValueCallback<Array<Uri>>?>(null) }
 
@@ -355,15 +347,8 @@ fun WebChatScreen(
                         val service = selectedService
                         val currentMode = pendingDesktopModes[service] ?: isDesktopMode
                         val nextDesktopMode = !currentMode
-                        val hasLiveWebView = webViewMap[service] != null
-                        if (!hasLiveWebView) {
+                        if (webViewMap[service] == null) {
                             desktopModes[service] = nextDesktopMode
-                        } else if (shouldConfirmUntrackedDisplayModeReload(
-                                hasLiveWebView = true,
-                                trackingSupported = providerGenerationTrackingSupported(service)
-                            )
-                        ) {
-                            pendingUntrackedDisplayModeConfirmation = service to nextDesktopMode
                         } else {
                             pendingDesktopModes[service] = nextDesktopMode
                             probeServiceActivity(service)
@@ -489,33 +474,6 @@ fun WebChatScreen(
             openExternalIntentUri(context, pendingUri)
         }
     )
-
-    pendingUntrackedDisplayModeConfirmation?.let { (service, nextDesktopMode) ->
-        AlertDialog(
-            onDismissRequest = { pendingUntrackedDisplayModeConfirmation = null },
-            title = { Text("Reload ${service.shortName}?") },
-            text = {
-                Text("LlmBench cannot verify whether ${service.shortName} is currently replying. Reloading may interrupt an active response.")
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    pendingUntrackedDisplayModeConfirmation = null
-                    val webView = webViewMap[service]
-                    pendingDesktopModes.remove(service)
-                    desktopModes[service] = nextDesktopMode
-                    if (webView != null) {
-                        applyUserAgent(webView, nextDesktopMode)
-                        webView.reload()
-                    }
-                }) { Text("Reload") }
-            },
-            dismissButton = {
-                TextButton(onClick = { pendingUntrackedDisplayModeConfirmation = null }) {
-                    Text("Cancel")
-                }
-            }
-        )
-    }
 
     if (showPromptHelperDialog) {
         AlertDialog(
@@ -754,8 +712,14 @@ private fun WebChatToolbar(
                                 )
                             },
                             onClick = {
-                                onToggleDesktopMode()
                                 menuExpanded = false
+                                if (providerGenerationTrackingSupported(selectedService)) {
+                                    onToggleDesktopMode()
+                                } else {
+                                    onShowSnackbar(
+                                        "Display mode switching is disabled until ${selectedService.shortName} activity tracking is verified."
+                                    )
+                                }
                             }
                         )
                         DropdownMenuItem(
