@@ -52,11 +52,11 @@ Full means the LlmBench-side integration is implemented; provider-side login or 
 | Kimi Web | Full | Provider page in WebView | Yes | Generating + unread | Persistent session |
 | Mistral Vibe Web | Full | Provider page in WebView | Yes | Generating + unread | Tracks the locale-independent square stop control in the composer |
 | Qwen Web | Partial | Provider page in WebView | Page-driven | Not yet | Persistent session, file chooser and mobile/desktop mode are integrated; provider-specific activity probe still needs verification |
-| Microsoft Copilot Web | Partial | Microsoft sign-in is provider-owned | Yes | Not yet | Microsoft documents chat file upload; embedded sign-in and provider-specific activity tracking still need verification |
+| Microsoft Copilot Web | Partial | Microsoft sign-in is provider-owned | Provider-documented; embedded not verified | Not yet | Microsoft documents chat file upload; embedded sign-in/upload flow and provider-specific activity tracking still need verification |
 | Z.ai Web | Partial | Provider page in WebView | Page-driven | Not yet | Persistent session, file chooser and mobile/desktop mode are integrated; provider-specific activity probe still needs verification |
-| Grok Web | Partial | Provider page in WebView | Yes | Not yet | xAI documents multi-file upload on the web; provider-specific activity tracking still needs verification |
+| Grok Web | Partial | Provider page in WebView | Provider-documented; embedded not verified | Not yet | xAI documents multi-file upload on the web; embedded upload flow and provider-specific activity tracking still need verification |
 | Character.AI Web | Partial | Provider page in WebView | Page-driven | Not yet | Persistent WebView shell is integrated; embedded sign-in, uploads and activity probe still need verification |
-| Venice Web | Partial | Provider page in WebView | Yes | Not yet | Venice documents file uploads in the chat input; embedded sign-in and provider-specific activity tracking still need verification |
+| Venice Web | Partial | Provider page in WebView | Provider-documented; embedded not verified | Not yet | Venice documents file uploads in the chat input; embedded sign-in/upload flow and provider-specific activity tracking still need verification |
 | Meta AI Web | Partial | Meta login surface is provider-owned | Not verified | Not yet | `alpha.meta.ai` is a verified provider-owned login alias; embedded sign-in, chat uploads and activity tracking still need verification |
 | Gemini AI Studio | Browser-only | System browser | Browser-owned | Browser-owned | Kept out of WebView because Google OAuth forbids authorization in embedded user-agents |
 | OpenRouter Free | Native gateway | API key | N/A | Native request state | Uses openrouter/free; excluded from default All Models compare |
@@ -119,7 +119,7 @@ Backends are optional, not the default. If a feature truly needs one, prefer a t
 - [x] create a provider-tweak/userscript interface instead of hard-coded WebView hacks
 - [x] show generating and unread response status on ChatGPT, Claude, Gemini, DeepSeek, Kimi and Vibe web tabs
 - [x] add Qwen, Microsoft Copilot, Z.ai, Grok, Character.AI, Venice and Meta AI account-backed WebView entries
-- [ ] verify embedded sign-in, uploads and provider-specific generation activity probes for Qwen, Copilot, Z.ai, Grok, Character.AI, Venice and Meta AI
+- [ ] verify embedded sign-in, embedded upload flows and provider-specific generation activity probes for Qwen, Copilot, Z.ai, Grok, Character.AI, Venice and Meta AI
 - [x] add CI build/lint checks
 - [x] document which providers work fully, partially, or block embedded login
 
