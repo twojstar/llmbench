@@ -55,21 +55,23 @@ class ConversationHistoryTest {
     @Test
     fun truncationKeepsNewestCompleteTurnsWithoutOrphanAssistant() {
         val prompt = "new prompt"
+        val recentUser = "recent user"
+        val recentAssistant = "recent assistant"
         val history = listOf(
             ModelChatMessage(id = "u1", sender = CHAT_ROLE_USER, text = "old user"),
             ModelChatMessage(
                 id = "a1", sender = CHAT_ROLE_ASSISTANT, provider = AiProvider.CLAUDE,
                 text = "old assistant"
             ),
-            ModelChatMessage(id = "u2", sender = CHAT_ROLE_USER, text = "recent user"),
+            ModelChatMessage(id = "u2", sender = CHAT_ROLE_USER, text = recentUser),
             ModelChatMessage(
                 id = "a2", sender = CHAT_ROLE_ASSISTANT, provider = AiProvider.CLAUDE,
-                text = "recent assistant"
+                text = recentAssistant
             ),
             ModelChatMessage(id = "u3", sender = CHAT_ROLE_USER, text = prompt)
         )
 
-        val recentSegmentCost = "recent user".length + "recent assistant".length + (2 * 32)
+        val recentSegmentCost = recentUser.length + recentAssistant.length + (2 * 32)
         val turns = buildBoundedProviderTextTurns(
             prompt = prompt,
             conversationHistory = history,
@@ -79,7 +81,7 @@ class ConversationHistoryTest {
         )
 
         assertEquals(
-            listOf("recent user", "recent assistant", prompt),
+            listOf(recentUser, recentAssistant, prompt),
             turns.map { it.text }
         )
         assertEquals(CHAT_ROLE_USER, turns.first().role)

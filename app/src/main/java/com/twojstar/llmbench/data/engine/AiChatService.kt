@@ -18,6 +18,11 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.util.concurrent.TimeUnit
 
+private const val JSON_ROLE_KEY = "role"
+private const val JSON_CONTENT_KEY = "content"
+private const val JSON_PARTS_KEY = "parts"
+private const val JSON_TEXT_KEY = "text"
+
 class AiChatService {
 
     private data class OpenAiCompatibleProviderConfig(
@@ -270,9 +275,9 @@ class AiChatService {
             prompt, conversationHistory, AiProvider.GEMINI, systemInstruction
         ).forEach { turn ->
             addJsonObject {
-                put("role", if (turn.role == CHAT_ROLE_ASSISTANT) "model" else CHAT_ROLE_USER)
-                putJsonArray("parts") {
-                    addJsonObject { put("text", turn.text) }
+                put(JSON_ROLE_KEY, if (turn.role == CHAT_ROLE_ASSISTANT) "model" else CHAT_ROLE_USER)
+                putJsonArray(JSON_PARTS_KEY) {
+                    addJsonObject { put(JSON_TEXT_KEY, turn.text) }
                 }
             }
         }
@@ -287,8 +292,8 @@ class AiChatService {
             prompt, conversationHistory, AiProvider.CHATGPT, systemInstruction
         ).forEach { turn ->
             addJsonObject {
-                put("role", turn.role)
-                put("content", turn.text)
+                put(JSON_ROLE_KEY, turn.role)
+                put(JSON_CONTENT_KEY, turn.text)
             }
         }
     }
@@ -302,8 +307,8 @@ class AiChatService {
             prompt, conversationHistory, AiProvider.CLAUDE, systemInstruction
         ).forEach { turn ->
             addJsonObject {
-                put("role", turn.role)
-                put("content", turn.text)
+                put(JSON_ROLE_KEY, turn.role)
+                put(JSON_CONTENT_KEY, turn.text)
             }
         }
     }
@@ -323,8 +328,8 @@ class AiChatService {
             put("contents", contentsArray)
             if (!systemInstruction.isNullOrBlank()) {
                 putJsonObject("systemInstruction") {
-                    putJsonArray("parts") {
-                        addJsonObject { put("text", systemInstruction) }
+                    putJsonArray(JSON_PARTS_KEY) {
+                        addJsonObject { put(JSON_TEXT_KEY, systemInstruction) }
                     }
                 }
             }
@@ -346,8 +351,8 @@ class AiChatService {
             val parsed = json.parseToJsonElement(responseBody).jsonObject
             val text = parsed["candidates"]?.jsonArray
                 ?.firstOrNull()?.jsonObject
-                ?.get("content")?.jsonObject
-                ?.get("parts")?.jsonArray
+                ?.get(JSON_CONTENT_KEY)?.jsonObject
+                ?.get(JSON_PARTS_KEY)?.jsonArray
                 .orEmpty()
                 .mapNotNull { it.jsonObject["text"]?.jsonPrimitive?.contentOrNull }
                 .joinToString(separator = "")
@@ -495,7 +500,7 @@ class AiChatService {
             val choices = parsed["choices"]?.jsonArray
             val firstChoice = choices?.getOrNull(0)?.jsonObject
             val message = firstChoice?.get("message")?.jsonObject
-            val content = message?.get("content")?.jsonPrimitive?.contentOrNull
+            val content = message?.get(JSON_CONTENT_KEY)?.jsonPrimitive?.contentOrNull
 
             return content ?: "Received empty message content."
         }
@@ -509,8 +514,8 @@ class AiChatService {
     ): JsonArray = buildJsonArray {
         if (!systemInstruction.isNullOrBlank()) {
             addJsonObject {
-                put("role", "system")
-                put("content", systemInstruction)
+                put(JSON_ROLE_KEY, "system")
+                put(JSON_CONTENT_KEY, systemInstruction)
             }
         }
 
@@ -521,8 +526,8 @@ class AiChatService {
             systemInstruction = systemInstruction
         ).forEach { turn ->
             addJsonObject {
-                put("role", turn.role)
-                put("content", turn.text)
+                put(JSON_ROLE_KEY, turn.role)
+                put(JSON_CONTENT_KEY, turn.text)
             }
         }
     }
