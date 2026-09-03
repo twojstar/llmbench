@@ -313,7 +313,7 @@ class StudioPromptBridgeTest {
         document.activeElement = ${if (active) "target" else "document.body"};
     """.trimIndent()
 
-    private fun jsQuote(value: String): String = org.json.JSONObject.quote(value)
+    private fun jsQuote(value: String): String = javascriptStringLiteral(value)
 
     private val browserMocks = """
         var events = [];

@@ -2,7 +2,6 @@ package com.twojstar.llmbench.web
 
 import android.webkit.WebView
 import com.twojstar.llmbench.data.model.WebAiService
-import org.json.JSONObject
 
 internal enum class StudioPromptApplyResult {
     INSERTED,
@@ -16,9 +15,33 @@ internal enum class StudioPromptApplyResult {
 private const val STUDIO_PROMPT_TRACKER_KEY = "__llmbenchStudioPromptTarget"
 private const val TRACKED_EDITOR_MAX_AGE_MS = 15_000
 
+internal fun javascriptStringLiteral(value: String): String = buildString(value.length + 2) {
+    append('"')
+    value.forEach { char ->
+        when (char) {
+            '\\' -> append("\\\\")
+            '"' -> append("\\\"")
+            '\b' -> append("\\b")
+            '\u000C' -> append("\\f")
+            '\n' -> append("\\n")
+            '\r' -> append("\\r")
+            '\t' -> append("\\t")
+            '\u2028' -> append("\\u2028")
+            '\u2029' -> append("\\u2029")
+            else -> if (char.code < 0x20) {
+                append("\\u")
+                append(char.code.toString(16).padStart(4, '0'))
+            } else {
+                append(char)
+            }
+        }
+    }
+    append('"')
+}
+
 private fun providerRuntimeGuardScript(service: WebAiService, offProviderResult: String): String {
     val allowedHosts = ProviderWebTweakRegistry.ownedHosts(service)
-        .joinToString(prefix = "[", postfix = "]") { JSONObject.quote(it) }
+        .joinToString(prefix = "[", postfix = "]") { javascriptStringLiteral(it) }
     return """
         var allowedHosts = $allowedHosts;
         var currentHost = String(location.hostname || '').toLowerCase();
@@ -33,7 +56,7 @@ private fun providerRuntimeGuardScript(service: WebAiService, offProviderResult:
 }
 
 private fun documentRuntimeGuardScript(pageUrl: String, offProviderResult: String): String {
-    val expectedUrl = JSONObject.quote(pageUrl.substringBefore('#'))
+    val expectedUrl = javascriptStringLiteral(pageUrl.substringBefore('#'))
     return """
         function llmbenchDocumentUrl(value) {
             return String(value || '').split('#')[0];
@@ -80,13 +103,13 @@ internal fun studioPromptTargetTrackerScript(
     pageUrl: String
 ): String? {
     if (!providerUrlMatches(service, pageUrl)) return null
-    val providerId = JSONObject.quote(service.id)
+    val providerId = javascriptStringLiteral(service.id)
     return """
         (() => {
             ${providerRuntimeGuardScript(service, "false")}
             ${documentRuntimeGuardScript(pageUrl, "false")}
             ${editableFinderScript()}
-            var key = ${JSONObject.quote(STUDIO_PROMPT_TRACKER_KEY)};
+            var key = ${javascriptStringLiteral(STUDIO_PROMPT_TRACKER_KEY)};
             var state = window[key] || { target: null, focusedAt: 0, installed: false, providerId: $providerId };
             window[key] = state;
             state.providerId = $providerId;
@@ -123,13 +146,13 @@ internal fun studioPromptApplyScript(
     prompt: String
 ): String? {
     if (!providerUrlMatches(service, pageUrl)) return null
-    val text = JSONObject.quote(prompt)
+    val text = javascriptStringLiteral(prompt)
     return """
         (() => {
             ${providerRuntimeGuardScript(service, "'off-provider'")}
             ${documentRuntimeGuardScript(pageUrl, "'off-provider'")}
             ${editableFinderScript()}
-            var key = ${JSONObject.quote(STUDIO_PROMPT_TRACKER_KEY)};
+            var key = ${javascriptStringLiteral(STUDIO_PROMPT_TRACKER_KEY)};
             var state = window[key];
             var target = llmbenchFindEditable(document.activeElement);
             if (!target && state && state.target && state.target.isConnected !== false) {
