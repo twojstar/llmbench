@@ -119,11 +119,13 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
     // --- Chat Screen Actions ---
 
     fun setChatProvider(provider: AiProvider) {
-        val knownModels = _uiState.value.gatewayModelOptions[provider] ?: provider.availableModels
+        val state = _uiState.value
+        val knownModels = state.gatewayModelOptions[provider] ?: provider.availableModels
         val newModel = when {
             provider == AiProvider.ALL -> "all"
+            state.selectedChatProvider == provider && state.selectedChatModel in knownModels -> state.selectedChatModel
             knownModels.isNotEmpty() -> knownModels.first()
-            else -> provider.defaultModel
+            else -> ""
         }
         _uiState.update {
             it.copy(
@@ -150,24 +152,26 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             try {
                 val models = aiChatService.fetchFreeGatewayModels(provider, apiKeys)
-                if (models.isNotEmpty()) {
-                    _uiState.update { current ->
-                        val selectedModel = if (
-                            current.selectedChatProvider == provider &&
-                            current.selectedChatModel !in models
-                        ) {
-                            models.first()
-                        } else {
-                            current.selectedChatModel
+                _uiState.update { current ->
+                    val selectedModel = if (current.selectedChatProvider == provider) {
+                        when {
+                            current.selectedChatModel in models -> current.selectedChatModel
+                            models.isNotEmpty() -> models.first()
+                            else -> ""
                         }
-                        current.copy(
-                            gatewayModelOptions = current.gatewayModelOptions + (provider to models),
-                            selectedChatModel = selectedModel
-                        )
+                    } else {
+                        current.selectedChatModel
                     }
+                    current.copy(
+                        gatewayModelOptions = current.gatewayModelOptions + (provider to models),
+                        selectedChatModel = selectedModel
+                    )
+                }
+                if (models.isEmpty()) {
+                    showSnackbar("No free text models are currently available for ${provider.shortName}.")
                 }
             } catch (_: Exception) {
-                // Keep the last successful catalog or bundled fallback.
+                showSnackbar("Could not refresh ${provider.shortName} models; using cached or bundled options.")
             } finally {
                 _uiState.update {
                     it.copy(refreshingGatewayCatalogs = it.refreshingGatewayCatalogs - provider)
@@ -229,6 +233,10 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
         val state = _uiState.value
         val targetProvider = state.selectedChatProvider
         val apiKeys = state.apiKeyConfig
+        if (targetProvider.usesLiveFreeModelCatalog() && state.gatewayModelOptions[targetProvider]?.isEmpty() == true) {
+            showSnackbar("No free text models are currently available for ${targetProvider.shortName}.")
+            return false
+        }
         val providersToRun = if (targetProvider == AiProvider.ALL) {
             apiKeys.configuredDirectProviders()
         } else {

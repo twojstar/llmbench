@@ -104,7 +104,7 @@ class AiChatService {
                         id = id,
                         inputPriceUsd = pricing?.get("prompt").asDoubleOrNull(),
                         outputPriceUsd = pricing?.get("completion").asDoubleOrNull(),
-                        supportsTextOutput = outputModalities?.contains("text") != false
+                        supportsTextOutput = outputModalities?.contains("text") == true
                     )
                 }
                 AiProvider.AIHUBMIX -> {

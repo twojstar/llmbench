@@ -93,9 +93,9 @@ class ChatModelsTest {
     }
 
     @Test
-    fun emptyLiveGatewayCatalogFallsBackToBundledModels() {
+    fun successfulEmptyLiveGatewayCatalogStaysEmpty() {
         assertEquals(
-            AiProvider.AIHUBMIX.availableModels,
+            emptyList<String>(),
             freeGatewayModelOptions(AiProvider.AIHUBMIX, emptyList())
         )
     }

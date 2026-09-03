@@ -112,6 +112,10 @@ class AiChatServiceTest {
                   "id": "vendor/image-only",
                   "pricing": {"prompt": "0", "completion": "0"},
                   "architecture": {"output_modalities": ["image"]}
+                },
+                {
+                  "id": "vendor/unknown-output",
+                  "pricing": {"prompt": "0", "completion": "0"}
                 }
               ]
             }
@@ -119,10 +123,11 @@ class AiChatServiceTest {
 
         val entries = AiChatService().parseGatewayModelCatalog(AiProvider.OPENROUTER, raw)
 
-        assertEquals(2, entries.size)
+        assertEquals(3, entries.size)
         assertEquals("vendor/free-model:free", entries.first().id)
         assertEquals(0.0, entries.first().inputPriceUsd ?: -1.0, 0.0)
         assertTrue(entries.first().supportsTextOutput)
+        assertFalse(entries[1].supportsTextOutput)
         assertFalse(entries.last().supportsTextOutput)
     }
 

@@ -250,12 +250,7 @@ fun freeGatewayModelOptions(
         .distinct()
         .toList()
 
-    if (liveFreeModels.isEmpty()) return provider.availableModels
-    return if (provider == AiProvider.OPENROUTER) {
-        (listOf(provider.defaultModel) + liveFreeModels).distinct()
-    } else {
-        liveFreeModels
-    }
+    return liveFreeModels
 }
 
 @Serializable
