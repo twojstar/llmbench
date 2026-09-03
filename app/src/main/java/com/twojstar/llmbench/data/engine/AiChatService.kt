@@ -13,6 +13,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.*
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.Call
@@ -33,6 +34,15 @@ private const val JSON_TEXT_KEY = "text"
 private const val JSON_MODEL_KEY = "model"
 private const val SSE_DATA_PREFIX = "data:"
 private const val SSE_DONE = "[DONE]"
+private const val STREAM_TYPE_KEY = "type"
+private const val STREAM_ERROR_KEY = "error"
+private const val STREAM_MESSAGE_KEY = "message"
+private const val STREAM_RESPONSE_KEY = "response"
+private const val STREAM_ERROR_EVENT = "error"
+private const val OPENAI_RESPONSE_FAILED = "response.failed"
+private const val OPENAI_RESPONSE_COMPLETED = "response.completed"
+private const val OPENAI_RESPONSE_INCOMPLETE = "response.incomplete"
+private const val CLAUDE_MESSAGE_STOP = "message_stop"
 
 class AiChatService {
 
@@ -594,18 +604,18 @@ class AiChatService {
     }
 
     internal fun extractStreamError(event: JsonObject): String? {
-        val type = event["type"]?.jsonPrimitive?.contentOrNull
+        val type = event[STREAM_TYPE_KEY]?.jsonPrimitive?.contentOrNull
         return when (type) {
-            "response.failed" -> event["response"]?.jsonObject
-                ?.get("error")?.jsonObject
-                ?.get("message")?.jsonPrimitive?.contentOrNull
+            OPENAI_RESPONSE_FAILED -> event[STREAM_RESPONSE_KEY]?.jsonObject
+                ?.get(STREAM_ERROR_KEY)?.jsonObject
+                ?.get(STREAM_MESSAGE_KEY)?.jsonPrimitive?.contentOrNull
                 ?: "OpenAI response failed"
-            "error" -> {
-                val error = event["error"]
+            STREAM_ERROR_EVENT -> {
+                val error = event[STREAM_ERROR_KEY]
                 when (error) {
-                    is JsonObject -> error["message"]?.jsonPrimitive?.contentOrNull ?: error.toString()
+                    is JsonObject -> error[STREAM_MESSAGE_KEY]?.jsonPrimitive?.contentOrNull ?: error.toString()
                     is JsonPrimitive -> error.contentOrNull
-                    else -> event["message"]?.jsonPrimitive?.contentOrNull ?: "Streaming API error"
+                    else -> event[STREAM_MESSAGE_KEY]?.jsonPrimitive?.contentOrNull ?: "Streaming API error"
                 }
             }
             else -> null
@@ -618,10 +628,11 @@ class AiChatService {
             ?.get("finishReason")?.jsonPrimitive?.contentOrNull != null
 
     internal fun isOpenAiStreamComplete(event: JsonObject): Boolean =
-        event["type"]?.jsonPrimitive?.contentOrNull == "response.completed"
+        event[STREAM_TYPE_KEY]?.jsonPrimitive?.contentOrNull in
+            setOf(OPENAI_RESPONSE_COMPLETED, OPENAI_RESPONSE_INCOMPLETE)
 
     internal fun isClaudeStreamComplete(event: JsonObject): Boolean =
-        event["type"]?.jsonPrimitive?.contentOrNull == "message_stop"
+        event[STREAM_TYPE_KEY]?.jsonPrimitive?.contentOrNull == CLAUDE_MESSAGE_STOP
 
     private suspend fun executeSse(
         request: Request,
@@ -638,37 +649,62 @@ class AiChatService {
 
             override fun onResponse(call: Call, response: Response) {
                 try {
-                    val collected = StringBuilder()
-                    var completed = false
-                    response.use {
-                        if (!response.isSuccessful) {
-                            val responseBody = response.body?.string().orEmpty()
-                            throw IOException(
-                                parseErrorMessage(responseBody) ?: "HTTP ${response.code}: ${response.message}"
-                            )
-                        }
-                        val source = response.body?.source() ?: throw IOException("Empty streaming response body")
-                        while (!source.exhausted()) {
-                            val line = source.readUtf8Line() ?: break
-                            if (!line.startsWith(SSE_DATA_PREFIX)) continue
-                            val payload = line.removePrefix(SSE_DATA_PREFIX).trim()
-                            if (payload.isBlank() || payload == SSE_DONE) continue
-                            val event = json.parseToJsonElement(payload).jsonObject
-                            extractStreamError(event)?.let { throw IOException(it) }
-                            extractText(event)?.takeIf { it.isNotEmpty() }?.let { delta ->
-                                collected.append(delta)
-                                onTextDelta(delta)
-                            }
-                            if (isComplete(event)) completed = true
-                        }
-                    }
-                    if (!completed) throw IOException("Streaming response ended before completion")
-                    if (continuation.isActive) continuation.resume(collected.toString())
-                } catch (e: Exception) {
+                    val text = readSseResponse(response, extractText, isComplete, onTextDelta)
+                    if (continuation.isActive) continuation.resume(text)
+                } catch (e: IOException) {
                     if (continuation.isActive) continuation.resumeWithException(e)
                 }
             }
         })
+    }
+
+    private fun readSseResponse(
+        response: Response,
+        extractText: (JsonObject) -> String?,
+        isComplete: (JsonObject) -> Boolean,
+        onTextDelta: (String) -> Unit
+    ): String {
+        val collected = StringBuilder()
+        var completed = false
+        response.use {
+            if (!response.isSuccessful) {
+                val responseBody = response.body?.string().orEmpty()
+                throw IOException(
+                    parseErrorMessage(responseBody) ?: "HTTP ${response.code}: ${response.message}"
+                )
+            }
+            val source = response.body?.source() ?: throw IOException("Empty streaming response body")
+            while (!source.exhausted()) {
+                val line = source.readUtf8Line() ?: break
+                if (!line.startsWith(SSE_DATA_PREFIX)) continue
+                val payload = line.removePrefix(SSE_DATA_PREFIX).trim()
+                val event = parseSseEvent(payload) ?: continue
+                extractStreamError(event)?.let { throw IOException(it) }
+                val delta = try {
+                    extractText(event)
+                } catch (e: IllegalArgumentException) {
+                    throw IOException("Malformed streaming event", e)
+                }
+                delta?.takeIf { it.isNotEmpty() }?.let { text ->
+                    collected.append(text)
+                    onTextDelta(text)
+                }
+                if (isComplete(event)) completed = true
+            }
+        }
+        if (!completed) throw IOException("Streaming response ended before completion")
+        return collected.toString()
+    }
+
+    private fun parseSseEvent(payload: String): JsonObject? {
+        if (payload.isBlank() || payload == SSE_DONE) return null
+        return try {
+            json.parseToJsonElement(payload).jsonObject
+        } catch (e: SerializationException) {
+            throw IOException("Malformed streaming event", e)
+        } catch (e: IllegalArgumentException) {
+            throw IOException("Malformed streaming event", e)
+        }
     }
 
     private suspend fun executeCancellableJson(request: Request): String =
@@ -691,7 +727,7 @@ class AiChatService {
                             }
                             if (continuation.isActive) continuation.resume(responseBody)
                         }
-                    } catch (e: Exception) {
+                    } catch (e: IOException) {
                         if (continuation.isActive) continuation.resumeWithException(e)
                     }
                 }

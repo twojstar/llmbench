@@ -256,6 +256,9 @@ class AiChatServiceTest {
         val openAi = Json.parseToJsonElement(
             """{"type":"response.completed","response":{"id":"resp_1"}}"""
         ).jsonObject
+        val openAiIncomplete = Json.parseToJsonElement(
+            """{"type":"response.incomplete","response":{"id":"resp_2"}}"""
+        ).jsonObject
         val claude = Json.parseToJsonElement(
             """{"type":"message_delta","delta":{"stop_reason":"end_turn"}}"""
         ).jsonObject
@@ -273,12 +276,16 @@ class AiChatServiceTest {
         val openAi = Json.parseToJsonElement(
             """{"type":"response.completed","response":{"id":"resp_1"}}"""
         ).jsonObject
+        val openAiIncomplete = Json.parseToJsonElement(
+            """{"type":"response.incomplete","response":{"id":"resp_2"}}"""
+        ).jsonObject
         val claude = Json.parseToJsonElement(
             """{"type":"message_stop"}"""
         ).jsonObject
 
         assertTrue(service.isGeminiStreamComplete(gemini))
         assertTrue(service.isOpenAiStreamComplete(openAi))
+        assertTrue(service.isOpenAiStreamComplete(openAiIncomplete))
         assertTrue(service.isClaudeStreamComplete(claude))
     }
 
