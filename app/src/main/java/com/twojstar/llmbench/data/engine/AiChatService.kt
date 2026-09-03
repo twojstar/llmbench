@@ -777,7 +777,12 @@ class AiChatService {
     ) {
         val text = delta?.takeIf { it.isNotEmpty() } ?: return
         collected.append(text)
-        onTextDelta(text)
+        val failure = runCatching { onTextDelta(text) }.exceptionOrNull()
+        when (failure) {
+            null -> Unit
+            is CancellationException -> throw failure
+            else -> throw IOException("Streaming text callback failed", failure)
+        }
     }
 
     private fun parseSseEvent(payload: String): JsonObject? {
