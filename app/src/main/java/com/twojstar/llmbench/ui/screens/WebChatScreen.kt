@@ -1230,5 +1230,6 @@ fun getWebServiceIcon(service: WebAiService): ImageVector {
         WebAiService.GROK -> Icons.Default.Public
         WebAiService.CHARACTER_AI -> Icons.Default.Groups
         WebAiService.VENICE -> Icons.Default.Lock
+        WebAiService.META_AI -> Icons.Default.AllInclusive
     }
 }

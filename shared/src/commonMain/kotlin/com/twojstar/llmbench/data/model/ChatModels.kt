@@ -108,6 +108,14 @@ enum class WebAiService(
         url = "https://venice.ai",
         description = "Venice account chat focused on private AI and creative workflows",
         brandHexColor = 0xFF0F766E // Teal
+    ),
+    META_AI(
+        id = "meta-ai",
+        displayName = "Meta AI",
+        shortName = "Meta AI",
+        url = "https://www.meta.ai",
+        description = "Meta AI account chat hosted at meta.ai",
+        brandHexColor = 0xFF0668E1 // Meta blue
     );
 
     companion object {

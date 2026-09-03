@@ -30,6 +30,7 @@ The first prototype already contains Compose UI, persistent per-provider WebView
 - Grok
 - Character.AI
 - Venice
+- Meta AI
 - Gemini AI Studio via a browser-backed platform flow rather than embedded OAuth
 
 AI Studio intentionally opens in the system browser because Google OAuth policy disallows authorization inside embedded user-agents such as Android WebView.
@@ -56,6 +57,7 @@ Full means the LlmBench-side integration is implemented; provider-side login or 
 | Grok Web | Partial | Provider page in WebView | Page-driven | Not yet | Persistent session, file chooser and mobile/desktop mode are integrated; provider-specific activity probe still needs verification |
 | Character.AI Web | Partial | Provider page in WebView | Page-driven | Not yet | Persistent WebView shell is integrated; embedded sign-in, uploads and activity probe still need verification |
 | Venice Web | Partial | Provider page in WebView | Page-driven | Not yet | Persistent WebView shell is integrated; embedded sign-in, uploads and activity probe still need verification |
+| Meta AI Web | Partial | Provider page in WebView | Page-driven | Not yet | Persistent WebView shell is integrated; embedded sign-in, uploads and activity probe still need verification |
 | Gemini AI Studio | Browser-only | System browser | Browser-owned | Browser-owned | Kept out of WebView because Google OAuth forbids authorization in embedded user-agents |
 | OpenRouter Free | Native gateway | API key | N/A | Native request state | Uses openrouter/free; excluded from default All Models compare |
 | AIHubMix Free | Native gateway | API key | N/A | Native request state | Uses explicit -free models; excluded from default All Models compare |
@@ -114,8 +116,8 @@ Backends are optional, not the default. If a feature truly needs one, prefer a t
 - [x] add AIHubMix and OpenRouter-compatible free-provider gateways
 - [x] create a provider-tweak/userscript interface instead of hard-coded WebView hacks
 - [x] show generating and unread response status on ChatGPT, Claude, Gemini, DeepSeek, Kimi and Vibe web tabs
-- [x] add Qwen, Microsoft Copilot, Z.ai, Grok, Character.AI and Venice account-backed WebView entries
-- [ ] verify embedded sign-in, uploads and provider-specific generation activity probes for Qwen, Copilot, Z.ai, Grok, Character.AI and Venice
+- [x] add Qwen, Microsoft Copilot, Z.ai, Grok, Character.AI, Venice and Meta AI account-backed WebView entries
+- [ ] verify embedded sign-in, uploads and provider-specific generation activity probes for Qwen, Copilot, Z.ai, Grok, Character.AI, Venice and Meta AI
 - [x] add CI build/lint checks
 - [x] document which providers work fully, partially, or block embedded login
 

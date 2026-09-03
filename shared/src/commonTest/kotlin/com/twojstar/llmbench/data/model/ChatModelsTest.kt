@@ -20,7 +20,8 @@ class ChatModelsTest {
             WebAiService.ZAI to "https://chat.z.ai",
             WebAiService.GROK to "https://grok.com",
             WebAiService.CHARACTER_AI to "https://character.ai",
-            WebAiService.VENICE to "https://venice.ai"
+            WebAiService.VENICE to "https://venice.ai",
+            WebAiService.META_AI to "https://www.meta.ai"
         )
 
         endpoints.forEach { (service, url) ->
