@@ -138,7 +138,7 @@ class AiChatServiceTest {
               "data": [
                 {
                   "model_id": "coding-model-free",
-                  "types": "llm",
+                  "types": "LLM",
                   "pricing": {"input": 0, "output": 0}
                 },
                 {

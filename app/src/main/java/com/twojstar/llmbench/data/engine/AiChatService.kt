@@ -114,7 +114,7 @@ class AiChatService {
                         id = id,
                         inputPriceUsd = pricing?.get("input").asDoubleOrNull(),
                         outputPriceUsd = pricing?.get("output").asDoubleOrNull(),
-                        supportsTextOutput = model["types"]?.jsonPrimitive?.contentOrNull == "llm"
+                        supportsTextOutput = model["types"]?.jsonPrimitive?.contentOrNull?.equals("llm", ignoreCase = true) == true
                     )
                 }
                 else -> return@mapNotNull null
