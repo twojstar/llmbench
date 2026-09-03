@@ -14,6 +14,7 @@ import android.graphics.Bitmap
 import android.net.Uri
 import android.net.http.SslError
 import android.util.Log
+import android.view.MotionEvent
 import android.view.ViewGroup
 import android.webkit.*
 import androidx.activity.compose.BackHandler
@@ -984,7 +985,7 @@ private fun releaseWebView(webView: WebView) {
 }
 
 /** Builds the least-privileged WebView needed by account-backed providers. */
-@SuppressLint("SetJavaScriptEnabled")
+@SuppressLint("SetJavaScriptEnabled", "ClickableViewAccessibility")
 private fun createConfiguredWebView(
     context: Context,
     service: WebAiService,
@@ -1007,6 +1008,22 @@ private fun createConfiguredWebView(
             ViewGroup.LayoutParams.MATCH_PARENT,
             ViewGroup.LayoutParams.MATCH_PARENT
         )
+        isClickable = true
+        isFocusable = true
+        isFocusableInTouchMode = true
+        setOnTouchListener { view, event ->
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    view.requestFocusFromTouch()
+                    view.parent?.requestDisallowInterceptTouchEvent(true)
+                }
+                MotionEvent.ACTION_MOVE ->
+                    view.parent?.requestDisallowInterceptTouchEvent(true)
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL ->
+                    view.parent?.requestDisallowInterceptTouchEvent(false)
+            }
+            false
+        }
 
         // Web Settings configured for modern SPA web applications (ChatGPT, Claude, Gemini, DeepSeek, Kimi, Vibe)
         settings.apply {
