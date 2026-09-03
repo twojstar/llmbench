@@ -52,29 +52,37 @@ class AiChatServiceTest {
 
     @Test
     fun providerHistoryExcludesDiagnosticsAndSimulations() {
+        val userSender = "user"
+        val assistantSender = "assistant"
+        val kimiModel = "kimi-k2.6"
+        val liveAnswer = "live answer"
+        val apiFailure = "API failed"
+        val simulatedAnswer = "simulated answer"
+        val otherProviderAnswer = "other provider answer"
+        val nextQuestion = "next question"
         val history = listOf(
-            ModelChatMessage(id = "u1", sender = "user", text = "first question"),
+            ModelChatMessage(id = "u1", sender = userSender, text = "first question"),
             ModelChatMessage(
-                id = "live", sender = "assistant", provider = AiProvider.KIMI,
-                modelName = "kimi-k2.6", text = "live answer"
+                id = "live", sender = assistantSender, provider = AiProvider.KIMI,
+                modelName = kimiModel, text = liveAnswer
             ),
             ModelChatMessage(
-                id = "error", sender = "assistant", provider = AiProvider.KIMI,
-                modelName = "kimi-k2.6", text = "API failed", isError = true
+                id = "error", sender = assistantSender, provider = AiProvider.KIMI,
+                modelName = kimiModel, text = apiFailure, isError = true
             ),
             ModelChatMessage(
-                id = "sim", sender = "assistant", provider = AiProvider.KIMI,
-                modelName = "kimi-k2.6", text = "simulated answer", isSimulated = true
+                id = "sim", sender = assistantSender, provider = AiProvider.KIMI,
+                modelName = kimiModel, text = simulatedAnswer, isSimulated = true
             ),
             ModelChatMessage(
-                id = "other", sender = "assistant", provider = AiProvider.DEEPSEEK,
-                modelName = "deepseek-v4-flash", text = "other provider answer"
+                id = "other", sender = assistantSender, provider = AiProvider.DEEPSEEK,
+                modelName = "deepseek-v4-flash", text = otherProviderAnswer
             ),
-            ModelChatMessage(id = "u2", sender = "user", text = "next question")
+            ModelChatMessage(id = "u2", sender = userSender, text = nextQuestion)
         )
 
         val messages = AiChatService().buildOpenAiCompatibleMessages(
-            prompt = "next question",
+            prompt = nextQuestion,
             systemInstruction = null,
             conversationHistory = history,
             provider = AiProvider.KIMI
@@ -82,11 +90,11 @@ class AiChatServiceTest {
         val contents = messages.map { it.jsonObject.getValue("content").jsonPrimitive.content }
         val roles = messages.map { it.jsonObject.getValue("role").jsonPrimitive.content }
 
-        assertEquals(listOf("user", "assistant", "user"), roles)
-        assertEquals(listOf("first question", "live answer", "next question"), contents)
-        assertFalse("API failed" in contents)
-        assertFalse("simulated answer" in contents)
-        assertFalse("other provider answer" in contents)
-        assertTrue("live answer" in contents)
+        assertEquals(listOf(userSender, assistantSender, userSender), roles)
+        assertEquals(listOf("first question", liveAnswer, nextQuestion), contents)
+        assertFalse(apiFailure in contents)
+        assertFalse(simulatedAnswer in contents)
+        assertFalse(otherProviderAnswer in contents)
+        assertTrue(liveAnswer in contents)
     }
 }
