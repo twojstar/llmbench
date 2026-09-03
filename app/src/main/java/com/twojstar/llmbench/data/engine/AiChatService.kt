@@ -90,7 +90,9 @@ class AiChatService {
         provider: AiProvider,
         rawJson: String
     ): List<GatewayModelCatalogEntry> {
-        val data = json.parseToJsonElement(rawJson).jsonObject["data"]?.jsonArray ?: return emptyList()
+        val root = json.parseToJsonElement(rawJson).jsonObject
+        val data = root["data"] as? JsonArray
+            ?: error("Malformed ${provider.shortName} model catalog: missing data array")
         return data.mapNotNull { element ->
             val model = element.jsonObject
             when (provider) {

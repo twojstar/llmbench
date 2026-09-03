@@ -132,6 +132,15 @@ class AiChatServiceTest {
     }
 
     @Test
+    fun rejectsCatalogWithoutDataArray() {
+        val result = runCatching {
+            AiChatService().parseGatewayModelCatalog(AiProvider.OPENROUTER, "{}")
+        }
+
+        assertTrue(result.isFailure)
+    }
+
+    @Test
     fun parsesAiHubMixCatalogPricingAndType() {
         val raw = """
             {
