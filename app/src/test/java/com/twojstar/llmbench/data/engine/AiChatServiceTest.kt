@@ -97,4 +97,74 @@ class AiChatServiceTest {
         assertFalse(otherProviderAnswer in contents)
         assertTrue(liveAnswer in contents)
     }
+
+    @Test
+    fun parsesOpenRouterCatalogPricingAndModalities() {
+        val raw = """
+            {
+              "data": [
+                {
+                  "id": "vendor/free-model:free",
+                  "pricing": {"prompt": "0", "completion": "0"},
+                  "architecture": {"output_modalities": ["text"]}
+                },
+                {
+                  "id": "vendor/image-only",
+                  "pricing": {"prompt": "0", "completion": "0"},
+                  "architecture": {"output_modalities": ["image"]}
+                },
+                {
+                  "id": "vendor/unknown-output",
+                  "pricing": {"prompt": "0", "completion": "0"}
+                }
+              ]
+            }
+        """.trimIndent()
+
+        val entries = AiChatService().parseGatewayModelCatalog(AiProvider.OPENROUTER, raw)
+
+        assertEquals(3, entries.size)
+        assertEquals("vendor/free-model:free", entries.first().id)
+        assertEquals(0.0, entries.first().inputPriceUsd ?: -1.0, 0.0)
+        assertTrue(entries.first().supportsTextOutput)
+        assertFalse(entries[1].supportsTextOutput)
+        assertFalse(entries.last().supportsTextOutput)
+    }
+
+    @Test
+    fun rejectsCatalogWithoutDataArray() {
+        val result = runCatching {
+            AiChatService().parseGatewayModelCatalog(AiProvider.OPENROUTER, "{}")
+        }
+
+        assertTrue(result.isFailure)
+    }
+
+    @Test
+    fun parsesAiHubMixCatalogPricingAndType() {
+        val raw = """
+            {
+              "data": [
+                {
+                  "model_id": "coding-model-free",
+                  "types": "LLM",
+                  "pricing": {"input": 0, "output": 0}
+                },
+                {
+                  "model_id": "image-model",
+                  "types": "image_generation",
+                  "pricing": {"input": 0, "output": 0}
+                }
+              ]
+            }
+        """.trimIndent()
+
+        val entries = AiChatService().parseGatewayModelCatalog(AiProvider.AIHUBMIX, raw)
+
+        assertEquals(2, entries.size)
+        assertEquals("coding-model-free", entries.first().id)
+        assertEquals(0.0, entries.first().outputPriceUsd ?: -1.0, 0.0)
+        assertTrue(entries.first().supportsTextOutput)
+        assertFalse(entries.last().supportsTextOutput)
+    }
 }

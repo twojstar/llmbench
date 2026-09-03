@@ -73,6 +73,34 @@ class ChatModelsTest {
     }
 
     @Test
+    fun liveGatewayCatalogKeepsOnlyFreeTextModels() {
+        val catalog = listOf(
+            GatewayModelCatalogEntry("free-a", 0.0, 0.0, supportsTextOutput = true),
+            GatewayModelCatalogEntry("paid", 0.0, 0.1, supportsTextOutput = true),
+            GatewayModelCatalogEntry("image-free", 0.0, 0.0, supportsTextOutput = false),
+            GatewayModelCatalogEntry("free-a", 0.0, 0.0, supportsTextOutput = true),
+            GatewayModelCatalogEntry("free-b", 0.0, 0.0, supportsTextOutput = true)
+        )
+
+        assertEquals(
+            listOf("free-a", "free-b"),
+            freeGatewayModelOptions(AiProvider.OPENROUTER, catalog)
+        )
+        assertEquals(
+            listOf("free-a", "free-b"),
+            freeGatewayModelOptions(AiProvider.AIHUBMIX, catalog)
+        )
+    }
+
+    @Test
+    fun successfulEmptyLiveGatewayCatalogStaysEmpty() {
+        assertEquals(
+            emptyList<String>(),
+            freeGatewayModelOptions(AiProvider.AIHUBMIX, emptyList())
+        )
+    }
+
+    @Test
     fun gatewayKeysDoNotMakeDefaultCompareConfigured() {
         val config = ApiKeyConfig(
             openRouterKey = "sk-or-v1-gateway",

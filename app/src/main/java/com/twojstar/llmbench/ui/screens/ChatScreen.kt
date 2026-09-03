@@ -244,6 +244,10 @@ fun ChatScreen(
 
                     // Model selection dropdown for single provider
                     if (uiState.selectedChatProvider != AiProvider.ALL) {
+                        val selectedProvider = uiState.selectedChatProvider
+                        val modelOptions = uiState.gatewayModelOptions[selectedProvider]
+                            ?: selectedProvider.availableModels
+                        val isRefreshingCatalog = selectedProvider in uiState.refreshingGatewayCatalogs
                         Spacer(Modifier.height(4.dp))
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
@@ -254,24 +258,32 @@ fun ChatScreen(
                                 .padding(horizontal = 4.dp, vertical = 2.dp)
                         ) {
                             Text(
-                                text = "Model: ${uiState.selectedChatModel}",
+                                text = "Model: ${uiState.selectedChatModel.ifBlank { "No free models" }}",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Medium
                             )
-                            Icon(
-                                imageVector = Icons.Default.ArrowDropDown,
-                                contentDescription = "Change Model",
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(16.dp)
-                            )
+                            if (isRefreshingCatalog) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(14.dp),
+                                    strokeWidth = 2.dp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            } else {
+                                Icon(
+                                    imageVector = Icons.Default.ArrowDropDown,
+                                    contentDescription = "Change Model",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
 
                             DropdownMenu(
                                 expanded = showModelMenu,
                                 onDismissRequest = { showModelMenu = false }
                             ) {
-                                uiState.selectedChatProvider.availableModels.forEach { model ->
+                                modelOptions.forEach { model ->
                                     DropdownMenuItem(
                                         text = {
                                             Text(

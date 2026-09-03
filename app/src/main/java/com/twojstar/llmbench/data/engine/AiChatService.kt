@@ -2,7 +2,9 @@ package com.twojstar.llmbench.data.engine
 
 import com.twojstar.llmbench.data.model.AiProvider
 import com.twojstar.llmbench.data.model.ApiKeyConfig
+import com.twojstar.llmbench.data.model.GatewayModelCatalogEntry
 import com.twojstar.llmbench.data.model.ModelChatMessage
+import com.twojstar.llmbench.data.model.freeGatewayModelOptions
 import com.twojstar.llmbench.data.model.Profile
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -17,6 +19,7 @@ class AiChatService {
 
     private data class OpenAiCompatibleProviderConfig(
         val endpointUrl: String,
+        val modelCatalogUrl: String? = null,
         val extraHeaders: Map<String, String> = emptyMap()
     )
 
@@ -29,13 +32,15 @@ class AiChatService {
         ),
         AiProvider.OPENROUTER to OpenAiCompatibleProviderConfig(
             endpointUrl = "https://openrouter.ai/api/v1/chat/completions",
+            modelCatalogUrl = "https://openrouter.ai/api/v1/models?output_modalities=text",
             extraHeaders = mapOf(
                 "HTTP-Referer" to "https://github.com/twojstar/llmbench",
                 "X-Title" to "LlmBench"
             )
         ),
         AiProvider.AIHUBMIX to OpenAiCompatibleProviderConfig(
-            endpointUrl = "https://aihubmix.com/v1/chat/completions"
+            endpointUrl = "https://aihubmix.com/v1/chat/completions",
+            modelCatalogUrl = "https://aihubmix.com/api/v1/models?type=llm"
         )
     )
 
@@ -48,6 +53,80 @@ class AiChatService {
     private val json = Json {
         ignoreUnknownKeys = true
         isLenient = true
+    }
+
+    suspend fun fetchFreeGatewayModels(
+        provider: AiProvider,
+        apiKeys: ApiKeyConfig
+    ): List<String> = withContext(Dispatchers.IO) {
+        val config = requireNotNull(openAiCompatibleProviders[provider]) {
+            "No OpenAI-compatible provider config for ${provider.id}"
+        }
+        val catalogUrl = requireNotNull(config.modelCatalogUrl) {
+            "No live model catalog for ${provider.id}"
+        }
+        val requestBuilder = Request.Builder().url(catalogUrl).get()
+        val apiKey = when (provider) {
+            AiProvider.OPENROUTER -> apiKeys.openRouterKey
+            AiProvider.AIHUBMIX -> apiKeys.aiHubMixKey
+            else -> ""
+        }.trim()
+        if (apiKey.isNotBlank()) {
+            requestBuilder.header("Authorization", "Bearer $apiKey")
+        }
+        config.extraHeaders.forEach { (name, value) -> requestBuilder.header(name, value) }
+
+        val responseBody = httpClient.newCall(requestBuilder.build()).execute().use { response ->
+            val body = response.body?.string().orEmpty()
+            if (!response.isSuccessful) {
+                error("${provider.shortName} model catalog HTTP ${response.code}: ${parseErrorMessage(body) ?: body.take(160)}")
+            }
+            body
+        }
+        freeGatewayModelOptions(provider, parseGatewayModelCatalog(provider, responseBody))
+    }
+
+    internal fun parseGatewayModelCatalog(
+        provider: AiProvider,
+        rawJson: String
+    ): List<GatewayModelCatalogEntry> {
+        val root = json.parseToJsonElement(rawJson).jsonObject
+        val data = root["data"] as? JsonArray
+            ?: error("Malformed ${provider.shortName} model catalog: missing data array")
+        return data.mapNotNull { element ->
+            val model = element.jsonObject
+            when (provider) {
+                AiProvider.OPENROUTER -> {
+                    val id = model["id"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
+                    val pricing = model["pricing"]?.jsonObject
+                    val outputModalities = model["architecture"]?.jsonObject
+                        ?.get("output_modalities")?.jsonArray
+                        ?.mapNotNull { it.jsonPrimitive.contentOrNull }
+                    GatewayModelCatalogEntry(
+                        id = id,
+                        inputPriceUsd = pricing?.get("prompt").asDoubleOrNull(),
+                        outputPriceUsd = pricing?.get("completion").asDoubleOrNull(),
+                        supportsTextOutput = outputModalities?.contains("text") == true
+                    )
+                }
+                AiProvider.AIHUBMIX -> {
+                    val id = model["model_id"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
+                    val pricing = model["pricing"]?.jsonObject
+                    GatewayModelCatalogEntry(
+                        id = id,
+                        inputPriceUsd = pricing?.get("input").asDoubleOrNull(),
+                        outputPriceUsd = pricing?.get("output").asDoubleOrNull(),
+                        supportsTextOutput = model["types"]?.jsonPrimitive?.contentOrNull?.equals("llm", ignoreCase = true) == true
+                    )
+                }
+                else -> return@mapNotNull null
+            }
+        }
+    }
+
+    private fun JsonElement?.asDoubleOrNull(): Double? = when (this) {
+        is JsonPrimitive -> contentOrNull?.toDoubleOrNull()
+        else -> null
     }
 
     suspend fun generateResponse(

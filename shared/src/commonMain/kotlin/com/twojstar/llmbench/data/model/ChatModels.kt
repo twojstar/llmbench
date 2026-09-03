@@ -223,6 +223,36 @@ fun ApiKeyConfig.hasKeyFor(provider: AiProvider): Boolean = when (provider) {
 fun ApiKeyConfig.configuredDirectProviders(): List<AiProvider> =
     AiProvider.concreteProviders.filter { hasKeyFor(it) }
 
+data class GatewayModelCatalogEntry(
+    val id: String,
+    val inputPriceUsd: Double?,
+    val outputPriceUsd: Double?,
+    val supportsTextOutput: Boolean
+)
+
+fun AiProvider.usesLiveFreeModelCatalog(): Boolean =
+    this == AiProvider.OPENROUTER || this == AiProvider.AIHUBMIX
+
+fun freeGatewayModelOptions(
+    provider: AiProvider,
+    catalog: List<GatewayModelCatalogEntry>
+): List<String> {
+    if (!provider.usesLiveFreeModelCatalog()) return provider.availableModels
+
+    val liveFreeModels = catalog.asSequence()
+        .filter { entry ->
+            entry.supportsTextOutput &&
+                entry.inputPriceUsd == 0.0 &&
+                entry.outputPriceUsd == 0.0
+        }
+        .map { it.id.trim() }
+        .filter { it.isNotEmpty() }
+        .distinct()
+        .toList()
+
+    return liveFreeModels
+}
+
 @Serializable
 data class ModelChatMessage(
     val id: String,
