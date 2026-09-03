@@ -52,15 +52,17 @@ Full means the LlmBench-side integration is implemented; provider-side login or 
 | Kimi Web | Full | Provider page in WebView | Yes | Generating + unread | Persistent session |
 | Mistral Vibe Web | Full | Provider page in WebView | Yes | Generating + unread | Tracks the locale-independent square stop control in the composer |
 | Qwen Web | Partial | Provider page in WebView | Page-driven | Not yet | Persistent session, file chooser and mobile/desktop mode are integrated; provider-specific activity probe still needs verification |
-| Microsoft Copilot Web | Partial | Microsoft sign-in is provider-owned | Page-driven | Not yet | Persistent WebView shell is integrated; embedded sign-in behavior and activity probe still need verification |
+| Microsoft Copilot Web | Partial | Microsoft sign-in is provider-owned | Yes | Not yet | Microsoft documents chat file upload; embedded sign-in and provider-specific activity tracking still need verification |
 | Z.ai Web | Partial | Provider page in WebView | Page-driven | Not yet | Persistent session, file chooser and mobile/desktop mode are integrated; provider-specific activity probe still needs verification |
-| Grok Web | Partial | Provider page in WebView | Page-driven | Not yet | Persistent session, file chooser and mobile/desktop mode are integrated; provider-specific activity probe still needs verification |
+| Grok Web | Partial | Provider page in WebView | Yes | Not yet | xAI documents multi-file upload on the web; provider-specific activity tracking still needs verification |
 | Character.AI Web | Partial | Provider page in WebView | Page-driven | Not yet | Persistent WebView shell is integrated; embedded sign-in, uploads and activity probe still need verification |
-| Venice Web | Partial | Provider page in WebView | Page-driven | Not yet | Persistent WebView shell is integrated; embedded sign-in, uploads and activity probe still need verification |
-| Meta AI Web | Partial | Provider page in WebView | Page-driven | Not yet | Persistent WebView shell is integrated; embedded sign-in, uploads and activity probe still need verification |
+| Venice Web | Partial | Provider page in WebView | Yes | Not yet | Venice documents file uploads in the chat input; embedded sign-in and provider-specific activity tracking still need verification |
+| Meta AI Web | Partial | Meta login surface is provider-owned | Not verified | Not yet | `alpha.meta.ai` is a verified provider-owned login alias; embedded sign-in, chat uploads and activity tracking still need verification |
 | Gemini AI Studio | Browser-only | System browser | Browser-owned | Browser-owned | Kept out of WebView because Google OAuth forbids authorization in embedded user-agents |
 | OpenRouter Free | Native gateway | API key | N/A | Native request state | Uses openrouter/free; excluded from default All Models compare |
 | AIHubMix Free | Native gateway | API key | N/A | Native request state | Uses explicit -free models; excluded from default All Models compare |
+
+Verification references for the newer web providers: [Microsoft Copilot file upload](https://support.microsoft.com/en-us/microsoft-copilot/file-upload-in-microsoft-copilot), [Grok files FAQ](https://docs.x.ai/grok/faq), [Venice upload changelog](https://featurebase.venice.ai/changelog/veniceai-change-log-march-1st-3rd-2025), and the provider-owned [Meta AI login surface](https://alpha.meta.ai/). These verify provider capabilities or owned hosts, not Android WebView login compatibility or stable generation DOM selectors.
 
 Google documents the embedded-user-agent restriction in its [OAuth 2.0 policies](https://developers.google.com/identity/protocols/oauth2/policies).
 
