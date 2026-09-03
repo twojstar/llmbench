@@ -43,7 +43,7 @@ Full means the LlmBench-side integration is implemented; provider-side login or 
 | Gemini Chat Web | Partial | Google sign-in may be blocked in embedded user-agents | Yes | Generating + unread | The chat surface is integrated, but fresh Google OAuth inside WebView is not a supported flow |
 | DeepSeek Web | Full | Provider page in WebView | Yes | Generating + unread | Persistent session |
 | Kimi Web | Full | Provider page in WebView | Yes | Generating + unread | Persistent session |
-| Mistral Vibe Web | Partial | Provider page in WebView | Yes | None | No stable locale-independent generation signal yet, so background completion cannot be marked unread |
+| Mistral Vibe Web | Full | Provider page in WebView | Yes | Generating + unread | Tracks the locale-independent square stop control in the composer |
 | Gemini AI Studio | Browser-only | System browser | Browser-owned | Browser-owned | Kept out of WebView because Google OAuth forbids authorization in embedded user-agents |
 | OpenRouter Free | Native gateway | API key | N/A | Native request state | Uses openrouter/free; excluded from default All Models compare |
 | AIHubMix Free | Native gateway | API key | N/A | Native request state | Uses explicit -free models; excluded from default All Models compare |
@@ -101,7 +101,7 @@ Backends are optional, not the default. If a feature truly needs one, prefer a t
 - [x] add Gemini AI Studio through a browser-backed platform flow
 - [x] add AIHubMix and OpenRouter-compatible free-provider gateways
 - [x] create a provider-tweak/userscript interface instead of hard-coded WebView hacks
-- [x] show generating and unread response status on ChatGPT, Claude, Gemini, DeepSeek and Kimi web tabs; Vibe remains pending a stable locale-independent generation signal
+- [x] show generating and unread response status on ChatGPT, Claude, Gemini, DeepSeek, Kimi and Vibe web tabs
 - [x] add CI build/lint checks
 - [x] document which providers work fully, partially, or block embedded login
 

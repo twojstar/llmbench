@@ -8,18 +8,34 @@ import kotlinx.serialization.json.Json
 
 private const val GENERATION_TRACKER_KEY = "__llmbenchGenerationTracker"
 
+private val generationControlPredicate = """
+    (activeControls, inactiveControls) => activeControls.some(activeControl => {
+        const activeSubmit = activeControl.closest('button[type="submit"]');
+        if (!activeSubmit) return true;
+        return !inactiveControls.some(idleControl =>
+            idleControl.closest('button[type="submit"]') === activeSubmit
+        );
+    })
+""".trimIndent()
+
+internal fun generationControlPredicateScript(): String = generationControlPredicate
+
 private fun generationActivityScript(
     selectors: List<String>,
+    idleSelectors: List<String>,
     consumeCompletion: Boolean,
     selected: Boolean? = null
 ): String {
     val encodedSelectors = Json.encodeToString(selectors)
+    val encodedIdleSelectors = Json.encodeToString(idleSelectors)
     val selectedState = selected?.toString() ?: "null"
     return """
         (() => {
             const selectors = $encodedSelectors;
+            const idleSelectors = $encodedIdleSelectors;
+            const trackedSelectors = selectors.concat(idleSelectors);
             const trackerKey = "$GENERATION_TRACKER_KEY";
-            const signature = JSON.stringify(selectors);
+            const signature = JSON.stringify({ selectors, idleSelectors });
             const selectedState = $selectedState;
             const isVisible = element => {
                 const style = getComputedStyle(element);
@@ -28,10 +44,17 @@ private fun generationActivityScript(
                     style.visibility !== 'hidden' &&
                     element.getClientRects().length > 0;
             };
-            const generationControls = () => selectors.flatMap(selector =>
+            const controlsFor = selectorsToMatch => selectorsToMatch.flatMap(selector =>
                 Array.from(document.querySelectorAll(selector)).filter(isVisible)
             );
-            const isGenerating = () => generationControls().length > 0;
+            const generationControls = () => controlsFor(selectors);
+            const idleControls = () => controlsFor(idleSelectors);
+            const trackedControls = () => controlsFor(trackedSelectors);
+            const hasActiveGenerationControl = $generationControlPredicate;
+            const isGenerating = () => hasActiveGenerationControl(
+                generationControls(),
+                idleControls()
+            );
 
             let tracker = window[trackerKey];
             if (!tracker || tracker.signature !== signature) {
@@ -42,7 +65,7 @@ private fun generationActivityScript(
                     completed: false,
                     completedWhileSelected: false,
                     selected: selectedState === null ? false : selectedState,
-                    controls: generationControls(),
+                    controls: trackedControls(),
                     observer: null
                 };
                 window[trackerKey] = tracker;
@@ -50,8 +73,8 @@ private fun generationActivityScript(
             if (selectedState !== null) tracker.selected = selectedState;
 
             const refreshActivity = () => {
-                const controls = generationControls();
-                const nextActive = controls.length > 0;
+                const controls = trackedControls();
+                const nextActive = isGenerating();
                 if (tracker.active && !nextActive) {
                     tracker.completedWhileSelected = tracker.completed
                         ? tracker.completedWhileSelected && tracker.selected
@@ -65,7 +88,7 @@ private fun generationActivityScript(
             if (!tracker.observer && document.documentElement) {
                 const nodeTouchesGenerationControl = node => {
                     if (!(node instanceof Element)) return false;
-                    return selectors.some(selector =>
+                    return trackedSelectors.some(selector =>
                         node.matches(selector) ||
                         node.querySelector(selector) !== null ||
                         node.closest(selector) !== null
@@ -113,6 +136,22 @@ private fun generationActivityScript(
     """.trimIndent()
 }
 
+
+internal fun providerGenerationActivityScript(
+    service: WebAiService,
+    consumeCompletion: Boolean,
+    selected: Boolean? = null
+): String? {
+    val selectors = ProviderWebTweakRegistry.generationSelectors(service)
+    if (selectors.isEmpty()) return null
+    return generationActivityScript(
+        selectors = selectors,
+        idleSelectors = ProviderWebTweakRegistry.generationIdleSelectors(service),
+        consumeCompletion = consumeCompletion,
+        selected = selected
+    )
+}
+
 /** Installs an in-page observer so short generation cycles cannot disappear between native polls. */
 internal fun installProviderGenerationTracker(
     webView: WebView,
@@ -121,12 +160,12 @@ internal fun installProviderGenerationTracker(
 ) {
     val pageUrl = webView.url ?: return
     if (!providerUrlMatches(service, pageUrl)) return
-    val selectors = ProviderWebTweakRegistry.generationSelectors(service)
-    if (selectors.isEmpty()) return
-    webView.evaluateJavascript(
-        generationActivityScript(selectors, consumeCompletion = false, selected = isSelected),
-        null
-    )
+    val script = providerGenerationActivityScript(
+        service = service,
+        consumeCompletion = false,
+        selected = isSelected
+    ) ?: return
+    webView.evaluateJavascript(script, null)
 }
 
 /** Keeps the in-page completion latch aligned with the native provider selection. */
@@ -172,13 +211,13 @@ internal fun probeProviderGenerationActivity(
         return
     }
 
-    val selectors = ProviderWebTweakRegistry.generationSelectors(service)
-    if (selectors.isEmpty()) {
+    val script = providerGenerationActivityScript(service, consumeCompletion = true)
+    if (script == null) {
         onResult(WebChatGenerationObservation.UNKNOWN)
         return
     }
 
-    webView.evaluateJavascript(generationActivityScript(selectors, consumeCompletion = true)) { rawResult ->
+    webView.evaluateJavascript(script) { rawResult ->
         onResult(
             when (rawResult?.trim()) {
                 "1" -> WebChatGenerationObservation.GENERATING
