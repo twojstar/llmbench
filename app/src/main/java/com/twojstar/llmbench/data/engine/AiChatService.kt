@@ -604,6 +604,16 @@ class AiChatService {
     }
 
     internal fun extractStreamError(event: JsonObject): String? {
+        val geminiCandidate = event["candidates"]?.jsonArray?.firstOrNull() as? JsonObject
+        val geminiFinishReason = geminiCandidate?.get("finishReason")?.jsonPrimitive?.contentOrNull
+        if (geminiFinishReason != null && geminiFinishReason != "STOP") {
+            val finishMessage = geminiCandidate["finishMessage"]?.jsonPrimitive?.contentOrNull
+            return buildString {
+                append("Gemini stopped with ").append(geminiFinishReason)
+                if (!finishMessage.isNullOrBlank()) append(": ").append(finishMessage)
+            }
+        }
+
         val type = event[STREAM_TYPE_KEY]?.jsonPrimitive?.contentOrNull
         return when (type) {
             OPENAI_RESPONSE_FAILED -> event[STREAM_RESPONSE_KEY]?.jsonObject
@@ -625,7 +635,7 @@ class AiChatService {
     internal fun isGeminiStreamComplete(event: JsonObject): Boolean =
         event["candidates"]?.jsonArray
             ?.firstOrNull()?.jsonObject
-            ?.get("finishReason")?.jsonPrimitive?.contentOrNull != null
+            ?.get("finishReason")?.jsonPrimitive?.contentOrNull == "STOP"
 
     internal fun isOpenAiStreamComplete(event: JsonObject): Boolean =
         event[STREAM_TYPE_KEY]?.jsonPrimitive?.contentOrNull in
@@ -679,9 +689,9 @@ class AiChatService {
                 if (!line.startsWith(SSE_DATA_PREFIX)) continue
                 val payload = line.removePrefix(SSE_DATA_PREFIX).trim()
                 val event = parseSseEvent(payload) ?: continue
-                extractStreamError(event)?.let { throw IOException(it) }
-                val delta = try {
-                    extractText(event)
+                val (delta, eventComplete) = try {
+                    extractStreamError(event)?.let { throw IOException(it) }
+                    extractText(event) to isComplete(event)
                 } catch (e: IllegalArgumentException) {
                     throw IOException(MALFORMED_STREAM_EVENT, e)
                 }
@@ -689,7 +699,7 @@ class AiChatService {
                     collected.append(text)
                     onTextDelta(text)
                 }
-                if (isComplete(event)) completed = true
+                if (eventComplete) completed = true
             }
         }
         if (!completed) throw IOException("Streaming response ended before completion")

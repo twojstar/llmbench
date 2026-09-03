@@ -300,4 +300,15 @@ class AiChatServiceTest {
         assertFalse(service.isOpenAiStreamComplete(failed))
     }
 
+    @Test
+    fun rejectsNonStopGeminiFinishReasons() {
+        val service = AiChatService()
+        val limited = Json.parseToJsonElement(
+            """{"candidates":[{"finishReason":"MAX_TOKENS","finishMessage":"token limit reached"}]}"""
+        ).jsonObject
+
+        assertFalse(service.isGeminiStreamComplete(limited))
+        assertEquals("Gemini stopped with MAX_TOKENS: token limit reached", service.extractStreamError(limited))
+    }
+
 }
