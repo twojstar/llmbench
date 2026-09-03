@@ -1218,5 +1218,9 @@ fun getWebServiceIcon(service: WebAiService): ImageVector {
         WebAiService.DEEPSEEK -> Icons.Default.Psychology
         WebAiService.KIMI -> Icons.Default.ElectricBolt
         WebAiService.VIBE -> Icons.Default.Air
+        WebAiService.QWEN -> Icons.Default.Hub
+        WebAiService.COPILOT -> Icons.Default.AutoAwesome
+        WebAiService.ZAI -> Icons.Default.Memory
+        WebAiService.GROK -> Icons.Default.Public
     }
 }

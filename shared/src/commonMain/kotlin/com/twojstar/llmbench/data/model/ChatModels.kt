@@ -60,6 +60,38 @@ enum class WebAiService(
         url = "https://chat.mistral.ai",
         description = "Mistral Vibe account chat, formerly Le Chat, with work and agent tools",
         brandHexColor = 0xFFFF7000 // Mistral Orange
+    ),
+    QWEN(
+        id = "qwen",
+        displayName = "Qwen",
+        shortName = "Qwen",
+        url = "https://qwen.ai",
+        description = "Alibaba Qwen account chat with multimodal, search, and agent capabilities",
+        brandHexColor = 0xFF6366F1 // Indigo
+    ),
+    COPILOT(
+        id = "copilot",
+        displayName = "Microsoft Copilot",
+        shortName = "Copilot",
+        url = "https://copilot.microsoft.com",
+        description = "Microsoft Copilot account chat with web-grounded assistance and Microsoft services",
+        brandHexColor = 0xFF2563EB // Microsoft blue
+    ),
+    ZAI(
+        id = "zai",
+        displayName = "Z.ai",
+        shortName = "Z.ai",
+        url = "https://chat.z.ai",
+        description = "Z.ai account chat powered by GLM models with chat and agent workflows",
+        brandHexColor = 0xFF7C3AED // Violet
+    ),
+    GROK(
+        id = "grok",
+        displayName = "Grok",
+        shortName = "Grok",
+        url = "https://grok.com",
+        description = "xAI Grok account chat with search, reasoning, files, and multimodal tools",
+        brandHexColor = 0xFF64748B // Slate
     );
 
     companion object {
