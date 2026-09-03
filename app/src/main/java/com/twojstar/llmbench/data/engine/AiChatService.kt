@@ -38,11 +38,11 @@ private const val STREAM_TYPE_KEY = "type"
 private const val STREAM_ERROR_KEY = "error"
 private const val STREAM_MESSAGE_KEY = "message"
 private const val STREAM_RESPONSE_KEY = "response"
-private const val STREAM_ERROR_EVENT = "error"
 private const val OPENAI_RESPONSE_FAILED = "response.failed"
 private const val OPENAI_RESPONSE_COMPLETED = "response.completed"
 private const val OPENAI_RESPONSE_INCOMPLETE = "response.incomplete"
 private const val CLAUDE_MESSAGE_STOP = "message_stop"
+private const val MALFORMED_STREAM_EVENT = "Malformed streaming event"
 
 class AiChatService {
 
@@ -439,7 +439,7 @@ class AiChatService {
             val parsed = json.parseToJsonElement(responseBody).jsonObject
             val text = parsed["output"]?.jsonArray.orEmpty().asSequence()
                 .mapNotNull { it as? JsonObject }
-                .filter { it["type"]?.jsonPrimitive?.contentOrNull == "message" }
+                .filter { it[STREAM_TYPE_KEY]?.jsonPrimitive?.contentOrNull == STREAM_MESSAGE_KEY }
                 .flatMap { message -> message[JSON_CONTENT_KEY]?.jsonArray.orEmpty().asSequence() }
                 .mapNotNull { it as? JsonObject }
                 .filter { it["type"]?.jsonPrimitive?.contentOrNull == "output_text" }
@@ -610,7 +610,7 @@ class AiChatService {
                 ?.get(STREAM_ERROR_KEY)?.jsonObject
                 ?.get(STREAM_MESSAGE_KEY)?.jsonPrimitive?.contentOrNull
                 ?: "OpenAI response failed"
-            STREAM_ERROR_EVENT -> {
+            STREAM_ERROR_KEY -> {
                 val error = event[STREAM_ERROR_KEY]
                 when (error) {
                     is JsonObject -> error[STREAM_MESSAGE_KEY]?.jsonPrimitive?.contentOrNull ?: error.toString()
@@ -683,7 +683,7 @@ class AiChatService {
                 val delta = try {
                     extractText(event)
                 } catch (e: IllegalArgumentException) {
-                    throw IOException("Malformed streaming event", e)
+                    throw IOException(MALFORMED_STREAM_EVENT, e)
                 }
                 delta?.takeIf { it.isNotEmpty() }?.let { text ->
                     collected.append(text)
@@ -698,13 +698,12 @@ class AiChatService {
 
     private fun parseSseEvent(payload: String): JsonObject? {
         if (payload.isBlank() || payload == SSE_DONE) return null
-        return try {
-            json.parseToJsonElement(payload).jsonObject
+        val element = try {
+            json.parseToJsonElement(payload)
         } catch (e: SerializationException) {
-            throw IOException("Malformed streaming event", e)
-        } catch (e: IllegalArgumentException) {
-            throw IOException("Malformed streaming event", e)
+            throw IOException(MALFORMED_STREAM_EVENT, e)
         }
+        return element as? JsonObject ?: throw IOException(MALFORMED_STREAM_EVENT)
     }
 
     private suspend fun executeCancellableJson(request: Request): String =
@@ -768,7 +767,7 @@ class AiChatService {
         val parsed = json.parseToJsonElement(responseBody).jsonObject
         val choices = parsed["choices"]?.jsonArray
         val firstChoice = choices?.getOrNull(0)?.jsonObject
-        val message = firstChoice?.get("message")?.jsonObject
+        val message = firstChoice?.get(STREAM_MESSAGE_KEY)?.jsonObject
         val content = message?.get(JSON_CONTENT_KEY)?.jsonPrimitive?.contentOrNull
 
         return content ?: "Received empty message content."
@@ -804,10 +803,10 @@ class AiChatService {
         return try {
             val obj = json.parseToJsonElement(rawJson).jsonObject
             when {
-                obj.containsKey("error") -> {
-                    val err = obj["error"]
+                obj.containsKey(STREAM_ERROR_KEY) -> {
+                    val err = obj[STREAM_ERROR_KEY]
                     if (err is JsonObject) {
-                        err["message"]?.jsonPrimitive?.contentOrNull ?: err.toString()
+                        err[STREAM_MESSAGE_KEY]?.jsonPrimitive?.contentOrNull ?: err.toString()
                     } else {
                         err?.jsonPrimitive?.contentOrNull
                     }
