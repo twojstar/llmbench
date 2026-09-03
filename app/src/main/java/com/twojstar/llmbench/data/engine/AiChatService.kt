@@ -57,7 +57,8 @@ class AiChatService {
         apiKeys: ApiKeyConfig,
         systemInstruction: String?,
         profile: Profile?,
-        conversationHistory: List<ModelChatMessage> = emptyList()
+        conversationHistory: List<ModelChatMessage> = emptyList(),
+        allowSimulationFallback: Boolean = true
     ): ModelChatMessage = withContext(Dispatchers.IO) {
         val startTime = System.currentTimeMillis()
         val effectiveModel = if (modelName == "all" || modelName.isBlank()) provider.defaultModel else modelName
@@ -111,14 +112,27 @@ class AiChatService {
                     )
                 }
             } catch (e: Exception) {
-                // If network failed with real key, return error with details
                 val latency = System.currentTimeMillis() - startTime
+                val errorDetails = e.localizedMessage ?: e.message ?: "Unknown error"
+                if (!allowSimulationFallback) {
+                    return@withContext ModelChatMessage(
+                        id = "msg_${System.currentTimeMillis()}_${provider.id}",
+                        sender = "assistant",
+                        provider = provider,
+                        modelName = effectiveModel,
+                        text = "⚠️ Error communicating with ${provider.displayName} API ($effectiveModel):\n\n$errorDetails",
+                        isError = true,
+                        isSimulated = false,
+                        latencyMs = latency,
+                        activeProfileNotes = listOf("API Request Failed - Simulation disabled for All Models")
+                    )
+                }
                 return@withContext ModelChatMessage(
                     id = "msg_${System.currentTimeMillis()}_${provider.id}",
                     sender = "assistant",
                     provider = provider,
                     modelName = effectiveModel,
-                    text = "⚠️ Error communicating with ${provider.displayName} API ($effectiveModel):\n\n${e.localizedMessage ?: e.message ?: "Unknown error"}\n\nFalling back to profile persona simulation below:\n\n" +
+                    text = "⚠️ Error communicating with ${provider.displayName} API ($effectiveModel):\n\n$errorDetails\n\nFalling back to profile persona simulation below:\n\n" +
                             generatePersonaResponse(prompt, provider, effectiveModel, profile),
                     isError = true,
                     isSimulated = true,
@@ -385,7 +399,10 @@ class AiChatService {
                     put("role", "user")
                     put("content", message.text)
                 }
-                message.sender == "assistant" && message.provider == provider -> addJsonObject {
+                message.sender == "assistant" &&
+                    message.provider == provider &&
+                    !message.isError &&
+                    !message.isSimulated -> addJsonObject {
                     put("role", "assistant")
                     put("content", message.text)
                 }

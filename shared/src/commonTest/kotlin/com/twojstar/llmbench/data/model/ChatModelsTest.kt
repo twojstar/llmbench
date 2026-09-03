@@ -56,4 +56,33 @@ class ChatModelsTest {
         assertEquals("hy3-free", AiProvider.AIHUBMIX.defaultModel)
         assertTrue(AiProvider.AIHUBMIX.availableModels.all { it.endsWith("-free") })
     }
+
+    @Test
+    fun configuredDirectProvidersIncludeOnlyKeyedDirectProviders() {
+        val config = ApiKeyConfig(
+            geminiKey = "   ",
+            openAiKey = "sk-live",
+            kimiKey = "  kimi-key  ",
+            openRouterKey = "sk-or-v1-gateway"
+        )
+
+        assertEquals(
+            listOf(AiProvider.CHATGPT, AiProvider.KIMI),
+            config.configuredDirectProviders()
+        )
+    }
+
+    @Test
+    fun gatewayKeysDoNotMakeDefaultCompareConfigured() {
+        val config = ApiKeyConfig(
+            openRouterKey = "sk-or-v1-gateway",
+            aiHubMixKey = "gateway-key"
+        )
+
+        assertTrue(config.hasKeyFor(AiProvider.OPENROUTER))
+        assertTrue(config.hasKeyFor(AiProvider.AIHUBMIX))
+        assertFalse(config.hasKeyFor(AiProvider.ALL))
+        assertTrue(config.configuredDirectProviders().isEmpty())
+    }
+
 }
