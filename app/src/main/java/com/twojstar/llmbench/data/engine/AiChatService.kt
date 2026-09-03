@@ -399,7 +399,10 @@ class AiChatService {
                     put("role", "user")
                     put("content", message.text)
                 }
-                message.sender == "assistant" && message.provider == provider -> addJsonObject {
+                message.sender == "assistant" &&
+                    message.provider == provider &&
+                    !message.isError &&
+                    !message.isSimulated -> addJsonObject {
                     put("role", "assistant")
                     put("content", message.text)
                 }
