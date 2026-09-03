@@ -2,8 +2,11 @@ package com.twojstar.llmbench.data.engine
 
 import com.twojstar.llmbench.data.model.AiProvider
 import com.twojstar.llmbench.data.model.ApiKeyConfig
+import com.twojstar.llmbench.data.model.CHAT_ROLE_ASSISTANT
+import com.twojstar.llmbench.data.model.CHAT_ROLE_USER
 import com.twojstar.llmbench.data.model.GatewayModelCatalogEntry
 import com.twojstar.llmbench.data.model.ModelChatMessage
+import com.twojstar.llmbench.data.model.buildBoundedProviderTextTurns
 import com.twojstar.llmbench.data.model.freeGatewayModelOptions
 import com.twojstar.llmbench.data.model.Profile
 import kotlinx.coroutines.Dispatchers
@@ -258,42 +261,16 @@ class AiChatService {
         return notes
     }
 
-    internal data class ProviderTextTurn(val role: String, val text: String)
-
-    internal fun buildProviderTextTurns(
-        prompt: String,
-        conversationHistory: List<ModelChatMessage>,
-        provider: AiProvider
-    ): List<ProviderTextTurn> {
-        val priorMessages = if (
-            conversationHistory.lastOrNull()?.let { it.sender == "user" && it.text == prompt } == true
-        ) {
-            conversationHistory.dropLast(1)
-        } else {
-            conversationHistory
-        }
-
-        return buildList {
-            priorMessages.forEach { message ->
-                when {
-                    message.sender == "user" -> add(ProviderTextTurn("user", message.text))
-                    message.sender == "assistant" &&
-                        message.provider == provider &&
-                        !message.isError &&
-                        !message.isSimulated -> add(ProviderTextTurn("assistant", message.text))
-                }
-            }
-            add(ProviderTextTurn("user", prompt))
-        }
-    }
-
     internal fun buildGeminiContents(
         prompt: String,
-        conversationHistory: List<ModelChatMessage>
+        conversationHistory: List<ModelChatMessage>,
+        systemInstruction: String? = null
     ): JsonArray = buildJsonArray {
-        buildProviderTextTurns(prompt, conversationHistory, AiProvider.GEMINI).forEach { turn ->
+        buildBoundedProviderTextTurns(
+            prompt, conversationHistory, AiProvider.GEMINI, systemInstruction
+        ).forEach { turn ->
             addJsonObject {
-                put("role", if (turn.role == "assistant") "model" else "user")
+                put("role", if (turn.role == CHAT_ROLE_ASSISTANT) "model" else CHAT_ROLE_USER)
                 putJsonArray("parts") {
                     addJsonObject { put("text", turn.text) }
                 }
@@ -303,9 +280,12 @@ class AiChatService {
 
     internal fun buildOpenAiResponseInput(
         prompt: String,
-        conversationHistory: List<ModelChatMessage>
+        conversationHistory: List<ModelChatMessage>,
+        systemInstruction: String? = null
     ): JsonArray = buildJsonArray {
-        buildProviderTextTurns(prompt, conversationHistory, AiProvider.CHATGPT).forEach { turn ->
+        buildBoundedProviderTextTurns(
+            prompt, conversationHistory, AiProvider.CHATGPT, systemInstruction
+        ).forEach { turn ->
             addJsonObject {
                 put("role", turn.role)
                 put("content", turn.text)
@@ -315,9 +295,12 @@ class AiChatService {
 
     internal fun buildClaudeMessages(
         prompt: String,
-        conversationHistory: List<ModelChatMessage>
+        conversationHistory: List<ModelChatMessage>,
+        systemInstruction: String? = null
     ): JsonArray = buildJsonArray {
-        buildProviderTextTurns(prompt, conversationHistory, AiProvider.CLAUDE).forEach { turn ->
+        buildBoundedProviderTextTurns(
+            prompt, conversationHistory, AiProvider.CLAUDE, systemInstruction
+        ).forEach { turn ->
             addJsonObject {
                 put("role", turn.role)
                 put("content", turn.text)
@@ -334,7 +317,7 @@ class AiChatService {
         conversationHistory: List<ModelChatMessage>
     ): String {
         val url = "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$apiKey"
-        val contentsArray = buildGeminiContents(prompt, conversationHistory)
+        val contentsArray = buildGeminiContents(prompt, conversationHistory, systemInstruction)
 
         val requestPayload = buildJsonObject {
             put("contents", contentsArray)
@@ -386,7 +369,7 @@ class AiChatService {
 
         val requestPayload = buildJsonObject {
             put("model", model)
-            put("input", buildOpenAiResponseInput(prompt, conversationHistory))
+            put("input", buildOpenAiResponseInput(prompt, conversationHistory, systemInstruction))
             put("store", false)
             if (!systemInstruction.isNullOrBlank()) {
                 put("instructions", systemInstruction)
@@ -432,7 +415,7 @@ class AiChatService {
         conversationHistory: List<ModelChatMessage>
     ): String {
         val url = "https://api.anthropic.com/v1/messages"
-        val messagesArray = buildClaudeMessages(prompt, conversationHistory)
+        val messagesArray = buildClaudeMessages(prompt, conversationHistory, systemInstruction)
 
         val requestPayload = buildJsonObject {
             put("model", model)
@@ -531,7 +514,12 @@ class AiChatService {
             }
         }
 
-        buildProviderTextTurns(prompt, conversationHistory, provider).forEach { turn ->
+        buildBoundedProviderTextTurns(
+            prompt = prompt,
+            conversationHistory = conversationHistory,
+            provider = provider,
+            systemInstruction = systemInstruction
+        ).forEach { turn ->
             addJsonObject {
                 put("role", turn.role)
                 put("content", turn.text)
