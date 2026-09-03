@@ -30,6 +30,16 @@ class ProviderWebTweaksTest {
     }
 
     @Test
+    fun acceptsVerifiedCopilotAliasesWithoutAcceptingSuffixSpoofs() {
+        listOf("copilot.com", "copilot.ai", "copilot.cloud.microsoft").forEach { host ->
+            assertTrue(providerHostMatches(WebAiService.COPILOT, host))
+            assertTrue(providerHostMatches(WebAiService.COPILOT, "www.$host"))
+            assertFalse(providerHostMatches(WebAiService.COPILOT, "not-$host"))
+            assertFalse(providerHostMatches(WebAiService.COPILOT, "$host.evil.example"))
+        }
+    }
+
+    @Test
     fun acceptsVerifiedMetaLoginAliasWithoutAcceptingSuffixSpoofs() {
         assertTrue(providerHostMatches(WebAiService.META_AI, "alpha.meta.ai"))
         assertTrue(providerHostMatches(WebAiService.META_AI, "www.alpha.meta.ai"))
