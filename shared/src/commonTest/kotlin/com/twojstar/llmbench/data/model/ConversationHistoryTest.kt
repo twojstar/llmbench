@@ -8,19 +8,23 @@ class ConversationHistoryTest {
     @Test
     fun keepsOnlyCurrentProviderLiveAssistantTurns() {
         val prompt = "follow up"
+        val first = "first"
+        val openAiAnswer = "openai answer"
+        val claudeAnswer = "claude answer"
+        val simulated = "simulated"
         val history = listOf(
-            ModelChatMessage(id = "u1", sender = CHAT_ROLE_USER, text = "first"),
+            ModelChatMessage(id = "u1", sender = CHAT_ROLE_USER, text = first),
             ModelChatMessage(
                 id = "gpt", sender = CHAT_ROLE_ASSISTANT, provider = AiProvider.CHATGPT,
-                text = "openai answer"
+                text = openAiAnswer
             ),
             ModelChatMessage(
                 id = "claude", sender = CHAT_ROLE_ASSISTANT, provider = AiProvider.CLAUDE,
-                text = "claude answer"
+                text = claudeAnswer
             ),
             ModelChatMessage(
                 id = "sim", sender = CHAT_ROLE_ASSISTANT, provider = AiProvider.CHATGPT,
-                text = "simulated", isSimulated = true
+                text = simulated, isSimulated = true
             ),
             ModelChatMessage(id = "u2", sender = CHAT_ROLE_USER, text = prompt)
         )
@@ -31,8 +35,8 @@ class ConversationHistoryTest {
             listOf(CHAT_ROLE_USER, CHAT_ROLE_ASSISTANT, CHAT_ROLE_USER),
             turns.map { it.role }
         )
-        assertEquals(listOf("first", "openai answer", prompt), turns.map { it.text })
-        assertFalse(turns.any { it.text == "claude answer" || it.text == "simulated" })
+        assertEquals(listOf(first, openAiAnswer, prompt), turns.map { it.text })
+        assertFalse(turns.any { it.text == claudeAnswer || it.text == simulated })
     }
 
     @Test
@@ -41,7 +45,7 @@ class ConversationHistoryTest {
         val history = listOf(
             ModelChatMessage(id = "u1", sender = CHAT_ROLE_USER, text = "private chatgpt prompt"),
             ModelChatMessage(
-                id = "gpt", sender = CHAT_ROLE_ASSISTANT, provider = AiProvider.CHATGPT,
+                id = "gpt-previous", sender = CHAT_ROLE_ASSISTANT, provider = AiProvider.CHATGPT,
                 text = "chatgpt answer"
             ),
             ModelChatMessage(id = "u2", sender = CHAT_ROLE_USER, text = prompt)
@@ -90,14 +94,16 @@ class ConversationHistoryTest {
     @Test
     fun systemInstructionConsumesHistoryBudget() {
         val prompt = "next"
+        val previous = "previous"
+        val answer = "answer"
         val history = listOf(
-            ModelChatMessage(id = "u1", sender = CHAT_ROLE_USER, text = "previous"),
+            ModelChatMessage(id = "u1", sender = CHAT_ROLE_USER, text = previous),
             ModelChatMessage(
                 id = "a1", sender = CHAT_ROLE_ASSISTANT, provider = AiProvider.GEMINI,
-                text = "answer"
+                text = answer
             )
         )
-        val segmentCost = "previous".length + "answer".length + (2 * 32)
+        val segmentCost = previous.length + answer.length + (2 * 32)
 
         val turns = buildBoundedProviderTextTurns(
             prompt = prompt,

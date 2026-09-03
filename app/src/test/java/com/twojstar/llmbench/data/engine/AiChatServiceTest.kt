@@ -1,6 +1,8 @@
 package com.twojstar.llmbench.data.engine
 
 import com.twojstar.llmbench.data.model.AiProvider
+import com.twojstar.llmbench.data.model.CHAT_ROLE_ASSISTANT
+import com.twojstar.llmbench.data.model.CHAT_ROLE_USER
 import com.twojstar.llmbench.data.model.ModelChatMessage
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -10,44 +12,54 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
+private const val TEST_ROLE_KEY = "role"
+private const val TEST_CONTENT_KEY = "content"
+private const val FIRST_QUESTION = "first question"
+private const val FOLLOW_UP = "follow up"
+private const val OPENAI_ANSWER = "openai answer"
+private const val CLAUDE_ANSWER = "claude answer"
+private const val GEMINI_ANSWER = "gemini answer"
+private const val SIMULATED_ANSWER = "simulated answer"
+private const val SYSTEM_PROMPT = "system"
+
 class AiChatServiceTest {
     @Test
     fun compatibleHistoryKeepsOnlyCurrentProviderAssistantTurns() {
         val history = listOf(
             ModelChatMessage(
                 id = "welcome",
-                sender = "assistant",
+                sender = CHAT_ROLE_ASSISTANT,
                 provider = AiProvider.ALL,
                 text = "welcome"
             ),
-            ModelChatMessage(id = "user-1", sender = "user", text = "first"),
+            ModelChatMessage(id = "user-1", sender = CHAT_ROLE_USER, text = "first"),
             ModelChatMessage(
                 id = "or-1",
-                sender = "assistant",
+                sender = CHAT_ROLE_ASSISTANT,
                 provider = AiProvider.OPENROUTER,
                 text = "openrouter answer"
             ),
             ModelChatMessage(
                 id = "ds-1",
-                sender = "assistant",
+                sender = CHAT_ROLE_ASSISTANT,
                 provider = AiProvider.DEEPSEEK,
                 text = "deepseek answer"
             ),
-            ModelChatMessage(id = "user-2", sender = "user", text = "follow up")
+            ModelChatMessage(id = "user-2", sender = CHAT_ROLE_USER, text = FOLLOW_UP)
         )
 
         val messages = AiChatService().buildOpenAiCompatibleMessages(
-            prompt = "follow up",
-            systemInstruction = "system",
+            prompt = FOLLOW_UP,
+            systemInstruction = SYSTEM_PROMPT,
             conversationHistory = history,
             provider = AiProvider.OPENROUTER
         )
 
-        assertEquals(listOf("system", "user", "assistant", "user"), messages.map {
-            it.jsonObject.getValue("role").jsonPrimitive.content
+        assertEquals(listOf(SYSTEM_PROMPT, CHAT_ROLE_USER, CHAT_ROLE_ASSISTANT, CHAT_ROLE_USER), messages.map {
+            it.jsonObject.getValue(TEST_ROLE_KEY).jsonPrimitive.content
         })
-        assertEquals(listOf("system", "first", "openrouter answer", "follow up"), messages.map {
-            it.jsonObject.getValue("content").jsonPrimitive.content
+        assertEquals(listOf(SYSTEM_PROMPT, "first", "openrouter answer", FOLLOW_UP), messages.map {
+            it.jsonObject.getValue(TEST_CONTENT_KEY).jsonPrimitive.content
         })
     }
 
@@ -58,11 +70,11 @@ class AiChatServiceTest {
         val kimiModel = "kimi-k2.6"
         val liveAnswer = "live answer"
         val apiFailure = "API failed"
-        val simulatedAnswer = "simulated answer"
+        val simulatedAnswer = SIMULATED_ANSWER
         val otherProviderAnswer = "other provider answer"
         val nextQuestion = "next question"
         val history = listOf(
-            ModelChatMessage(id = "u1", sender = userSender, text = "first question"),
+            ModelChatMessage(id = "u1", sender = userSender, text = FIRST_QUESTION),
             ModelChatMessage(
                 id = "live", sender = assistantSender, provider = AiProvider.KIMI,
                 modelName = kimiModel, text = liveAnswer
@@ -88,11 +100,11 @@ class AiChatServiceTest {
             conversationHistory = history,
             provider = AiProvider.KIMI
         )
-        val contents = messages.map { it.jsonObject.getValue("content").jsonPrimitive.content }
-        val roles = messages.map { it.jsonObject.getValue("role").jsonPrimitive.content }
+        val contents = messages.map { it.jsonObject.getValue(TEST_CONTENT_KEY).jsonPrimitive.content }
+        val roles = messages.map { it.jsonObject.getValue(TEST_ROLE_KEY).jsonPrimitive.content }
 
         assertEquals(listOf(userSender, assistantSender, userSender), roles)
-        assertEquals(listOf("first question", liveAnswer, nextQuestion), contents)
+        assertEquals(listOf(FIRST_QUESTION, liveAnswer, nextQuestion), contents)
         assertFalse(apiFailure in contents)
         assertFalse(simulatedAnswer in contents)
         assertFalse(otherProviderAnswer in contents)
@@ -101,52 +113,52 @@ class AiChatServiceTest {
 
     @Test
     fun directProviderHistoryUsesNativeRolesAndProviderScopedAnswers() {
-        val prompt = "follow up"
+        val prompt = FOLLOW_UP
         val history = listOf(
-            ModelChatMessage(id = "u1", sender = "user", text = "first question"),
+            ModelChatMessage(id = "u1", sender = CHAT_ROLE_USER, text = FIRST_QUESTION),
             ModelChatMessage(
-                id = "gpt", sender = "assistant", provider = AiProvider.CHATGPT, text = "openai answer"
+                id = "gpt", sender = CHAT_ROLE_ASSISTANT, provider = AiProvider.CHATGPT, text = OPENAI_ANSWER
             ),
             ModelChatMessage(
-                id = "claude", sender = "assistant", provider = AiProvider.CLAUDE, text = "claude answer"
+                id = "claude", sender = CHAT_ROLE_ASSISTANT, provider = AiProvider.CLAUDE, text = CLAUDE_ANSWER
             ),
             ModelChatMessage(
-                id = "gemini", sender = "assistant", provider = AiProvider.GEMINI, text = "gemini answer"
+                id = "gemini", sender = CHAT_ROLE_ASSISTANT, provider = AiProvider.GEMINI, text = GEMINI_ANSWER
             ),
             ModelChatMessage(
-                id = "simulated", sender = "assistant", provider = AiProvider.CHATGPT,
-                text = "simulated answer", isSimulated = true
+                id = "simulated", sender = CHAT_ROLE_ASSISTANT, provider = AiProvider.CHATGPT,
+                text = SIMULATED_ANSWER, isSimulated = true
             ),
             ModelChatMessage(
-                id = "error", sender = "assistant", provider = AiProvider.CLAUDE,
+                id = "error", sender = CHAT_ROLE_ASSISTANT, provider = AiProvider.CLAUDE,
                 text = "error answer", isError = true
             ),
-            ModelChatMessage(id = "u2", sender = "user", text = prompt)
+            ModelChatMessage(id = "u2", sender = CHAT_ROLE_USER, text = prompt)
         )
         val service = AiChatService()
 
         val gemini = service.buildGeminiContents(prompt, history)
-        assertEquals(listOf("user", "model", "user"), gemini.map {
-            it.jsonObject.getValue("role").jsonPrimitive.content
+        assertEquals(listOf(CHAT_ROLE_USER, "model", CHAT_ROLE_USER), gemini.map {
+            it.jsonObject.getValue(TEST_ROLE_KEY).jsonPrimitive.content
         })
-        assertEquals(listOf("first question", "gemini answer", prompt), gemini.map {
+        assertEquals(listOf(FIRST_QUESTION, GEMINI_ANSWER, prompt), gemini.map {
             it.jsonObject.getValue("parts").jsonArray.first().jsonObject.getValue("text").jsonPrimitive.content
         })
 
         val openAi = service.buildOpenAiResponseInput(prompt, history)
-        assertEquals(listOf("user", "assistant", "user"), openAi.map {
-            it.jsonObject.getValue("role").jsonPrimitive.content
+        assertEquals(listOf(CHAT_ROLE_USER, CHAT_ROLE_ASSISTANT, CHAT_ROLE_USER), openAi.map {
+            it.jsonObject.getValue(TEST_ROLE_KEY).jsonPrimitive.content
         })
-        assertEquals(listOf("first question", "openai answer", prompt), openAi.map {
-            it.jsonObject.getValue("content").jsonPrimitive.content
+        assertEquals(listOf(FIRST_QUESTION, OPENAI_ANSWER, prompt), openAi.map {
+            it.jsonObject.getValue(TEST_CONTENT_KEY).jsonPrimitive.content
         })
 
         val claude = service.buildClaudeMessages(prompt, history)
-        assertEquals(listOf("user", "assistant", "user"), claude.map {
-            it.jsonObject.getValue("role").jsonPrimitive.content
+        assertEquals(listOf(CHAT_ROLE_USER, CHAT_ROLE_ASSISTANT, CHAT_ROLE_USER), claude.map {
+            it.jsonObject.getValue(TEST_ROLE_KEY).jsonPrimitive.content
         })
-        assertEquals(listOf("first question", "claude answer", prompt), claude.map {
-            it.jsonObject.getValue("content").jsonPrimitive.content
+        assertEquals(listOf(FIRST_QUESTION, CLAUDE_ANSWER, prompt), claude.map {
+            it.jsonObject.getValue(TEST_CONTENT_KEY).jsonPrimitive.content
         })
     }
 
