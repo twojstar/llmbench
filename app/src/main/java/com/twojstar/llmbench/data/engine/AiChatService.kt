@@ -9,6 +9,7 @@ import com.twojstar.llmbench.data.model.ModelChatMessage
 import com.twojstar.llmbench.data.model.buildBoundedProviderTextTurns
 import com.twojstar.llmbench.data.model.freeGatewayModelOptions
 import com.twojstar.llmbench.data.model.Profile
+import kotlinx.coroutines.CancellableContinuation
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -42,6 +43,10 @@ private const val OPENAI_RESPONSE_FAILED = "response.failed"
 private const val OPENAI_RESPONSE_COMPLETED = "response.completed"
 private const val OPENAI_RESPONSE_INCOMPLETE = "response.incomplete"
 private const val CLAUDE_MESSAGE_STOP = "message_stop"
+private const val OPENAI_OUTPUT_TEXT = "output_text"
+private const val OPENAI_OUTPUT_TEXT_DELTA = "response.output_text.delta"
+private const val CLAUDE_CONTENT_BLOCK_DELTA = "content_block_delta"
+private const val CLAUDE_TEXT_DELTA = "text_delta"
 private const val MALFORMED_STREAM_EVENT = "Malformed streaming event"
 
 class AiChatService {
@@ -442,7 +447,7 @@ class AiChatService {
                 .filter { it[STREAM_TYPE_KEY]?.jsonPrimitive?.contentOrNull == STREAM_MESSAGE_KEY }
                 .flatMap { message -> message[JSON_CONTENT_KEY]?.jsonArray.orEmpty().asSequence() }
                 .mapNotNull { it as? JsonObject }
-                .filter { it["type"]?.jsonPrimitive?.contentOrNull == "output_text" }
+                .filter { it[STREAM_TYPE_KEY]?.jsonPrimitive?.contentOrNull == OPENAI_OUTPUT_TEXT }
                 .mapNotNull { it[JSON_TEXT_KEY]?.jsonPrimitive?.contentOrNull }
                 .joinToString(separator = "")
                 .takeIf { it.isNotEmpty() }
@@ -490,7 +495,7 @@ class AiChatService {
             val parsed = json.parseToJsonElement(responseBody).jsonObject
             val text = parsed[JSON_CONTENT_KEY]?.jsonArray.orEmpty()
                 .mapNotNull { it as? JsonObject }
-                .filter { it["type"]?.jsonPrimitive?.contentOrNull == JSON_TEXT_KEY }
+                .filter { it[STREAM_TYPE_KEY]?.jsonPrimitive?.contentOrNull == JSON_TEXT_KEY }
                 .mapNotNull { it[JSON_TEXT_KEY]?.jsonPrimitive?.contentOrNull }
                 .joinToString(separator = "")
                 .takeIf { it.isNotEmpty() }
@@ -510,16 +515,16 @@ class AiChatService {
             .takeIf { it.isNotEmpty() }
 
     internal fun extractOpenAiStreamText(event: JsonObject): String? =
-        if (event["type"]?.jsonPrimitive?.contentOrNull == "response.output_text.delta") {
+        if (event[STREAM_TYPE_KEY]?.jsonPrimitive?.contentOrNull == OPENAI_OUTPUT_TEXT_DELTA) {
             event["delta"]?.jsonPrimitive?.contentOrNull
         } else {
             null
         }
 
     internal fun extractClaudeStreamText(event: JsonObject): String? =
-        if (event["type"]?.jsonPrimitive?.contentOrNull == "content_block_delta") {
+        if (event[STREAM_TYPE_KEY]?.jsonPrimitive?.contentOrNull == CLAUDE_CONTENT_BLOCK_DELTA) {
             event["delta"]?.jsonObject
-                ?.takeIf { it["type"]?.jsonPrimitive?.contentOrNull == "text_delta" }
+                ?.takeIf { it[STREAM_TYPE_KEY]?.jsonPrimitive?.contentOrNull == CLAUDE_TEXT_DELTA }
                 ?.get(JSON_TEXT_KEY)?.jsonPrimitive?.contentOrNull
         } else {
             null
@@ -658,14 +663,24 @@ class AiChatService {
             }
 
             override fun onResponse(call: Call, response: Response) {
-                try {
-                    val text = readSseResponse(response, extractText, isComplete, onTextDelta)
-                    if (continuation.isActive) continuation.resume(text)
-                } catch (e: IOException) {
-                    if (continuation.isActive) continuation.resumeWithException(e)
-                }
+                completeSseContinuation(continuation, response, extractText, isComplete, onTextDelta)
             }
         })
+    }
+
+    private fun completeSseContinuation(
+        continuation: CancellableContinuation<String>,
+        response: Response,
+        extractText: (JsonObject) -> String?,
+        isComplete: (JsonObject) -> Boolean,
+        onTextDelta: (String) -> Unit
+    ) {
+        try {
+            val text = readSseResponse(response, extractText, isComplete, onTextDelta)
+            if (continuation.isActive) continuation.resume(text)
+        } catch (e: IOException) {
+            if (continuation.isActive) continuation.resumeWithException(e)
+        }
     }
 
     private fun readSseResponse(
