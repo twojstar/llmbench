@@ -103,9 +103,9 @@ internal fun shouldApplyPendingDesktopMode(
     isStableOffProviderPage: Boolean
 ): Boolean = when {
     observation == WebChatGenerationObservation.GENERATING -> false
-    observation != WebChatGenerationObservation.UNKNOWN -> true
-    !trackingSupported -> true
     isStableOffProviderPage -> true
+    !trackingSupported -> false
+    observation != WebChatGenerationObservation.UNKNOWN -> true
     else -> false
 }
 
@@ -348,6 +348,7 @@ fun WebChatScreen(
                         val currentMode = pendingDesktopModes[service] ?: isDesktopMode
                         val nextDesktopMode = !currentMode
                         if (webViewMap[service] == null) {
+                            pendingDesktopModes.remove(service)
                             desktopModes[service] = nextDesktopMode
                         } else {
                             pendingDesktopModes[service] = nextDesktopMode
@@ -712,8 +713,14 @@ private fun WebChatToolbar(
                                 )
                             },
                             onClick = {
-                                onToggleDesktopMode()
                                 menuExpanded = false
+                                if (providerGenerationTrackingSupported(selectedService)) {
+                                    onToggleDesktopMode()
+                                } else {
+                                    onShowSnackbar(
+                                        "Display mode switching is disabled until ${selectedService.shortName} activity tracking is verified."
+                                    )
+                                }
                             }
                         )
                         DropdownMenuItem(
@@ -1218,5 +1225,12 @@ fun getWebServiceIcon(service: WebAiService): ImageVector {
         WebAiService.DEEPSEEK -> Icons.Default.Psychology
         WebAiService.KIMI -> Icons.Default.ElectricBolt
         WebAiService.VIBE -> Icons.Default.Air
+        WebAiService.QWEN -> Icons.Default.Hub
+        WebAiService.COPILOT -> Icons.Default.AutoAwesome
+        WebAiService.ZAI -> Icons.Default.Memory
+        WebAiService.GROK -> Icons.Default.Public
+        WebAiService.CHARACTER_AI -> Icons.Default.Groups
+        WebAiService.VENICE -> Icons.Default.Lock
+        WebAiService.META_AI -> Icons.Default.AllInclusive
     }
 }

@@ -13,6 +13,24 @@ class ChatModelsTest {
     }
 
     @Test
+    fun additionalWebProvidersUseCanonicalEndpoints() {
+        val endpoints = mapOf(
+            WebAiService.QWEN to "https://qwen.ai",
+            WebAiService.COPILOT to "https://copilot.microsoft.com",
+            WebAiService.ZAI to "https://chat.z.ai",
+            WebAiService.GROK to "https://grok.com",
+            WebAiService.CHARACTER_AI to "https://character.ai",
+            WebAiService.VENICE to "https://venice.ai",
+            WebAiService.META_AI to "https://www.meta.ai"
+        )
+
+        endpoints.forEach { (service, url) ->
+            assertEquals(url, service.url)
+            assertEquals(service, WebAiService.fromId(service.id))
+        }
+    }
+
+    @Test
     fun browserPlatformUsesCanonicalAiStudioEndpoint() {
         assertEquals("https://aistudio.google.com", BrowserAiPlatform.GEMINI_AI_STUDIO.url)
         assertEquals("AI Studio", BrowserAiPlatform.GEMINI_AI_STUDIO.shortName)

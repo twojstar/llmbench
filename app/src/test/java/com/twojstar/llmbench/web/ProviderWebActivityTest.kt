@@ -9,10 +9,19 @@ import org.mozilla.javascript.Context
 class ProviderWebActivityTest {
     @Test
     fun everyProviderWithVerifiedStableMarkupHasAnAuditableGenerationProbe() {
+        val verifiedProviders = setOf(
+            WebAiService.CLAUDE,
+            WebAiService.CHATGPT,
+            WebAiService.GEMINI,
+            WebAiService.DEEPSEEK,
+            WebAiService.KIMI,
+            WebAiService.VIBE
+        )
+
         WebAiService.entries.forEach { service ->
             assertTrue(
-                "Missing generation probe for ${service.id}",
-                ProviderWebTweakRegistry.generationSelectors(service).isNotEmpty()
+                "Unexpected generation tracking state for ${service.id}",
+                providerGenerationTrackingSupported(service) == (service in verifiedProviders)
             )
         }
     }
