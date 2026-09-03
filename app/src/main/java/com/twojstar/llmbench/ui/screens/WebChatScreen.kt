@@ -348,6 +348,7 @@ fun WebChatScreen(
                         val currentMode = pendingDesktopModes[service] ?: isDesktopMode
                         val nextDesktopMode = !currentMode
                         if (webViewMap[service] == null) {
+                            pendingDesktopModes.remove(service)
                             desktopModes[service] = nextDesktopMode
                         } else {
                             pendingDesktopModes[service] = nextDesktopMode
