@@ -703,6 +703,8 @@ class AiChatService {
         try {
             val text = readSseResponse(response, extractText, isComplete, onTextDelta)
             if (continuation.isActive) continuation.resume(text)
+        } catch (cancelled: CancellationException) {
+            if (continuation.isActive) continuation.resumeWithException(cancelled)
         } catch (e: IOException) {
             if (continuation.isActive) continuation.resumeWithException(e)
         }
@@ -737,10 +739,12 @@ class AiChatService {
                 }
                 delta?.takeIf { it.isNotEmpty() }?.let { text ->
                     collected.append(text)
-                    try {
-                        onTextDelta(text)
-                    } catch (e: RuntimeException) {
-                        throw IOException("Streaming text callback failed", e)
+                    val callbackFailure = runCatching { onTextDelta(text) }.exceptionOrNull()
+                    when (callbackFailure) {
+                        null -> Unit
+                        is CancellationException -> throw callbackFailure
+                        is RuntimeException -> throw IOException("Streaming text callback failed", callbackFailure)
+                        else -> throw callbackFailure
                     }
                 }
                 if (eventComplete) completed = true

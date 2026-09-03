@@ -4,6 +4,7 @@ import com.twojstar.llmbench.data.model.AiProvider
 import com.twojstar.llmbench.data.model.CHAT_ROLE_ASSISTANT
 import com.twojstar.llmbench.data.model.CHAT_ROLE_USER
 import com.twojstar.llmbench.data.model.ModelChatMessage
+import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -343,6 +344,33 @@ class AiChatServiceTest {
 
         assertTrue(result.isFailure)
         assertEquals("Streaming text callback failed", result.exceptionOrNull()?.message)
+    }
+
+    @Test
+    fun streamingDeltaCallbackCancellationIsPreserved() {
+        val service = AiChatService()
+        val response = Response.Builder()
+            .request(Request.Builder().url("https://example.test/stream").build())
+            .protocol(Protocol.HTTP_1_1)
+            .code(200)
+            .message("OK")
+            .body(
+                "data: {\"type\":\"response.output_text.delta\",\"delta\":\"hello\"}\n\n"
+                    .toResponseBody("text/event-stream".toMediaType())
+            )
+            .build()
+
+        val result = runCatching {
+            service.readSseResponse(
+                response = response,
+                extractText = service::extractOpenAiStreamText,
+                isComplete = service::isOpenAiStreamComplete,
+                onTextDelta = { throw CancellationException("stopped") }
+            )
+        }
+
+        assertTrue(result.exceptionOrNull() is CancellationException)
+        assertEquals("stopped", result.exceptionOrNull()?.message)
     }
 
 }
