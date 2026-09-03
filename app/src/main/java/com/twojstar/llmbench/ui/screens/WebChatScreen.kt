@@ -103,9 +103,9 @@ internal fun shouldApplyPendingDesktopMode(
     isStableOffProviderPage: Boolean
 ): Boolean = when {
     observation == WebChatGenerationObservation.GENERATING -> false
-    observation != WebChatGenerationObservation.UNKNOWN -> true
-    !trackingSupported -> true
     isStableOffProviderPage -> true
+    !trackingSupported -> false
+    observation != WebChatGenerationObservation.UNKNOWN -> true
     else -> false
 }
 

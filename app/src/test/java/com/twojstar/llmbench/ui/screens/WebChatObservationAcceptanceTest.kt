@@ -112,12 +112,23 @@ class WebChatObservationAcceptanceTest {
     }
 
     @Test
-    fun unknownObservationWithoutTrackingCanApplyPendingDisplayMode() {
-        assertTrue(
+    fun unknownObservationWithoutTrackingKeepsPendingDisplayModeDeferred() {
+        assertFalse(
             shouldApplyPendingDesktopMode(
                 observation = WebChatGenerationObservation.UNKNOWN,
                 trackingSupported = false,
                 isStableOffProviderPage = false
+            )
+        )
+    }
+
+    @Test
+    fun unsupportedTrackingCanApplyPendingDisplayModeOffProviderPage() {
+        assertTrue(
+            shouldApplyPendingDesktopMode(
+                observation = WebChatGenerationObservation.UNKNOWN,
+                trackingSupported = false,
+                isStableOffProviderPage = true
             )
         )
     }
