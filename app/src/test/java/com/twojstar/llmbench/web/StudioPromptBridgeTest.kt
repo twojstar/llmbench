@@ -91,8 +91,8 @@ class StudioPromptBridgeTest {
     }
 
     @Test
-    fun rejectsSearchAndAccountEmailInputs() {
-        listOf("search", "email").forEach { type ->
+    fun rejectsGenericInputsWithoutVerifiedComposerMarkers() {
+        listOf("text", "search", "email").forEach { type ->
             val outcome = runApply(
                 targetSetup = inputSetup(type = type, value = "", active = true),
                 prompt = STUDIO_PROFILE
@@ -172,6 +172,53 @@ class StudioPromptBridgeTest {
 
         assertEquals(INSERTED_RESULT, outcome.result)
         assertEquals(STUDIO_PROFILE, outcome.value)
+    }
+
+    @Test
+    fun rememberedEditorAgeRefreshesWhenFocusLeavesComposer() {
+        val script = requireNotNull(
+            studioPromptTargetTrackerScript(WebAiService.CHATGPT, CHATGPT_URL)
+        )
+        val context = Context.enter()
+        try {
+            context.optimizationLevel = -1
+            context.languageVersion = Context.VERSION_ES6
+            val scope = context.initStandardObjects()
+            val runtime = browserMocks
+                .replace("__RUNTIME_HOST__", "chatgpt.com")
+                .replace("__RUNTIME_HREF__", CHATGPT_URL)
+            context.evaluateString(scope, runtime + "\n" + textAreaSetup("", active = true), "focus-setup", 1, null)
+            context.evaluateString(scope, script, "focus-tracker", 1, null)
+            context.evaluateString(
+                scope,
+                "window.__llmbenchStudioPromptTarget.focusedAt = 1; document.listeners.focusout({target: target});",
+                "focus-out",
+                1,
+                null
+            )
+            val refreshed = context.evaluateString(
+                scope,
+                "window.__llmbenchStudioPromptTarget.focusedAt > 1;",
+                "focus-time",
+                1,
+                null
+            )
+            assertTrue(Context.toBoolean(refreshed))
+        } finally {
+            Context.exit()
+        }
+    }
+
+    @Test
+    fun contentEditableWithAttachmentFallsBackWithoutDeletingContent() {
+        val outcome = runApply(
+            targetSetup = contentEditableSetup(active = true, hasAttachment = true),
+            prompt = STUDIO_PROFILE
+        )
+
+        assertEquals("not-empty", outcome.result)
+        assertEquals("", outcome.value)
+        assertEquals("", outcome.events)
     }
 
     @Test
@@ -256,11 +303,12 @@ class StudioPromptBridgeTest {
         document.activeElement = ${if (active) "target" else "document.body"};
     """.trimIndent()
 
-    private fun contentEditableSetup(active: Boolean): String = """
+    private fun contentEditableSetup(active: Boolean, hasAttachment: Boolean = false): String = """
         var target = {
             tagName: 'DIV', textContent: '', innerText: '', isConnected: true,
             parentElement: null, isContentEditable: true,
-            focus: function() {}, dispatchEvent: function(event) { events.push(event.type); return true; }
+            focus: function() {}, dispatchEvent: function(event) { events.push(event.type); return true; },
+            querySelector: function() { return ${if (hasAttachment) "{ tagName: 'IMG' }" else "null"}; }
         };
         document.activeElement = ${if (active) "target" else "document.body"};
     """.trimIndent()

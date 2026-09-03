@@ -102,6 +102,14 @@ internal fun studioPromptTargetTrackerScript(
                 document.addEventListener('focusin', function(event) {
                     remember(event.target);
                 }, true);
+                document.addEventListener('focusout', function(event) {
+                    var target = llmbenchFindEditable(event.target);
+                    if (target && target === state.target) state.focusedAt = Date.now();
+                }, true);
+                document.addEventListener('input', function(event) {
+                    var target = llmbenchFindEditable(event.target);
+                    if (target && target === state.target) state.focusedAt = Date.now();
+                }, true);
                 state.installed = true;
             }
             return true;
@@ -137,6 +145,12 @@ internal fun studioPromptApplyScript(
                 ? String(target.value || '')
                 : String(target.innerText || target.textContent || '');
             if (current.trim().length > 0) return 'not-empty';
+            if (tag !== 'textarea' && typeof target.querySelector === 'function') {
+                var nonTextContent = target.querySelector(
+                    'img,video,audio,canvas,svg,iframe,object,embed,input,button,[contenteditable="false"]'
+                );
+                if (nonTextContent) return 'not-empty';
+            }
 
             if (typeof target.focus === 'function') target.focus();
             var beforeInput = typeof InputEvent === 'function'
