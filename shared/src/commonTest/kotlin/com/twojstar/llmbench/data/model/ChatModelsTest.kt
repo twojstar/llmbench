@@ -18,7 +18,9 @@ class ChatModelsTest {
             WebAiService.QWEN to "https://qwen.ai",
             WebAiService.COPILOT to "https://copilot.microsoft.com",
             WebAiService.ZAI to "https://chat.z.ai",
-            WebAiService.GROK to "https://grok.com"
+            WebAiService.GROK to "https://grok.com",
+            WebAiService.CHARACTER_AI to "https://character.ai",
+            WebAiService.VENICE to "https://venice.ai"
         )
 
         endpoints.forEach { (service, url) ->

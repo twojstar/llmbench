@@ -92,6 +92,22 @@ enum class WebAiService(
         url = "https://grok.com",
         description = "xAI Grok account chat with search, reasoning, files, and multimodal tools",
         brandHexColor = 0xFF64748B // Slate
+    ),
+    CHARACTER_AI(
+        id = "character-ai",
+        displayName = "Character.AI",
+        shortName = "Character.AI",
+        url = "https://character.ai",
+        description = "Character.AI account chat for character-driven conversations",
+        brandHexColor = 0xFF7C3AED // Violet
+    ),
+    VENICE(
+        id = "venice",
+        displayName = "Venice AI",
+        shortName = "Venice",
+        url = "https://venice.ai",
+        description = "Venice account chat focused on private AI and creative workflows",
+        brandHexColor = 0xFF0F766E // Teal
     );
 
     companion object {
