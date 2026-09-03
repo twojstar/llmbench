@@ -4,6 +4,7 @@ import com.twojstar.llmbench.data.model.AiProvider
 import com.twojstar.llmbench.data.model.CHAT_ROLE_ASSISTANT
 import com.twojstar.llmbench.data.model.CHAT_ROLE_USER
 import com.twojstar.llmbench.data.model.ModelChatMessage
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -231,4 +232,36 @@ class AiChatServiceTest {
         assertTrue(entries.first().supportsTextOutput)
         assertFalse(entries.last().supportsTextOutput)
     }
+    @Test
+    fun extractsNativeStreamingTextDeltas() {
+        val service = AiChatService()
+        val gemini = Json.parseToJsonElement(
+            """{"candidates":[{"content":{"parts":[{"text":"hel"},{"text":"lo"}]}}]}"""
+        ).jsonObject
+        val openAi = Json.parseToJsonElement(
+            """{"type":"response.output_text.delta","delta":"hello"}"""
+        ).jsonObject
+        val claude = Json.parseToJsonElement(
+            """{"type":"content_block_delta","delta":{"type":"text_delta","text":"hello"}}"""
+        ).jsonObject
+
+        assertEquals("hello", service.extractGeminiStreamText(gemini))
+        assertEquals("hello", service.extractOpenAiStreamText(openAi))
+        assertEquals("hello", service.extractClaudeStreamText(claude))
+    }
+
+    @Test
+    fun ignoresNonTextNativeStreamingEvents() {
+        val service = AiChatService()
+        val openAi = Json.parseToJsonElement(
+            """{"type":"response.completed","response":{"id":"resp_1"}}"""
+        ).jsonObject
+        val claude = Json.parseToJsonElement(
+            """{"type":"message_delta","delta":{"stop_reason":"end_turn"}}"""
+        ).jsonObject
+
+        assertEquals(null, service.extractOpenAiStreamText(openAi))
+        assertEquals(null, service.extractClaudeStreamText(claude))
+    }
+
 }

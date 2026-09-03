@@ -263,6 +263,7 @@ data class ModelChatMessage(
     val timestamp: Long = Clock.System.now().toEpochMilliseconds(),
     val isError: Boolean = false,
     val isSimulated: Boolean = false,
+    val isPartial: Boolean = false,
     val latencyMs: Long? = null,
     val activeProfileNotes: List<String> = emptyList()
 )

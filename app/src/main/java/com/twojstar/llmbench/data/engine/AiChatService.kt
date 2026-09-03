@@ -9,7 +9,11 @@ import com.twojstar.llmbench.data.model.ModelChatMessage
 import com.twojstar.llmbench.data.model.buildBoundedProviderTextTurns
 import com.twojstar.llmbench.data.model.freeGatewayModelOptions
 import com.twojstar.llmbench.data.model.Profile
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.*
 import okhttp3.MediaType.Companion.toMediaType
@@ -57,6 +61,10 @@ class AiChatService {
         .connectTimeout(60, TimeUnit.SECONDS)
         .readTimeout(60, TimeUnit.SECONDS)
         .writeTimeout(60, TimeUnit.SECONDS)
+        .build()
+
+    private val streamingHttpClient: OkHttpClient = httpClient.newBuilder()
+        .readTimeout(0, TimeUnit.MILLISECONDS)
         .build()
 
     private val json = Json {
@@ -146,7 +154,8 @@ class AiChatService {
         systemInstruction: String?,
         profile: Profile?,
         conversationHistory: List<ModelChatMessage> = emptyList(),
-        allowSimulationFallback: Boolean = true
+        allowSimulationFallback: Boolean = true,
+        onTextDelta: ((String) -> Unit)? = null
     ): ModelChatMessage = withContext(Dispatchers.IO) {
         val startTime = System.currentTimeMillis()
         val effectiveModel = if (modelName == "all" || modelName.isBlank()) provider.defaultModel else modelName
@@ -166,15 +175,27 @@ class AiChatService {
         if (isKeyProvided) {
             try {
                 val realResult = when (provider) {
-                    AiProvider.GEMINI -> callGeminiApi(
-                        prompt, effectiveModel, key, systemInstruction, conversationHistory
-                    )
-                    AiProvider.CHATGPT -> callOpenAiApi(
-                        prompt, effectiveModel, key, systemInstruction, conversationHistory
-                    )
-                    AiProvider.CLAUDE -> callClaudeApi(
-                        prompt, effectiveModel, key, systemInstruction, conversationHistory
-                    )
+                    AiProvider.GEMINI -> if (onTextDelta != null) {
+                        callGeminiStreamApi(
+                            prompt, effectiveModel, key, systemInstruction, conversationHistory, onTextDelta
+                        )
+                    } else {
+                        callGeminiApi(prompt, effectiveModel, key, systemInstruction, conversationHistory)
+                    }
+                    AiProvider.CHATGPT -> if (onTextDelta != null) {
+                        callOpenAiStreamApi(
+                            prompt, effectiveModel, key, systemInstruction, conversationHistory, onTextDelta
+                        )
+                    } else {
+                        callOpenAiApi(prompt, effectiveModel, key, systemInstruction, conversationHistory)
+                    }
+                    AiProvider.CLAUDE -> if (onTextDelta != null) {
+                        callClaudeStreamApi(
+                            prompt, effectiveModel, key, systemInstruction, conversationHistory, onTextDelta
+                        )
+                    } else {
+                        callClaudeApi(prompt, effectiveModel, key, systemInstruction, conversationHistory)
+                    }
                     AiProvider.DEEPSEEK, AiProvider.KIMI, AiProvider.OPENROUTER, AiProvider.AIHUBMIX -> {
                         val config = checkNotNull(openAiCompatibleProviders[provider])
                         callOpenAiCompatibleApi(
@@ -205,6 +226,8 @@ class AiChatService {
                         activeProfileNotes = activeNotes
                     )
                 }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
             } catch (e: Exception) {
                 val latency = System.currentTimeMillis() - startTime
                 val errorDetails = e.localizedMessage ?: e.message ?: "Unknown error"
@@ -458,6 +481,151 @@ class AiChatService {
 
             return text ?: "Received empty content block from Claude."
         }
+    }
+
+    internal fun extractGeminiStreamText(event: JsonObject): String? =
+        event["candidates"]?.jsonArray
+            ?.firstOrNull()?.jsonObject
+            ?.get(JSON_CONTENT_KEY)?.jsonObject
+            ?.get(JSON_PARTS_KEY)?.jsonArray
+            .orEmpty()
+            .mapNotNull { it.jsonObject[JSON_TEXT_KEY]?.jsonPrimitive?.contentOrNull }
+            .joinToString(separator = "")
+            .takeIf { it.isNotEmpty() }
+
+    internal fun extractOpenAiStreamText(event: JsonObject): String? =
+        if (event["type"]?.jsonPrimitive?.contentOrNull == "response.output_text.delta") {
+            event["delta"]?.jsonPrimitive?.contentOrNull
+        } else {
+            null
+        }
+
+    internal fun extractClaudeStreamText(event: JsonObject): String? =
+        if (event["type"]?.jsonPrimitive?.contentOrNull == "content_block_delta") {
+            event["delta"]?.jsonObject
+                ?.takeIf { it["type"]?.jsonPrimitive?.contentOrNull == "text_delta" }
+                ?.get(JSON_TEXT_KEY)?.jsonPrimitive?.contentOrNull
+        } else {
+            null
+        }
+
+    private suspend fun callGeminiStreamApi(
+        prompt: String,
+        model: String,
+        apiKey: String,
+        systemInstruction: String?,
+        conversationHistory: List<ModelChatMessage>,
+        onTextDelta: (String) -> Unit
+    ): String {
+        val url = "https://generativelanguage.googleapis.com/v1beta/models/$model:streamGenerateContent?alt=sse&key=$apiKey"
+        val requestPayload = buildJsonObject {
+            put("contents", buildGeminiContents(prompt, conversationHistory, systemInstruction))
+            if (!systemInstruction.isNullOrBlank()) {
+                putJsonObject("systemInstruction") {
+                    putJsonArray(JSON_PARTS_KEY) {
+                        addJsonObject { put(JSON_TEXT_KEY, systemInstruction) }
+                    }
+                }
+            }
+        }
+        val request = Request.Builder()
+            .url(url)
+            .post(requestPayload.toString().toRequestBody("application/json".toMediaType()))
+            .build()
+        return executeSse(request, ::extractGeminiStreamText, onTextDelta)
+            .ifEmpty { "Received empty content response from Gemini." }
+    }
+
+    private suspend fun callOpenAiStreamApi(
+        prompt: String,
+        model: String,
+        apiKey: String,
+        systemInstruction: String?,
+        conversationHistory: List<ModelChatMessage>,
+        onTextDelta: (String) -> Unit
+    ): String {
+        val requestPayload = buildJsonObject {
+            put(JSON_MODEL_KEY, model)
+            put("input", buildOpenAiResponseInput(prompt, conversationHistory, systemInstruction))
+            put("store", false)
+            put("stream", true)
+            if (!systemInstruction.isNullOrBlank()) put("instructions", systemInstruction)
+        }
+        val request = Request.Builder()
+            .url("https://api.openai.com/v1/responses")
+            .addHeader("Authorization", "Bearer $apiKey")
+            .addHeader("Content-Type", "application/json")
+            .post(requestPayload.toString().toRequestBody("application/json".toMediaType()))
+            .build()
+        return executeSse(request, ::extractOpenAiStreamText, onTextDelta)
+            .ifEmpty { "Received empty message content from OpenAI." }
+    }
+
+    private suspend fun callClaudeStreamApi(
+        prompt: String,
+        model: String,
+        apiKey: String,
+        systemInstruction: String?,
+        conversationHistory: List<ModelChatMessage>,
+        onTextDelta: (String) -> Unit
+    ): String {
+        val requestPayload = buildJsonObject {
+            put(JSON_MODEL_KEY, model)
+            put("max_tokens", 2048)
+            put("stream", true)
+            if (!systemInstruction.isNullOrBlank()) put("system", systemInstruction)
+            put("messages", buildClaudeMessages(prompt, conversationHistory, systemInstruction))
+        }
+        val request = Request.Builder()
+            .url("https://api.anthropic.com/v1/messages")
+            .addHeader("x-api-key", apiKey)
+            .addHeader("anthropic-version", "2023-06-01")
+            .addHeader("content-type", "application/json")
+            .post(requestPayload.toString().toRequestBody("application/json".toMediaType()))
+            .build()
+        return executeSse(request, ::extractClaudeStreamText, onTextDelta)
+            .ifEmpty { "Received empty content block from Claude." }
+    }
+
+    private suspend fun executeSse(
+        request: Request,
+        extractText: (JsonObject) -> String?,
+        onTextDelta: (String) -> Unit
+    ): String {
+        val call = streamingHttpClient.newCall(request)
+        val cancellationHandle = currentCoroutineContext()[Job]?.invokeOnCompletion { cause ->
+            if (cause is CancellationException) call.cancel()
+        }
+        val collected = StringBuilder()
+        try {
+            call.execute().use { response ->
+                if (!response.isSuccessful) {
+                    val responseBody = response.body?.string().orEmpty()
+                    val errorMsg = parseErrorMessage(responseBody)
+                        ?: "HTTP ${response.code}: ${response.message}"
+                    throw Exception(errorMsg)
+                }
+                val source = response.body?.source() ?: throw Exception("Empty streaming response body")
+                while (!source.exhausted()) {
+                    currentCoroutineContext().ensureActive()
+                    val line = source.readUtf8Line() ?: break
+                    if (!line.startsWith("data:")) continue
+                    val payload = line.removePrefix("data:").trim()
+                    if (payload.isBlank() || payload == "[DONE]") continue
+                    val event = runCatching { json.parseToJsonElement(payload).jsonObject }.getOrNull() ?: continue
+                    if (event["type"]?.jsonPrimitive?.contentOrNull == "error") {
+                        throw Exception(parseErrorMessage(payload) ?: event.toString())
+                    }
+                    extractText(event)?.takeIf { it.isNotEmpty() }?.let { delta ->
+                        collected.append(delta)
+                        onTextDelta(delta)
+                    }
+                }
+            }
+        } finally {
+            cancellationHandle?.dispose()
+        }
+        return collected.toString()
     }
 
     // --- OpenAI-compatible provider/gateway boundary ---

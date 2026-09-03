@@ -48,6 +48,7 @@ fun buildBoundedProviderTextTurns(
                 message.provider == provider &&
                 !message.isError &&
                 !message.isSimulated &&
+                !message.isPartial &&
                 segments.isNotEmpty() -> {
                 segments.last() += ProviderTextTurn(CHAT_ROLE_ASSISTANT, message.text)
             }
