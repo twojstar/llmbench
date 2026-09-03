@@ -8,6 +8,18 @@ import kotlinx.serialization.json.Json
 
 private const val GENERATION_TRACKER_KEY = "__llmbenchGenerationTracker"
 
+private val generationControlPredicate = """
+    (activeControls, inactiveControls) => activeControls.some(activeControl => {
+        const activeSubmit = activeControl.closest('button[type="submit"]');
+        if (!activeSubmit) return true;
+        return !inactiveControls.some(idleControl =>
+            idleControl.closest('button[type="submit"]') === activeSubmit
+        );
+    })
+""".trimIndent()
+
+internal fun generationControlPredicateScript(): String = generationControlPredicate
+
 private fun generationActivityScript(
     selectors: List<String>,
     idleSelectors: List<String>,
@@ -38,17 +50,11 @@ private fun generationActivityScript(
             const generationControls = () => controlsFor(selectors);
             const idleControls = () => controlsFor(idleSelectors);
             const trackedControls = () => controlsFor(trackedSelectors);
-            const isGenerating = () => {
-                const activeControls = generationControls();
-                const inactiveControls = idleControls();
-                return activeControls.some(activeControl => {
-                    const activeSubmit = activeControl.closest('button[type="submit"]');
-                    if (!activeSubmit) return true;
-                    return !inactiveControls.some(idleControl =>
-                        idleControl.closest('button[type="submit"]') === activeSubmit
-                    );
-                });
-            };
+            const hasActiveGenerationControl = $generationControlPredicate;
+            const isGenerating = () => hasActiveGenerationControl(
+                generationControls(),
+                idleControls()
+            );
 
             let tracker = window[trackerKey];
             if (!tracker || tracker.signature !== signature) {

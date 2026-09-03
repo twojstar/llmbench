@@ -4,6 +4,7 @@ import com.twojstar.llmbench.data.model.WebAiService
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.mozilla.javascript.Context
 
 class ProviderWebActivityTest {
     @Test
@@ -59,20 +60,28 @@ class ProviderWebActivityTest {
 
     @Test
     fun vibeTrackerRejectsIdleFingerprintOnTheSameSubmitControl() {
+        assertTrue(evaluateGenerationControlPredicate(activeSubmitIds = listOf("active")))
+        assertFalse(
+            evaluateGenerationControlPredicate(
+                activeSubmitIds = listOf("active"),
+                idleSubmitIds = listOf("active")
+            )
+        )
+        assertTrue(
+            evaluateGenerationControlPredicate(
+                activeSubmitIds = listOf("active"),
+                idleSubmitIds = listOf("other")
+            )
+        )
+
         val script = requireNotNull(
             providerGenerationActivityScript(
                 service = WebAiService.VIBE,
                 consumeCompletion = false
             )
         )
-
-        assertTrue(script.contains("button[type=\\\"submit\\\"] svg rect"))
-        assertTrue(script.contains("M12 18v4h4v-4h-4ZM16 14v4h4v-4h-4"))
-        assertTrue(
-            script.contains(
-                "idleControl.closest('button[type=\"submit\"]') === activeSubmit"
-            )
-        )
+        assertTrue(script.contains("const hasActiveGenerationControl ="))
+        assertTrue(script.contains("hasActiveGenerationControl("))
     }
 
     @Test
@@ -85,4 +94,39 @@ class ProviderWebActivityTest {
         assertFalse(activeSelector.contains("aria-label"))
         assertFalse(idleSelector.contains("aria-label"))
     }
+
+    private fun evaluateGenerationControlPredicate(
+        activeSubmitIds: List<String?>,
+        idleSubmitIds: List<String?> = emptyList()
+    ): Boolean {
+        val context = Context.enter()
+        return try {
+            context.optimizationLevel = -1
+            context.languageVersion = Context.VERSION_ES6
+            val scope = context.initStandardObjects()
+            val activeIds = activeSubmitIds.joinToString(prefix = "[", postfix = "]") { id ->
+                id?.let { "\"$it\"" } ?: "null"
+            }
+            val idleIds = idleSubmitIds.joinToString(prefix = "[", postfix = "]") { id ->
+                id?.let { "\"$it\"" } ?: "null"
+            }
+            val source = """
+                var predicate = ${generationControlPredicateScript()};
+                function control(submitId) {
+                    return {
+                        closest: function(selector) {
+                            return selector === 'button[type="submit"]' ? submitId : null;
+                        }
+                    };
+                }
+                var activeControls = $activeIds.map(control);
+                var idleControls = $idleIds.map(control);
+                predicate(activeControls, idleControls);
+            """.trimIndent()
+            Context.toBoolean(context.evaluateString(scope, source, "generation-control-test", 1, null))
+        } finally {
+            Context.exit()
+        }
+    }
+
 }

@@ -56,6 +56,7 @@ dependencies {
     implementation(libs.okhttp.logging)
 
     testImplementation(libs.junit)
+    testImplementation(libs.rhino)
 
     debugImplementation(libs.androidx.ui.tooling)
 }
