@@ -12,6 +12,8 @@ import com.twojstar.llmbench.data.model.Profile
 import kotlinx.coroutines.CancellableContinuation
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerializationException
@@ -23,6 +25,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
 import okhttp3.RequestBody.Companion.toRequestBody
+import okio.BufferedSource
 import java.io.IOException
 import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resume
@@ -264,9 +267,8 @@ class AiChatService {
                         activeProfileNotes = activeNotes
                     )
                 }
-            } catch (cancelled: CancellationException) { // skipcq: KT-W1064 - Cancellation propagates from suspend provider calls.
-                throw cancelled
             } catch (e: Exception) {
+                currentCoroutineContext().ensureActive()
                 val latency = System.currentTimeMillis() - startTime
                 val errorDetails = e.localizedMessage ?: e.message ?: "Unknown error"
                 if (!allowSimulationFallback) {
@@ -702,10 +704,14 @@ class AiChatService {
     ) {
         val result = runCatching { readSseResponse(response, extractText, isComplete, onTextDelta) }
         if (!continuation.isActive) return
-        result.fold(
-            onSuccess = continuation::resume,
-            onFailure = continuation::resumeWithException
-        )
+
+        val failure = result.exceptionOrNull()
+        when {
+            failure == null -> continuation.resume(result.getOrThrow())
+            failure is CancellationException -> continuation.cancel(failure)
+            failure is IOException -> continuation.resumeWithException(failure)
+            else -> continuation.resumeWithException(IOException("Streaming callback failed", failure))
+        }
     }
 
     internal fun readSseResponse(
@@ -714,57 +720,64 @@ class AiChatService {
         isComplete: (JsonObject) -> Boolean,
         onTextDelta: (String) -> Unit
     ): String {
-        validateStreamingResponse(response)
-        val source = response.body?.source() ?: throw IOException("Empty streaming response body")
-        val collected = StringBuilder()
-        var completed = false
         response.use {
-            while (!source.exhausted()) {
-                val event = source.readUtf8Line()?.toSseEvent() ?: continue
-                val (delta, eventComplete) = decodeSseEvent(event, extractText, isComplete)
-                appendStreamDelta(collected, delta, onTextDelta)
-                completed = completed || eventComplete
-            }
+            ensureSuccessfulStreamingResponse(response)
+            val source = response.body?.source() ?: throw IOException("Empty streaming response body")
+            return consumeSseSource(source, extractText, isComplete, onTextDelta)
         }
-        if (!completed) throw IOException("Streaming response ended before completion")
-        return collected.toString()
     }
 
-    private fun validateStreamingResponse(response: Response) {
+    private fun ensureSuccessfulStreamingResponse(response: Response) {
         if (response.isSuccessful) return
         val responseBody = response.body?.string().orEmpty()
         throw IOException(parseErrorMessage(responseBody) ?: "HTTP ${response.code}: ${response.message}")
     }
 
-    private fun String.toSseEvent(): JsonObject? {
-        if (!startsWith(SSE_DATA_PREFIX)) return null
-        return parseSseEvent(removePrefix(SSE_DATA_PREFIX).trim())
+    private fun consumeSseSource(
+        source: BufferedSource,
+        extractText: (JsonObject) -> String?,
+        isComplete: (JsonObject) -> Boolean,
+        onTextDelta: (String) -> Unit
+    ): String {
+        val collected = StringBuilder()
+        var completed = false
+        while (!source.exhausted()) {
+            val event = readSseEvent(source) ?: continue
+            val (delta, eventComplete) = decodeSseEvent(event, extractText, isComplete)
+            appendStreamingDelta(collected, delta, onTextDelta)
+            if (eventComplete) completed = true
+        }
+        if (!completed) throw IOException("Streaming response ended before completion")
+        return collected.toString()
+    }
+
+    private fun readSseEvent(source: BufferedSource): JsonObject? {
+        val line = source.readUtf8Line() ?: return null
+        if (!line.startsWith(SSE_DATA_PREFIX)) return null
+        return parseSseEvent(line.removePrefix(SSE_DATA_PREFIX).trim())
     }
 
     private fun decodeSseEvent(
         event: JsonObject,
         extractText: (JsonObject) -> String?,
         isComplete: (JsonObject) -> Boolean
-    ): Pair<String?, Boolean> = try {
-        extractStreamError(event)?.let { throw IOException(it) }
-        extractText(event) to isComplete(event)
-    } catch (e: IllegalArgumentException) {
-        throw IOException(MALFORMED_STREAM_EVENT, e)
+    ): Pair<String?, Boolean> {
+        return try {
+            extractStreamError(event)?.let { throw IOException(it) }
+            extractText(event) to isComplete(event)
+        } catch (e: IllegalArgumentException) {
+            throw IOException(MALFORMED_STREAM_EVENT, e)
+        }
     }
 
-    private fun appendStreamDelta(
+    private fun appendStreamingDelta(
         collected: StringBuilder,
         delta: String?,
         onTextDelta: (String) -> Unit
     ) {
         val text = delta?.takeIf { it.isNotEmpty() } ?: return
         collected.append(text)
-        val callbackFailure = runCatching { onTextDelta(text) }.exceptionOrNull() ?: return
-        when (callbackFailure) {
-            is CancellationException -> throw callbackFailure
-            is RuntimeException -> throw IOException("Streaming text callback failed", callbackFailure)
-            else -> throw callbackFailure
-        }
+        onTextDelta(text)
     }
 
     private fun parseSseEvent(payload: String): JsonObject? {
