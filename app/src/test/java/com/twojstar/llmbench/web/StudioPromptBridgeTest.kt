@@ -8,20 +8,28 @@ import org.junit.Test
 import org.mozilla.javascript.Context
 
 class StudioPromptBridgeTest {
+    private companion object {
+        const val CHATGPT_URL = "https://chatgpt.com/"
+        const val SAMPLE_PROFILE = "Profile"
+        const val STUDIO_PROFILE = "Studio profile"
+        const val INSERTED_RESULT = "inserted"
+        const val INPUT_EVENTS = "beforeinput,input,change"
+    }
+
     @Test
     fun scriptsAreRestrictedToProviderOwnedHttpsPages() {
         assertTrue(
             studioPromptApplyScript(
                 WebAiService.CHATGPT,
-                "https://chatgpt.com/",
-                "Profile"
+                CHATGPT_URL,
+                SAMPLE_PROFILE
             ) != null
         )
         assertNull(
             studioPromptApplyScript(
                 WebAiService.CHATGPT,
                 "https://chatgpt.com.evil.example/",
-                "Profile"
+                SAMPLE_PROFILE
             )
         )
         assertNull(
@@ -36,9 +44,9 @@ class StudioPromptBridgeTest {
             prompt = prompt
         )
 
-        assertEquals("inserted", outcome.result)
+        assertEquals(INSERTED_RESULT, outcome.result)
         assertEquals(prompt, outcome.value)
-        assertEquals("beforeinput,input,change", outcome.events)
+        assertEquals(INPUT_EVENTS, outcome.events)
     }
 
 
@@ -46,7 +54,7 @@ class StudioPromptBridgeTest {
     fun runtimeGuardRejectsNavigationRaceToAnotherHost() {
         val outcome = runApply(
             targetSetup = textAreaSetup(value = "", active = true),
-            prompt = "Studio profile",
+            prompt = STUDIO_PROFILE,
             runtimeHost = "accounts.example.com"
         )
 
@@ -59,7 +67,7 @@ class StudioPromptBridgeTest {
     fun refusesToOverwriteExistingComposerText() {
         val outcome = runApply(
             targetSetup = textAreaSetup(value = "draft message", active = true),
-            prompt = "Studio profile"
+            prompt = STUDIO_PROFILE
         )
 
         assertEquals("not-empty", outcome.result)
@@ -68,10 +76,43 @@ class StudioPromptBridgeTest {
     }
 
     @Test
+    fun rejectsSearchAndAccountEmailInputs() {
+        listOf("search", "email").forEach { type ->
+            val outcome = runApply(
+                targetSetup = inputSetup(type = type, value = "", active = true),
+                prompt = STUDIO_PROFILE
+            )
+            assertEquals("no-editor", outcome.result)
+            assertEquals("", outcome.value)
+        }
+    }
+
+    @Test
+    fun rejectsHiddenDisabledAndReadOnlyTextareas() {
+        val hidden = runApply(
+            targetSetup = textAreaSetup(value = "", active = true) +
+                "\ntarget.getClientRects = function() { return []; };",
+            prompt = STUDIO_PROFILE
+        )
+        val disabled = runApply(
+            targetSetup = textAreaSetup(value = "", active = true) + "\ntarget.disabled = true;",
+            prompt = STUDIO_PROFILE
+        )
+        val readOnly = runApply(
+            targetSetup = textAreaSetup(value = "", active = true) + "\ntarget.readOnly = true;",
+            prompt = STUDIO_PROFILE
+        )
+
+        assertEquals("no-editor", hidden.result)
+        assertEquals("no-editor", disabled.result)
+        assertEquals("no-editor", readOnly.result)
+    }
+
+    @Test
     fun neverTreatsPasswordInputAsAStudioTarget() {
         val outcome = runApply(
             targetSetup = inputSetup(type = "password", value = "", active = true),
-            prompt = "Studio profile"
+            prompt = STUDIO_PROFILE
         )
 
         assertEquals("no-editor", outcome.result)
@@ -80,7 +121,7 @@ class StudioPromptBridgeTest {
     @Test
     fun trackerRemembersLastFocusedEditableElement() {
         val script = requireNotNull(
-            studioPromptTargetTrackerScript(WebAiService.CHATGPT, "https://chatgpt.com/")
+            studioPromptTargetTrackerScript(WebAiService.CHATGPT, CHATGPT_URL)
         )
         val context = Context.enter()
         try {
@@ -108,24 +149,24 @@ class StudioPromptBridgeTest {
     fun usesLastTrackedEditorAfterNativeToolbarTakesFocus() {
         val outcome = runApply(
             targetSetup = textAreaSetup(value = "", active = false) + "\n" +
-                "window.__llmbenchStudioPromptTarget = { target: target };",
-            prompt = "Studio profile"
+                "window.__llmbenchStudioPromptTarget = { target: target, focusedAt: Date.now() };",
+            prompt = STUDIO_PROFILE
         )
 
-        assertEquals("inserted", outcome.result)
-        assertEquals("Studio profile", outcome.value)
+        assertEquals(INSERTED_RESULT, outcome.result)
+        assertEquals(STUDIO_PROFILE, outcome.value)
     }
 
     @Test
     fun insertsIntoEmptyContentEditable() {
         val outcome = runApply(
             targetSetup = contentEditableSetup(active = true),
-            prompt = "Studio profile"
+            prompt = STUDIO_PROFILE
         )
 
-        assertEquals("inserted", outcome.result)
-        assertEquals("Studio profile", outcome.value)
-        assertEquals("beforeinput,input,change", outcome.events)
+        assertEquals(INSERTED_RESULT, outcome.result)
+        assertEquals(STUDIO_PROFILE, outcome.value)
+        assertEquals(INPUT_EVENTS, outcome.events)
     }
 
     @Test
@@ -150,7 +191,7 @@ class StudioPromptBridgeTest {
         val script = requireNotNull(
             studioPromptApplyScript(
                 WebAiService.CHATGPT,
-                "https://chatgpt.com/",
+                CHATGPT_URL,
                 prompt
             )
         )
@@ -159,7 +200,8 @@ class StudioPromptBridgeTest {
             context.optimizationLevel = -1
             context.languageVersion = Context.VERSION_ES6
             val scope = context.initStandardObjects()
-            context.evaluateString(scope, browserMocks + "\n" + targetSetup, "studio-setup", 1, null)
+            val runtime = browserMocks.replace("__RUNTIME_HOST__", runtimeHost)
+            context.evaluateString(scope, runtime + "\n" + targetSetup, "studio-setup", 1, null)
             val result = Context.toString(
                 context.evaluateString(scope, script, "studio-apply", 1, null)
             )

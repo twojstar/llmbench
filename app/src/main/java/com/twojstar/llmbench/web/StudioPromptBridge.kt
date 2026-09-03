@@ -14,6 +14,7 @@ internal enum class StudioPromptApplyResult {
 }
 
 private const val STUDIO_PROMPT_TRACKER_KEY = "__llmbenchStudioPromptTarget"
+private const val TRACKED_EDITOR_MAX_AGE_MS = 15_000
 
 private fun providerRuntimeGuardScript(service: WebAiService, offProviderResult: String): String {
     val allowedHosts = ProviderWebTweakRegistry.ownedHosts(service)
@@ -32,15 +33,30 @@ private fun providerRuntimeGuardScript(service: WebAiService, offProviderResult:
 }
 
 private fun editableFinderScript(): String = """
+    function llmbenchIsEligibleEditor(node) {
+        if (!node || node.hidden === true || node.disabled === true || node.readOnly === true) return false;
+        if (typeof node.getAttribute === 'function') {
+            if (String(node.getAttribute('aria-hidden') || '').toLowerCase() === 'true') return false;
+            if (String(node.getAttribute('aria-disabled') || '').toLowerCase() === 'true') return false;
+            if (String(node.getAttribute('aria-readonly') || '').toLowerCase() === 'true') return false;
+            if (String(node.getAttribute('role') || '').toLowerCase() === 'searchbox') return false;
+        }
+        if (typeof node.getClientRects === 'function' && node.getClientRects().length === 0) return false;
+        return true;
+    }
+
     function llmbenchFindEditable(node) {
         while (node && node !== document.documentElement) {
             var tag = String(node.tagName || '').toLowerCase();
-            if (tag === 'textarea') return node;
-            if (tag === 'input') {
-                var type = String(node.type || 'text').toLowerCase();
-                return ['text', 'search', 'email', 'url', 'tel'].indexOf(type) >= 0 ? node : null;
+            if (tag === 'input') return null;
+            if (tag === 'textarea') return llmbenchIsEligibleEditor(node) ? node : null;
+            if (node.isContentEditable === true) {
+                var root = node;
+                while (root.parentElement && root.parentElement.isContentEditable === true) {
+                    root = root.parentElement;
+                }
+                return llmbenchIsEligibleEditor(root) ? root : null;
             }
-            if (node.isContentEditable === true) return node;
             node = node.parentElement;
         }
         return null;
@@ -58,12 +74,15 @@ internal fun studioPromptTargetTrackerScript(
             ${providerRuntimeGuardScript(service, "false")}
             ${editableFinderScript()}
             var key = ${JSONObject.quote(STUDIO_PROMPT_TRACKER_KEY)};
-            var state = window[key] || { target: null, installed: false, providerId: $providerId };
+            var state = window[key] || { target: null, focusedAt: 0, installed: false, providerId: $providerId };
             window[key] = state;
             state.providerId = $providerId;
             function remember(node) {
                 var target = llmbenchFindEditable(node);
-                if (target) state.target = target;
+                if (target) {
+                    state.target = target;
+                    state.focusedAt = Date.now();
+                }
             }
             remember(document.activeElement);
             if (!state.installed) {
@@ -92,7 +111,10 @@ internal fun studioPromptApplyScript(
             var state = window[key];
             var target = llmbenchFindEditable(document.activeElement);
             if (!target && state && state.target && state.target.isConnected !== false) {
-                target = llmbenchFindEditable(state.target);
+                var age = Date.now() - Number(state.focusedAt || 0);
+                if (age >= 0 && age <= $TRACKED_EDITOR_MAX_AGE_MS) {
+                    target = llmbenchFindEditable(state.target);
+                }
             }
             if (!target || target.isConnected === false) return 'no-editor';
 
