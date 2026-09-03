@@ -12,8 +12,10 @@ import com.twojstar.llmbench.data.model.*
 import com.twojstar.llmbench.data.security.ApiKeyStore
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import java.util.concurrent.atomic.AtomicLong
 
 data class ChatMessage(
     val id: String,
@@ -73,6 +75,8 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
 
     private val _uiState = MutableStateFlow(StudioUiState())
     private val pendingGatewayCatalogRefreshes = mutableSetOf<AiProvider>()
+    private var chatGenerationJob: Job? = null
+    private val activeChatGenerationId = AtomicLong(0)
     val uiState: StateFlow<StudioUiState> = _uiState.asStateFlow()
 
     init {
@@ -229,8 +233,83 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun clearChatHistory() {
+        cancelChatGeneration()
         initChatWelcome()
         showSnackbar("Chat history cleared.")
+    }
+
+    fun cancelChatGeneration() {
+        if (!_uiState.value.isChatGenerating) return
+        activeChatGenerationId.incrementAndGet()
+        chatGenerationJob?.cancel()
+        chatGenerationJob = null
+        _uiState.update { state ->
+            state.copy(
+                chatMessages = state.chatMessages.map { message ->
+                    if (message.isPartial) {
+                        message.copy(
+                            activeProfileNotes = (message.activeProfileNotes + "Generation stopped").distinct()
+                        )
+                    } else {
+                        message
+                    }
+                },
+                isChatGenerating = false,
+                activeGeneratingProviders = emptySet()
+            )
+        }
+    }
+
+    private fun appendStreamingDelta(
+        generationId: Long,
+        messageId: String,
+        provider: AiProvider,
+        model: String,
+        delta: String
+    ) {
+        if (delta.isEmpty() || generationId != activeChatGenerationId.get()) return
+        _uiState.update { state ->
+            if (generationId != activeChatGenerationId.get()) return@update state
+            val index = state.chatMessages.indexOfFirst { it.id == messageId }
+            val messages = if (index >= 0) {
+                state.chatMessages.toMutableList().apply {
+                    this[index] = this[index].copy(text = this[index].text + delta)
+                }
+            } else {
+                state.chatMessages + ModelChatMessage(
+                    id = messageId,
+                    sender = CHAT_ROLE_ASSISTANT,
+                    provider = provider,
+                    modelName = model,
+                    text = delta,
+                    isPartial = true
+                )
+            }
+            state.copy(chatMessages = messages)
+        }
+    }
+
+    private fun finishStreamingMessage(
+        generationId: Long,
+        messageId: String,
+        provider: AiProvider,
+        response: ModelChatMessage
+    ) {
+        if (generationId != activeChatGenerationId.get()) return
+        _uiState.update { state ->
+            if (generationId != activeChatGenerationId.get()) return@update state
+            val finalMessage = response.copy(id = messageId, isPartial = false)
+            val index = state.chatMessages.indexOfFirst { it.id == messageId }
+            val messages = if (index >= 0) {
+                state.chatMessages.toMutableList().apply { this[index] = finalMessage }
+            } else {
+                state.chatMessages + finalMessage
+            }
+            state.copy(
+                chatMessages = messages,
+                activeGeneratingProviders = state.activeGeneratingProviders - provider
+            )
+        }
     }
 
     fun sendChatMessage(prompt: String): Boolean {
@@ -258,11 +337,12 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
 
         val userMessage = ModelChatMessage(
             id = "user_${System.currentTimeMillis()}",
-            sender = "user",
+            sender = CHAT_ROLE_USER,
             text = trimmed,
             timestamp = System.currentTimeMillis()
         )
         val currentMessages = state.chatMessages + userMessage
+        val generationId = activeChatGenerationId.incrementAndGet()
 
         _uiState.update {
             it.copy(
@@ -272,60 +352,59 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
             )
         }
 
-        viewModelScope.launch {
-            val systemPrompt = if (_uiState.value.includeSystemProfileInChat) {
-                _uiState.value.renderedInstructions.ifBlank { null }
-            } else {
-                null
-            }
-            val activeProfile = if (_uiState.value.includeSystemProfileInChat) {
-                _uiState.value.mergedProfile
-            } else {
-                null
-            }
-            if (targetProvider == AiProvider.ALL) {
-                // Run concurrent requests for every native provider
-                val tasks = providersToRun.map { provider ->
-                    async {
-                        val model = provider.defaultModel
-                        aiChatService.generateResponse(
-                            prompt = trimmed,
-                            provider = provider,
-                            modelName = model,
-                            apiKeys = apiKeys,
-                            systemInstruction = systemPrompt,
-                            profile = activeProfile,
-                            conversationHistory = currentMessages,
-                            allowSimulationFallback = false
-                        )
-                    }
+        chatGenerationJob = viewModelScope.launch {
+            try {
+                val systemPrompt = if (_uiState.value.includeSystemProfileInChat) {
+                    _uiState.value.renderedInstructions.ifBlank { null }
+                } else {
+                    null
+                }
+                val activeProfile = if (_uiState.value.includeSystemProfileInChat) {
+                    _uiState.value.mergedProfile
+                } else {
+                    null
                 }
 
-                val responses = tasks.awaitAll()
-                _uiState.update { state ->
-                    state.copy(
-                        chatMessages = state.chatMessages + responses,
-                        isChatGenerating = false,
-                        activeGeneratingProviders = emptySet()
+                suspend fun runProvider(provider: AiProvider, model: String, allowSimulationFallback: Boolean) {
+                    val streamMessageId = "stream_${userMessage.id}_${provider.id}"
+                    val response = aiChatService.generateResponse(
+                        prompt = trimmed,
+                        provider = provider,
+                        modelName = model,
+                        apiKeys = apiKeys,
+                        systemInstruction = systemPrompt,
+                        profile = activeProfile,
+                        conversationHistory = currentMessages,
+                        allowSimulationFallback = allowSimulationFallback,
+                        onTextDelta = { delta ->
+                            appendStreamingDelta(generationId, streamMessageId, provider, model, delta)
+                        }
+                    )
+                    finishStreamingMessage(generationId, streamMessageId, provider, response)
+                }
+
+                if (targetProvider == AiProvider.ALL) {
+                    providersToRun.map { provider ->
+                        async {
+                            runProvider(provider, provider.defaultModel, allowSimulationFallback = false)
+                        }
+                    }.awaitAll()
+                } else {
+                    runProvider(
+                        targetProvider,
+                        _uiState.value.selectedChatModel,
+                        allowSimulationFallback = true
                     )
                 }
-            } else {
-                val model = _uiState.value.selectedChatModel
-                val response = aiChatService.generateResponse(
-                    prompt = trimmed,
-                    provider = targetProvider,
-                    modelName = model,
-                    apiKeys = apiKeys,
-                    systemInstruction = systemPrompt,
-                    profile = activeProfile,
-                    conversationHistory = currentMessages
-                )
-                _uiState.update { state ->
-                    state.copy(
-                        chatMessages = state.chatMessages + response,
-                        isChatGenerating = false,
-                        activeGeneratingProviders = emptySet()
-                    )
+            } finally {
+                if (generationId == activeChatGenerationId.get()) {
+                    chatGenerationJob = null
+                    _uiState.update {
+                        it.copy(
+                            isChatGenerating = false,
+                            activeGeneratingProviders = emptySet()
+                        )
+                    }
                 }
             }
         }

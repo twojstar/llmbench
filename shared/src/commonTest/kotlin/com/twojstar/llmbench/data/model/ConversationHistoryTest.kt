@@ -116,4 +116,27 @@ class ConversationHistoryTest {
 
         assertEquals(listOf(prompt), turns.map { it.text })
     }
+    @Test
+    fun partialAssistantResponsesAreNotReplayed() {
+        val history = listOf(
+            ModelChatMessage(id = "u1", sender = CHAT_ROLE_USER, text = "first"),
+            ModelChatMessage(
+                id = "partial",
+                sender = CHAT_ROLE_ASSISTANT,
+                provider = AiProvider.CHATGPT,
+                text = "half an answer",
+                isPartial = true
+            ),
+            ModelChatMessage(id = "u2", sender = CHAT_ROLE_USER, text = "next")
+        )
+
+        val turns = buildBoundedProviderTextTurns(
+            prompt = "next",
+            conversationHistory = history,
+            provider = AiProvider.CHATGPT
+        )
+
+        assertEquals(listOf(ProviderTextTurn(CHAT_ROLE_USER, "next")), turns)
+    }
+
 }

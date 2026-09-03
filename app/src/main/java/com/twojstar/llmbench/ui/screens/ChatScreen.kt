@@ -47,6 +47,7 @@ import com.twojstar.llmbench.ui.viewmodel.StudioViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
+// skipcq: KT-R1006 - Existing screen composition complexity is outside this streaming/cancellation change.
 fun ChatScreen(
     viewModel: StudioViewModel,
     uiState: StudioUiState,
@@ -390,7 +391,9 @@ fun ChatScreen(
 
                         FloatingActionButton(
                             onClick = {
-                                if (promptInput.isNotBlank() && !uiState.isChatGenerating) {
+                                if (uiState.isChatGenerating) {
+                                    viewModel.cancelChatGeneration()
+                                } else if (promptInput.isNotBlank()) {
                                     val textToSend = promptInput
                                     if (viewModel.sendChatMessage(textToSend)) {
                                         promptInput = ""
@@ -403,21 +406,13 @@ fun ChatScreen(
                             elevation = FloatingActionButtonDefaults.elevation(0.dp),
                             modifier = Modifier
                                 .size(48.dp)
-                                .testTag("send_prompt_button")
+                                .testTag(if (uiState.isChatGenerating) "stop_generation_button" else "send_prompt_button")
                         ) {
-                            if (uiState.isChatGenerating) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(20.dp),
-                                    color = Color.White,
-                                    strokeWidth = 2.dp
-                                )
-                            } else {
-                                Icon(
-                                    Icons.Default.Send,
-                                    contentDescription = "Send Prompt",
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
+                            Icon(
+                                imageVector = if (uiState.isChatGenerating) Icons.Default.Stop else Icons.Default.Send,
+                                contentDescription = if (uiState.isChatGenerating) "Stop generation" else "Send Prompt",
+                                modifier = Modifier.size(20.dp)
+                            )
                         }
                     }
                 }

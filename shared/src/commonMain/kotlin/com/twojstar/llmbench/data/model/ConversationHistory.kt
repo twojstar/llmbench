@@ -12,6 +12,13 @@ data class ProviderTextTurn(
     val text: String
 )
 
+private fun ModelChatMessage.isReplayableAssistantFor(provider: AiProvider): Boolean =
+    sender == CHAT_ROLE_ASSISTANT &&
+        this.provider == provider &&
+        !isError &&
+        !isSimulated &&
+        !isPartial
+
 /**
  * Builds a provider-scoped conversation suffix for stateless chat APIs.
  *
@@ -44,11 +51,7 @@ fun buildBoundedProviderTextTurns(
             message.sender == CHAT_ROLE_USER -> {
                 segments += mutableListOf(ProviderTextTurn(CHAT_ROLE_USER, message.text))
             }
-            message.sender == CHAT_ROLE_ASSISTANT &&
-                message.provider == provider &&
-                !message.isError &&
-                !message.isSimulated &&
-                segments.isNotEmpty() -> {
+            message.isReplayableAssistantFor(provider) && segments.isNotEmpty() -> {
                 segments.last() += ProviderTextTurn(CHAT_ROLE_ASSISTANT, message.text)
             }
         }

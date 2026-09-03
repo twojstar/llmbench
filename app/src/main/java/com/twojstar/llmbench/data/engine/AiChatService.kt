@@ -9,20 +9,63 @@ import com.twojstar.llmbench.data.model.ModelChatMessage
 import com.twojstar.llmbench.data.model.buildBoundedProviderTextTurns
 import com.twojstar.llmbench.data.model.freeGatewayModelOptions
 import com.twojstar.llmbench.data.model.Profile
+import kotlinx.coroutines.CancellableContinuation
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.*
 import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.Call
+import okhttp3.Callback
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.Response
 import okhttp3.RequestBody.Companion.toRequestBody
+import okio.BufferedSource
+import java.io.IOException
 import java.util.concurrent.TimeUnit
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 
 private const val JSON_ROLE_KEY = "role"
 private const val JSON_CONTENT_KEY = "content"
 private const val JSON_PARTS_KEY = "parts"
 private const val JSON_TEXT_KEY = "text"
 private const val JSON_MODEL_KEY = "model"
+private const val JSON_PRICING_KEY = "pricing"
+private const val JSON_INPUT_KEY = "input"
+private const val JSON_OUTPUT_KEY = "output"
+private const val JSON_CANDIDATES_KEY = "candidates"
+private const val JSON_SYSTEM_KEY = "system"
+private const val JSON_MESSAGES_KEY = "messages"
+private const val JSON_MAX_TOKENS_KEY = "max_tokens"
+private const val JSON_STORE_KEY = "store"
+private const val JSON_INSTRUCTIONS_KEY = "instructions"
+private const val JSON_MEDIA_TYPE = "application/json"
+private const val HEADER_AUTHORIZATION = "Authorization"
+private const val HEADER_CONTENT_TYPE = "Content-Type"
+private const val HEADER_CONTENT_TYPE_LOWER = "content-type"
+private const val SSE_DATA_PREFIX = "data:"
+private const val SSE_DONE = "[DONE]"
+private const val STREAM_TYPE_KEY = "type"
+private const val STREAM_ERROR_KEY = "error"
+private const val STREAM_MESSAGE_KEY = "message"
+private const val STREAM_RESPONSE_KEY = "response"
+private const val OPENAI_RESPONSE_FAILED = "response.failed"
+private const val OPENAI_RESPONSE_COMPLETED = "response.completed"
+private const val OPENAI_RESPONSE_INCOMPLETE = "response.incomplete"
+private const val OPENAI_INCOMPLETE_DETAILS_KEY = "incomplete_details"
+private const val OPENAI_INCOMPLETE_REASON_KEY = "reason"
+private const val CLAUDE_MESSAGE_STOP = "message_stop"
+private const val OPENAI_OUTPUT_TEXT = "output_text"
+private const val OPENAI_OUTPUT_TEXT_DELTA = "response.output_text.delta"
+private const val CLAUDE_CONTENT_BLOCK_DELTA = "content_block_delta"
+private const val CLAUDE_TEXT_DELTA = "text_delta"
+private const val MALFORMED_STREAM_EVENT = "Malformed streaming event"
 
 class AiChatService {
 
@@ -59,6 +102,10 @@ class AiChatService {
         .writeTimeout(60, TimeUnit.SECONDS)
         .build()
 
+    private val streamingHttpClient: OkHttpClient = httpClient.newBuilder()
+        .readTimeout(0, TimeUnit.MILLISECONDS)
+        .build()
+
     private val json = Json {
         ignoreUnknownKeys = true
         isLenient = true
@@ -81,7 +128,7 @@ class AiChatService {
             else -> ""
         }.trim()
         if (apiKey.isNotBlank()) {
-            requestBuilder.header("Authorization", "Bearer $apiKey")
+            requestBuilder.header(HEADER_AUTHORIZATION, bearerToken(apiKey))
         }
         config.extraHeaders.forEach { (name, value) -> requestBuilder.header(name, value) }
 
@@ -107,7 +154,7 @@ class AiChatService {
             when (provider) {
                 AiProvider.OPENROUTER -> {
                     val id = model["id"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
-                    val pricing = model["pricing"]?.jsonObject
+                    val pricing = model[JSON_PRICING_KEY]?.jsonObject
                     val outputModalities = model["architecture"]?.jsonObject
                         ?.get("output_modalities")?.jsonArray
                         ?.mapNotNull { it.jsonPrimitive.contentOrNull }
@@ -120,11 +167,11 @@ class AiChatService {
                 }
                 AiProvider.AIHUBMIX -> {
                     val id = model["model_id"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
-                    val pricing = model["pricing"]?.jsonObject
+                    val pricing = model[JSON_PRICING_KEY]?.jsonObject
                     GatewayModelCatalogEntry(
                         id = id,
-                        inputPriceUsd = pricing?.get("input").asDoubleOrNull(),
-                        outputPriceUsd = pricing?.get("output").asDoubleOrNull(),
+                        inputPriceUsd = pricing?.get(JSON_INPUT_KEY).asDoubleOrNull(),
+                        outputPriceUsd = pricing?.get(JSON_OUTPUT_KEY).asDoubleOrNull(),
                         supportsTextOutput = model["types"]?.jsonPrimitive?.contentOrNull?.equals("llm", ignoreCase = true) == true
                     )
                 }
@@ -138,6 +185,8 @@ class AiChatService {
         else -> null
     }
 
+    private fun bearerToken(apiKey: String): String = "Bearer $apiKey"
+
     suspend fun generateResponse(
         prompt: String,
         provider: AiProvider,
@@ -146,7 +195,8 @@ class AiChatService {
         systemInstruction: String?,
         profile: Profile?,
         conversationHistory: List<ModelChatMessage> = emptyList(),
-        allowSimulationFallback: Boolean = true
+        allowSimulationFallback: Boolean = true,
+        onTextDelta: ((String) -> Unit)? = null
     ): ModelChatMessage = withContext(Dispatchers.IO) {
         val startTime = System.currentTimeMillis()
         val effectiveModel = if (modelName == "all" || modelName.isBlank()) provider.defaultModel else modelName
@@ -166,15 +216,27 @@ class AiChatService {
         if (isKeyProvided) {
             try {
                 val realResult = when (provider) {
-                    AiProvider.GEMINI -> callGeminiApi(
-                        prompt, effectiveModel, key, systemInstruction, conversationHistory
-                    )
-                    AiProvider.CHATGPT -> callOpenAiApi(
-                        prompt, effectiveModel, key, systemInstruction, conversationHistory
-                    )
-                    AiProvider.CLAUDE -> callClaudeApi(
-                        prompt, effectiveModel, key, systemInstruction, conversationHistory
-                    )
+                    AiProvider.GEMINI -> if (onTextDelta != null) {
+                        callGeminiStreamApi(
+                            prompt, effectiveModel, key, systemInstruction, conversationHistory, onTextDelta
+                        )
+                    } else {
+                        callGeminiApi(prompt, effectiveModel, key, systemInstruction, conversationHistory)
+                    }
+                    AiProvider.CHATGPT -> if (onTextDelta != null) {
+                        callOpenAiStreamApi(
+                            prompt, effectiveModel, key, systemInstruction, conversationHistory, onTextDelta
+                        )
+                    } else {
+                        callOpenAiApi(prompt, effectiveModel, key, systemInstruction, conversationHistory)
+                    }
+                    AiProvider.CLAUDE -> if (onTextDelta != null) {
+                        callClaudeStreamApi(
+                            prompt, effectiveModel, key, systemInstruction, conversationHistory, onTextDelta
+                        )
+                    } else {
+                        callClaudeApi(prompt, effectiveModel, key, systemInstruction, conversationHistory)
+                    }
                     AiProvider.DEEPSEEK, AiProvider.KIMI, AiProvider.OPENROUTER, AiProvider.AIHUBMIX -> {
                         val config = checkNotNull(openAiCompatibleProviders[provider])
                         callOpenAiCompatibleApi(
@@ -206,6 +268,7 @@ class AiChatService {
                     )
                 }
             } catch (e: Exception) {
+                currentCoroutineContext().ensureActive()
                 val latency = System.currentTimeMillis() - startTime
                 val errorDetails = e.localizedMessage ?: e.message ?: "Unknown error"
                 if (!allowSimulationFallback) {
@@ -336,7 +399,7 @@ class AiChatService {
             }
         }
 
-        val body = requestPayload.toString().toRequestBody("application/json".toMediaType())
+        val body = requestPayload.toString().toRequestBody(JSON_MEDIA_TYPE.toMediaType())
         val request = Request.Builder()
             .url(url)
             .post(body)
@@ -350,7 +413,7 @@ class AiChatService {
             }
 
             val parsed = json.parseToJsonElement(responseBody).jsonObject
-            val text = parsed["candidates"]?.jsonArray
+            val text = parsed[JSON_CANDIDATES_KEY]?.jsonArray
                 ?.firstOrNull()?.jsonObject
                 ?.get(JSON_CONTENT_KEY)?.jsonObject
                 ?.get(JSON_PARTS_KEY)?.jsonArray
@@ -375,18 +438,18 @@ class AiChatService {
 
         val requestPayload = buildJsonObject {
             put(JSON_MODEL_KEY, model)
-            put("input", buildOpenAiResponseInput(prompt, conversationHistory, systemInstruction))
-            put("store", false)
+            put(JSON_INPUT_KEY, buildOpenAiResponseInput(prompt, conversationHistory, systemInstruction))
+            put(JSON_STORE_KEY, false)
             if (!systemInstruction.isNullOrBlank()) {
-                put("instructions", systemInstruction)
+                put(JSON_INSTRUCTIONS_KEY, systemInstruction)
             }
         }
 
-        val body = requestPayload.toString().toRequestBody("application/json".toMediaType())
+        val body = requestPayload.toString().toRequestBody(JSON_MEDIA_TYPE.toMediaType())
         val request = Request.Builder()
             .url(url)
-            .addHeader("Authorization", "Bearer $apiKey")
-            .addHeader("Content-Type", "application/json")
+            .addHeader(HEADER_AUTHORIZATION, bearerToken(apiKey))
+            .addHeader(HEADER_CONTENT_TYPE, JSON_MEDIA_TYPE)
             .post(body)
             .build()
 
@@ -398,12 +461,12 @@ class AiChatService {
             }
 
             val parsed = json.parseToJsonElement(responseBody).jsonObject
-            val text = parsed["output"]?.jsonArray.orEmpty().asSequence()
+            val text = parsed[JSON_OUTPUT_KEY]?.jsonArray.orEmpty().asSequence()
                 .mapNotNull { it as? JsonObject }
-                .filter { it["type"]?.jsonPrimitive?.contentOrNull == "message" }
+                .filter { it[STREAM_TYPE_KEY]?.jsonPrimitive?.contentOrNull == STREAM_MESSAGE_KEY }
                 .flatMap { message -> message[JSON_CONTENT_KEY]?.jsonArray.orEmpty().asSequence() }
                 .mapNotNull { it as? JsonObject }
-                .filter { it["type"]?.jsonPrimitive?.contentOrNull == "output_text" }
+                .filter { it[STREAM_TYPE_KEY]?.jsonPrimitive?.contentOrNull == OPENAI_OUTPUT_TEXT }
                 .mapNotNull { it[JSON_TEXT_KEY]?.jsonPrimitive?.contentOrNull }
                 .joinToString(separator = "")
                 .takeIf { it.isNotEmpty() }
@@ -425,19 +488,19 @@ class AiChatService {
 
         val requestPayload = buildJsonObject {
             put(JSON_MODEL_KEY, model)
-            put("max_tokens", 2048)
+            put(JSON_MAX_TOKENS_KEY, 2048)
             if (!systemInstruction.isNullOrBlank()) {
-                put("system", systemInstruction)
+                put(JSON_SYSTEM_KEY, systemInstruction)
             }
-            put("messages", messagesArray)
+            put(JSON_MESSAGES_KEY, messagesArray)
         }
 
-        val body = requestPayload.toString().toRequestBody("application/json".toMediaType())
+        val body = requestPayload.toString().toRequestBody(JSON_MEDIA_TYPE.toMediaType())
         val request = Request.Builder()
             .url(url)
             .addHeader("x-api-key", apiKey)
             .addHeader("anthropic-version", "2023-06-01")
-            .addHeader("content-type", "application/json")
+            .addHeader(HEADER_CONTENT_TYPE_LOWER, JSON_MEDIA_TYPE)
             .post(body)
             .build()
 
@@ -451,7 +514,7 @@ class AiChatService {
             val parsed = json.parseToJsonElement(responseBody).jsonObject
             val text = parsed[JSON_CONTENT_KEY]?.jsonArray.orEmpty()
                 .mapNotNull { it as? JsonObject }
-                .filter { it["type"]?.jsonPrimitive?.contentOrNull == JSON_TEXT_KEY }
+                .filter { it[STREAM_TYPE_KEY]?.jsonPrimitive?.contentOrNull == JSON_TEXT_KEY }
                 .mapNotNull { it[JSON_TEXT_KEY]?.jsonPrimitive?.contentOrNull }
                 .joinToString(separator = "")
                 .takeIf { it.isNotEmpty() }
@@ -460,8 +523,307 @@ class AiChatService {
         }
     }
 
+    internal fun extractGeminiStreamText(event: JsonObject): String? =
+        event[JSON_CANDIDATES_KEY]?.jsonArray
+            ?.firstOrNull()?.jsonObject
+            ?.get(JSON_CONTENT_KEY)?.jsonObject
+            ?.get(JSON_PARTS_KEY)?.jsonArray
+            .orEmpty()
+            .mapNotNull { it.jsonObject[JSON_TEXT_KEY]?.jsonPrimitive?.contentOrNull }
+            .joinToString(separator = "")
+            .takeIf { it.isNotEmpty() }
+
+    internal fun extractOpenAiStreamText(event: JsonObject): String? =
+        if (event[STREAM_TYPE_KEY]?.jsonPrimitive?.contentOrNull == OPENAI_OUTPUT_TEXT_DELTA) {
+            event["delta"]?.jsonPrimitive?.contentOrNull
+        } else {
+            null
+        }
+
+    internal fun extractClaudeStreamText(event: JsonObject): String? =
+        if (event[STREAM_TYPE_KEY]?.jsonPrimitive?.contentOrNull == CLAUDE_CONTENT_BLOCK_DELTA) {
+            event["delta"]?.jsonObject
+                ?.takeIf { it[STREAM_TYPE_KEY]?.jsonPrimitive?.contentOrNull == CLAUDE_TEXT_DELTA }
+                ?.get(JSON_TEXT_KEY)?.jsonPrimitive?.contentOrNull
+        } else {
+            null
+        }
+
+    private suspend fun callGeminiStreamApi(
+        prompt: String,
+        model: String,
+        apiKey: String,
+        systemInstruction: String?,
+        conversationHistory: List<ModelChatMessage>,
+        onTextDelta: (String) -> Unit
+    ): String {
+        val url = "https://generativelanguage.googleapis.com/v1beta/models/$model:streamGenerateContent?alt=sse&key=$apiKey"
+        val requestPayload = buildJsonObject {
+            put("contents", buildGeminiContents(prompt, conversationHistory, systemInstruction))
+            if (!systemInstruction.isNullOrBlank()) {
+                putJsonObject("systemInstruction") {
+                    putJsonArray(JSON_PARTS_KEY) {
+                        addJsonObject { put(JSON_TEXT_KEY, systemInstruction) }
+                    }
+                }
+            }
+        }
+        val request = Request.Builder()
+            .url(url)
+            .post(requestPayload.toString().toRequestBody(JSON_MEDIA_TYPE.toMediaType()))
+            .build()
+        return executeSse(request, ::extractGeminiStreamText, ::isGeminiStreamComplete, onTextDelta)
+            .ifEmpty { "Received empty content response from Gemini." }
+    }
+
+    private suspend fun callOpenAiStreamApi(
+        prompt: String,
+        model: String,
+        apiKey: String,
+        systemInstruction: String?,
+        conversationHistory: List<ModelChatMessage>,
+        onTextDelta: (String) -> Unit
+    ): String {
+        val requestPayload = buildJsonObject {
+            put(JSON_MODEL_KEY, model)
+            put(JSON_INPUT_KEY, buildOpenAiResponseInput(prompt, conversationHistory, systemInstruction))
+            put(JSON_STORE_KEY, false)
+            put("stream", true)
+            if (!systemInstruction.isNullOrBlank()) put(JSON_INSTRUCTIONS_KEY, systemInstruction)
+        }
+        val request = Request.Builder()
+            .url("https://api.openai.com/v1/responses")
+            .addHeader(HEADER_AUTHORIZATION, bearerToken(apiKey))
+            .addHeader(HEADER_CONTENT_TYPE, JSON_MEDIA_TYPE)
+            .post(requestPayload.toString().toRequestBody(JSON_MEDIA_TYPE.toMediaType()))
+            .build()
+        return executeSse(request, ::extractOpenAiStreamText, ::isOpenAiStreamComplete, onTextDelta)
+            .ifEmpty { "Received empty message content from OpenAI." }
+    }
+
+    private suspend fun callClaudeStreamApi(
+        prompt: String,
+        model: String,
+        apiKey: String,
+        systemInstruction: String?,
+        conversationHistory: List<ModelChatMessage>,
+        onTextDelta: (String) -> Unit
+    ): String {
+        val requestPayload = buildJsonObject {
+            put(JSON_MODEL_KEY, model)
+            put(JSON_MAX_TOKENS_KEY, 2048)
+            put("stream", true)
+            if (!systemInstruction.isNullOrBlank()) put(JSON_SYSTEM_KEY, systemInstruction)
+            put(JSON_MESSAGES_KEY, buildClaudeMessages(prompt, conversationHistory, systemInstruction))
+        }
+        val request = Request.Builder()
+            .url("https://api.anthropic.com/v1/messages")
+            .addHeader("x-api-key", apiKey)
+            .addHeader("anthropic-version", "2023-06-01")
+            .addHeader(HEADER_CONTENT_TYPE_LOWER, JSON_MEDIA_TYPE)
+            .post(requestPayload.toString().toRequestBody(JSON_MEDIA_TYPE.toMediaType()))
+            .build()
+        return executeSse(request, ::extractClaudeStreamText, ::isClaudeStreamComplete, onTextDelta)
+            .ifEmpty { "Received empty content block from Claude." }
+    }
+
+    internal fun extractStreamError(event: JsonObject): String? =
+        extractGeminiStreamError(event) ?: extractTypedStreamError(event)
+
+    private fun extractGeminiStreamError(event: JsonObject): String? {
+        val candidate = event[JSON_CANDIDATES_KEY]?.jsonArray?.firstOrNull() as? JsonObject
+        val finishReason = candidate?.get("finishReason")?.jsonPrimitive?.contentOrNull ?: return null
+        if (finishReason == "STOP") return null
+        val finishMessage = candidate["finishMessage"]?.jsonPrimitive?.contentOrNull
+        return buildString {
+            append("Gemini stopped with ").append(finishReason)
+            if (!finishMessage.isNullOrBlank()) append(": ").append(finishMessage)
+        }
+    }
+
+    private fun extractTypedStreamError(event: JsonObject): String? {
+        return when (event[STREAM_TYPE_KEY]?.jsonPrimitive?.contentOrNull) {
+            OPENAI_RESPONSE_FAILED -> event[STREAM_RESPONSE_KEY]?.jsonObject
+                ?.get(STREAM_ERROR_KEY)?.jsonObject
+                ?.get(STREAM_MESSAGE_KEY)?.jsonPrimitive?.contentOrNull
+                ?: "OpenAI response failed"
+            OPENAI_RESPONSE_INCOMPLETE -> event[STREAM_RESPONSE_KEY]?.jsonObject
+                ?.get(OPENAI_INCOMPLETE_DETAILS_KEY)?.jsonObject
+                ?.get(OPENAI_INCOMPLETE_REASON_KEY)?.jsonPrimitive?.contentOrNull
+                ?.let { "OpenAI response incomplete: $it" }
+                ?: "OpenAI response incomplete"
+            STREAM_ERROR_KEY -> extractGenericStreamError(event)
+            else -> null
+        }
+    }
+
+    private fun extractGenericStreamError(event: JsonObject): String? {
+        return when (val error = event[STREAM_ERROR_KEY]) {
+            is JsonObject -> error[STREAM_MESSAGE_KEY]?.jsonPrimitive?.contentOrNull ?: error.toString()
+            is JsonPrimitive -> error.contentOrNull
+            else -> event[STREAM_MESSAGE_KEY]?.jsonPrimitive?.contentOrNull ?: "Streaming API error"
+        }
+    }
+
+    internal fun isGeminiStreamComplete(event: JsonObject): Boolean =
+        event[JSON_CANDIDATES_KEY]?.jsonArray
+            ?.firstOrNull()?.jsonObject
+            ?.get("finishReason")?.jsonPrimitive?.contentOrNull == "STOP"
+
+    internal fun isOpenAiStreamComplete(event: JsonObject): Boolean =
+        event[STREAM_TYPE_KEY]?.jsonPrimitive?.contentOrNull == OPENAI_RESPONSE_COMPLETED
+
+    internal fun isClaudeStreamComplete(event: JsonObject): Boolean =
+        event[STREAM_TYPE_KEY]?.jsonPrimitive?.contentOrNull == CLAUDE_MESSAGE_STOP
+
+    private suspend fun executeSse(
+        request: Request,
+        extractText: (JsonObject) -> String?,
+        isComplete: (JsonObject) -> Boolean,
+        onTextDelta: (String) -> Unit
+    ): String = suspendCancellableCoroutine { continuation ->
+        val call = streamingHttpClient.newCall(request)
+        continuation.invokeOnCancellation { call.cancel() }
+        call.enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) {
+                if (continuation.isActive) continuation.resumeWithException(e)
+            }
+
+            override fun onResponse(call: Call, response: Response) {
+                completeSseContinuation(continuation, response, extractText, isComplete, onTextDelta)
+            }
+        })
+    }
+
+    private fun completeSseContinuation(
+        continuation: CancellableContinuation<String>,
+        response: Response,
+        extractText: (JsonObject) -> String?,
+        isComplete: (JsonObject) -> Boolean,
+        onTextDelta: (String) -> Unit
+    ) {
+        val result = runCatching { readSseResponse(response, extractText, isComplete, onTextDelta) }
+        if (!continuation.isActive) return
+
+        val failure = result.exceptionOrNull()
+        when {
+            failure == null -> continuation.resume(result.getOrThrow())
+            failure is CancellationException -> continuation.cancel(failure)
+            failure is IOException -> continuation.resumeWithException(failure)
+            else -> continuation.resumeWithException(IOException("Streaming callback failed", failure))
+        }
+    }
+
+    internal fun readSseResponse(
+        response: Response,
+        extractText: (JsonObject) -> String?,
+        isComplete: (JsonObject) -> Boolean,
+        onTextDelta: (String) -> Unit
+    ): String {
+        response.use {
+            ensureSuccessfulStreamingResponse(response)
+            val source = response.body?.source() ?: throw IOException("Empty streaming response body")
+            return consumeSseSource(source, extractText, isComplete, onTextDelta)
+        }
+    }
+
+    private fun ensureSuccessfulStreamingResponse(response: Response) {
+        if (response.isSuccessful) return
+        val responseBody = response.body?.string().orEmpty()
+        throw IOException(parseErrorMessage(responseBody) ?: "HTTP ${response.code}: ${response.message}")
+    }
+
+    private fun consumeSseSource(
+        source: BufferedSource,
+        extractText: (JsonObject) -> String?,
+        isComplete: (JsonObject) -> Boolean,
+        onTextDelta: (String) -> Unit
+    ): String {
+        val collected = StringBuilder()
+        var completed = false
+        while (!source.exhausted()) {
+            val event = readSseEvent(source) ?: continue
+            val (delta, eventComplete) = decodeSseEvent(event, extractText, isComplete)
+            appendStreamingDelta(collected, delta, onTextDelta)
+            if (eventComplete) completed = true
+        }
+        if (!completed) throw IOException("Streaming response ended before completion")
+        return collected.toString()
+    }
+
+    private fun readSseEvent(source: BufferedSource): JsonObject? {
+        val line = source.readUtf8Line() ?: return null
+        if (!line.startsWith(SSE_DATA_PREFIX)) return null
+        return parseSseEvent(line.removePrefix(SSE_DATA_PREFIX).trim())
+    }
+
+    private fun decodeSseEvent(
+        event: JsonObject,
+        extractText: (JsonObject) -> String?,
+        isComplete: (JsonObject) -> Boolean
+    ): Pair<String?, Boolean> {
+        return try {
+            extractStreamError(event)?.let { throw IOException(it) }
+            extractText(event) to isComplete(event)
+        } catch (e: IllegalArgumentException) {
+            throw IOException(MALFORMED_STREAM_EVENT, e)
+        }
+    }
+
+    private fun appendStreamingDelta(
+        collected: StringBuilder,
+        delta: String?,
+        onTextDelta: (String) -> Unit
+    ) {
+        val text = delta?.takeIf { it.isNotEmpty() } ?: return
+        collected.append(text)
+        val failure = runCatching { onTextDelta(text) }.exceptionOrNull()
+        when (failure) {
+            null -> Unit
+            is CancellationException -> throw failure
+            else -> throw IOException("Streaming text callback failed", failure)
+        }
+    }
+
+    private fun parseSseEvent(payload: String): JsonObject? {
+        if (payload.isBlank() || payload == SSE_DONE) return null
+        val element = try {
+            json.parseToJsonElement(payload)
+        } catch (e: SerializationException) {
+            throw IOException(MALFORMED_STREAM_EVENT, e)
+        }
+        return element as? JsonObject ?: throw IOException(MALFORMED_STREAM_EVENT)
+    }
+
+    private suspend fun executeCancellableJson(request: Request): String =
+        suspendCancellableCoroutine { continuation ->
+            val call = httpClient.newCall(request)
+            continuation.invokeOnCancellation { call.cancel() }
+            call.enqueue(object : Callback {
+                override fun onFailure(call: Call, e: IOException) {
+                    if (continuation.isActive) continuation.resumeWithException(e)
+                }
+
+                override fun onResponse(call: Call, response: Response) {
+                    try {
+                        response.use {
+                            val responseBody = response.body?.string() ?: throw IOException("Empty response from server")
+                            if (!response.isSuccessful) {
+                                throw IOException(
+                                    parseErrorMessage(responseBody) ?: "HTTP ${response.code}: ${response.message}"
+                                )
+                            }
+                            if (continuation.isActive) continuation.resume(responseBody)
+                        }
+                    } catch (e: IOException) {
+                        if (continuation.isActive) continuation.resumeWithException(e)
+                    }
+                }
+            })
+        }
+
     // --- OpenAI-compatible provider/gateway boundary ---
-    private fun callOpenAiCompatibleApi(
+    private suspend fun callOpenAiCompatibleApi(
         config: OpenAiCompatibleProviderConfig,
         prompt: String,
         model: String,
@@ -479,32 +841,25 @@ class AiChatService {
 
         val requestPayload = buildJsonObject {
             put(JSON_MODEL_KEY, model)
-            put("messages", messagesArray)
+            put(JSON_MESSAGES_KEY, messagesArray)
         }
 
-        val body = requestPayload.toString().toRequestBody("application/json".toMediaType())
+        val body = requestPayload.toString().toRequestBody(JSON_MEDIA_TYPE.toMediaType())
         val requestBuilder = Request.Builder()
             .url(config.endpointUrl)
-            .addHeader("Authorization", "Bearer $apiKey")
-            .addHeader("Content-Type", "application/json")
+            .addHeader(HEADER_AUTHORIZATION, bearerToken(apiKey))
+            .addHeader(HEADER_CONTENT_TYPE, JSON_MEDIA_TYPE)
         config.extraHeaders.forEach { (name, value) -> requestBuilder.addHeader(name, value) }
         val request = requestBuilder.post(body).build()
 
-        httpClient.newCall(request).execute().use { response ->
-            val responseBody = response.body?.string() ?: throw Exception("Empty response from server")
-            if (!response.isSuccessful) {
-                val errorMsg = parseErrorMessage(responseBody) ?: "HTTP ${response.code}: ${response.message}"
-                throw Exception(errorMsg)
-            }
+        val responseBody = executeCancellableJson(request)
+        val parsed = json.parseToJsonElement(responseBody).jsonObject
+        val choices = parsed["choices"]?.jsonArray
+        val firstChoice = choices?.getOrNull(0)?.jsonObject
+        val message = firstChoice?.get(STREAM_MESSAGE_KEY)?.jsonObject
+        val content = message?.get(JSON_CONTENT_KEY)?.jsonPrimitive?.contentOrNull
 
-            val parsed = json.parseToJsonElement(responseBody).jsonObject
-            val choices = parsed["choices"]?.jsonArray
-            val firstChoice = choices?.getOrNull(0)?.jsonObject
-            val message = firstChoice?.get("message")?.jsonObject
-            val content = message?.get(JSON_CONTENT_KEY)?.jsonPrimitive?.contentOrNull
-
-            return content ?: "Received empty message content."
-        }
+        return content ?: "Received empty message content."
     }
 
     internal fun buildOpenAiCompatibleMessages(
@@ -515,7 +870,7 @@ class AiChatService {
     ): JsonArray = buildJsonArray {
         if (!systemInstruction.isNullOrBlank()) {
             addJsonObject {
-                put(JSON_ROLE_KEY, "system")
+                put(JSON_ROLE_KEY, JSON_SYSTEM_KEY)
                 put(JSON_CONTENT_KEY, systemInstruction)
             }
         }
@@ -537,10 +892,10 @@ class AiChatService {
         return try {
             val obj = json.parseToJsonElement(rawJson).jsonObject
             when {
-                obj.containsKey("error") -> {
-                    val err = obj["error"]
+                obj.containsKey(STREAM_ERROR_KEY) -> {
+                    val err = obj[STREAM_ERROR_KEY]
                     if (err is JsonObject) {
-                        err["message"]?.jsonPrimitive?.contentOrNull ?: err.toString()
+                        err[STREAM_MESSAGE_KEY]?.jsonPrimitive?.contentOrNull ?: err.toString()
                     } else {
                         err?.jsonPrimitive?.contentOrNull
                     }
