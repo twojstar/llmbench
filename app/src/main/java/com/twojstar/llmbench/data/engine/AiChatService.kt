@@ -2,8 +2,11 @@ package com.twojstar.llmbench.data.engine
 
 import com.twojstar.llmbench.data.model.AiProvider
 import com.twojstar.llmbench.data.model.ApiKeyConfig
+import com.twojstar.llmbench.data.model.CHAT_ROLE_ASSISTANT
+import com.twojstar.llmbench.data.model.CHAT_ROLE_USER
 import com.twojstar.llmbench.data.model.GatewayModelCatalogEntry
 import com.twojstar.llmbench.data.model.ModelChatMessage
+import com.twojstar.llmbench.data.model.buildBoundedProviderTextTurns
 import com.twojstar.llmbench.data.model.freeGatewayModelOptions
 import com.twojstar.llmbench.data.model.Profile
 import kotlinx.coroutines.Dispatchers
@@ -14,6 +17,12 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.util.concurrent.TimeUnit
+
+private const val JSON_ROLE_KEY = "role"
+private const val JSON_CONTENT_KEY = "content"
+private const val JSON_PARTS_KEY = "parts"
+private const val JSON_TEXT_KEY = "text"
+private const val JSON_MODEL_KEY = "model"
 
 class AiChatService {
 
@@ -106,7 +115,7 @@ class AiChatService {
                         id = id,
                         inputPriceUsd = pricing?.get("prompt").asDoubleOrNull(),
                         outputPriceUsd = pricing?.get("completion").asDoubleOrNull(),
-                        supportsTextOutput = outputModalities?.contains("text") == true
+                        supportsTextOutput = outputModalities?.contains(JSON_TEXT_KEY) == true
                     )
                 }
                 AiProvider.AIHUBMIX -> {
@@ -157,9 +166,15 @@ class AiChatService {
         if (isKeyProvided) {
             try {
                 val realResult = when (provider) {
-                    AiProvider.GEMINI -> callGeminiApi(prompt, effectiveModel, key, systemInstruction)
-                    AiProvider.CHATGPT -> callOpenAiApi(prompt, effectiveModel, key, systemInstruction)
-                    AiProvider.CLAUDE -> callClaudeApi(prompt, effectiveModel, key, systemInstruction)
+                    AiProvider.GEMINI -> callGeminiApi(
+                        prompt, effectiveModel, key, systemInstruction, conversationHistory
+                    )
+                    AiProvider.CHATGPT -> callOpenAiApi(
+                        prompt, effectiveModel, key, systemInstruction, conversationHistory
+                    )
+                    AiProvider.CLAUDE -> callClaudeApi(
+                        prompt, effectiveModel, key, systemInstruction, conversationHistory
+                    )
                     AiProvider.DEEPSEEK, AiProvider.KIMI, AiProvider.OPENROUTER, AiProvider.AIHUBMIX -> {
                         val config = checkNotNull(openAiCompatibleProviders[provider])
                         callOpenAiCompatibleApi(
@@ -252,30 +267,70 @@ class AiChatService {
         return notes
     }
 
+    internal fun buildGeminiContents(
+        prompt: String,
+        conversationHistory: List<ModelChatMessage>,
+        systemInstruction: String? = null
+    ): JsonArray = buildJsonArray {
+        buildBoundedProviderTextTurns(
+            prompt, conversationHistory, AiProvider.GEMINI, systemInstruction
+        ).forEach { turn ->
+            addJsonObject {
+                put(JSON_ROLE_KEY, if (turn.role == CHAT_ROLE_ASSISTANT) JSON_MODEL_KEY else CHAT_ROLE_USER)
+                putJsonArray(JSON_PARTS_KEY) {
+                    addJsonObject { put(JSON_TEXT_KEY, turn.text) }
+                }
+            }
+        }
+    }
+
+    internal fun buildOpenAiResponseInput(
+        prompt: String,
+        conversationHistory: List<ModelChatMessage>,
+        systemInstruction: String? = null
+    ): JsonArray = buildJsonArray {
+        buildBoundedProviderTextTurns(
+            prompt, conversationHistory, AiProvider.CHATGPT, systemInstruction
+        ).forEach { turn ->
+            addJsonObject {
+                put(JSON_ROLE_KEY, turn.role)
+                put(JSON_CONTENT_KEY, turn.text)
+            }
+        }
+    }
+
+    internal fun buildClaudeMessages(
+        prompt: String,
+        conversationHistory: List<ModelChatMessage>,
+        systemInstruction: String? = null
+    ): JsonArray = buildJsonArray {
+        buildBoundedProviderTextTurns(
+            prompt, conversationHistory, AiProvider.CLAUDE, systemInstruction
+        ).forEach { turn ->
+            addJsonObject {
+                put(JSON_ROLE_KEY, turn.role)
+                put(JSON_CONTENT_KEY, turn.text)
+            }
+        }
+    }
+
     // --- Google Gemini REST API ---
     private fun callGeminiApi(
         prompt: String,
         model: String,
         apiKey: String,
-        systemInstruction: String?
+        systemInstruction: String?,
+        conversationHistory: List<ModelChatMessage>
     ): String {
         val url = "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$apiKey"
-
-        val contentsArray = buildJsonArray {
-            addJsonObject {
-                put("role", "user")
-                putJsonArray("parts") {
-                    addJsonObject { put("text", prompt) }
-                }
-            }
-        }
+        val contentsArray = buildGeminiContents(prompt, conversationHistory, systemInstruction)
 
         val requestPayload = buildJsonObject {
             put("contents", contentsArray)
             if (!systemInstruction.isNullOrBlank()) {
                 putJsonObject("systemInstruction") {
-                    putJsonArray("parts") {
-                        addJsonObject { put("text", systemInstruction) }
+                    putJsonArray(JSON_PARTS_KEY) {
+                        addJsonObject { put(JSON_TEXT_KEY, systemInstruction) }
                     }
                 }
             }
@@ -295,11 +350,14 @@ class AiChatService {
             }
 
             val parsed = json.parseToJsonElement(responseBody).jsonObject
-            val candidates = parsed["candidates"]?.jsonArray
-            val firstCandidate = candidates?.getOrNull(0)?.jsonObject
-            val content = firstCandidate?.get("content")?.jsonObject
-            val parts = content?.get("parts")?.jsonArray
-            val text = parts?.getOrNull(0)?.jsonObject?.get("text")?.jsonPrimitive?.contentOrNull
+            val text = parsed["candidates"]?.jsonArray
+                ?.firstOrNull()?.jsonObject
+                ?.get(JSON_CONTENT_KEY)?.jsonObject
+                ?.get(JSON_PARTS_KEY)?.jsonArray
+                .orEmpty()
+                .mapNotNull { it.jsonObject[JSON_TEXT_KEY]?.jsonPrimitive?.contentOrNull }
+                .joinToString(separator = "")
+                .takeIf { it.isNotEmpty() }
 
             return text ?: "Received empty content response from Gemini."
         }
@@ -310,13 +368,14 @@ class AiChatService {
         prompt: String,
         model: String,
         apiKey: String,
-        systemInstruction: String?
+        systemInstruction: String?,
+        conversationHistory: List<ModelChatMessage>
     ): String {
         val url = "https://api.openai.com/v1/responses"
 
         val requestPayload = buildJsonObject {
-            put("model", model)
-            put("input", prompt)
+            put(JSON_MODEL_KEY, model)
+            put("input", buildOpenAiResponseInput(prompt, conversationHistory, systemInstruction))
             put("store", false)
             if (!systemInstruction.isNullOrBlank()) {
                 put("instructions", systemInstruction)
@@ -339,16 +398,15 @@ class AiChatService {
             }
 
             val parsed = json.parseToJsonElement(responseBody).jsonObject
-            val output = parsed["output"]?.jsonArray.orEmpty()
-            val text = output.asSequence()
+            val text = parsed["output"]?.jsonArray.orEmpty().asSequence()
                 .mapNotNull { it as? JsonObject }
                 .filter { it["type"]?.jsonPrimitive?.contentOrNull == "message" }
-                .flatMap { message -> message["content"]?.jsonArray.orEmpty().asSequence() }
+                .flatMap { message -> message[JSON_CONTENT_KEY]?.jsonArray.orEmpty().asSequence() }
                 .mapNotNull { it as? JsonObject }
-                .firstOrNull { it["type"]?.jsonPrimitive?.contentOrNull == "output_text" }
-                ?.get("text")
-                ?.jsonPrimitive
-                ?.contentOrNull
+                .filter { it["type"]?.jsonPrimitive?.contentOrNull == "output_text" }
+                .mapNotNull { it[JSON_TEXT_KEY]?.jsonPrimitive?.contentOrNull }
+                .joinToString(separator = "")
+                .takeIf { it.isNotEmpty() }
 
             return text ?: "Received empty message content from OpenAI."
         }
@@ -359,19 +417,14 @@ class AiChatService {
         prompt: String,
         model: String,
         apiKey: String,
-        systemInstruction: String?
+        systemInstruction: String?,
+        conversationHistory: List<ModelChatMessage>
     ): String {
         val url = "https://api.anthropic.com/v1/messages"
-
-        val messagesArray = buildJsonArray {
-            addJsonObject {
-                put("role", "user")
-                put("content", prompt)
-            }
-        }
+        val messagesArray = buildClaudeMessages(prompt, conversationHistory, systemInstruction)
 
         val requestPayload = buildJsonObject {
-            put("model", model)
+            put(JSON_MODEL_KEY, model)
             put("max_tokens", 2048)
             if (!systemInstruction.isNullOrBlank()) {
                 put("system", systemInstruction)
@@ -396,9 +449,12 @@ class AiChatService {
             }
 
             val parsed = json.parseToJsonElement(responseBody).jsonObject
-            val contentArray = parsed["content"]?.jsonArray
-            val firstBlock = contentArray?.getOrNull(0)?.jsonObject
-            val text = firstBlock?.get("text")?.jsonPrimitive?.contentOrNull
+            val text = parsed[JSON_CONTENT_KEY]?.jsonArray.orEmpty()
+                .mapNotNull { it as? JsonObject }
+                .filter { it["type"]?.jsonPrimitive?.contentOrNull == JSON_TEXT_KEY }
+                .mapNotNull { it[JSON_TEXT_KEY]?.jsonPrimitive?.contentOrNull }
+                .joinToString(separator = "")
+                .takeIf { it.isNotEmpty() }
 
             return text ?: "Received empty content block from Claude."
         }
@@ -422,7 +478,7 @@ class AiChatService {
         )
 
         val requestPayload = buildJsonObject {
-            put("model", model)
+            put(JSON_MODEL_KEY, model)
             put("messages", messagesArray)
         }
 
@@ -445,7 +501,7 @@ class AiChatService {
             val choices = parsed["choices"]?.jsonArray
             val firstChoice = choices?.getOrNull(0)?.jsonObject
             val message = firstChoice?.get("message")?.jsonObject
-            val content = message?.get("content")?.jsonPrimitive?.contentOrNull
+            val content = message?.get(JSON_CONTENT_KEY)?.jsonPrimitive?.contentOrNull
 
             return content ?: "Received empty message content."
         }
@@ -459,38 +515,21 @@ class AiChatService {
     ): JsonArray = buildJsonArray {
         if (!systemInstruction.isNullOrBlank()) {
             addJsonObject {
-                put("role", "system")
-                put("content", systemInstruction)
+                put(JSON_ROLE_KEY, "system")
+                put(JSON_CONTENT_KEY, systemInstruction)
             }
         }
 
-        val priorMessages = if (
-            conversationHistory.lastOrNull()?.let { it.sender == "user" && it.text == prompt } == true
-        ) {
-            conversationHistory.dropLast(1)
-        } else {
-            conversationHistory
-        }
-
-        priorMessages.forEach { message ->
-            when {
-                message.sender == "user" -> addJsonObject {
-                    put("role", "user")
-                    put("content", message.text)
-                }
-                message.sender == "assistant" &&
-                    message.provider == provider &&
-                    !message.isError &&
-                    !message.isSimulated -> addJsonObject {
-                    put("role", "assistant")
-                    put("content", message.text)
-                }
+        buildBoundedProviderTextTurns(
+            prompt = prompt,
+            conversationHistory = conversationHistory,
+            provider = provider,
+            systemInstruction = systemInstruction
+        ).forEach { turn ->
+            addJsonObject {
+                put(JSON_ROLE_KEY, turn.role)
+                put(JSON_CONTENT_KEY, turn.text)
             }
-        }
-
-        addJsonObject {
-            put("role", "user")
-            put("content", prompt)
         }
     }
 
