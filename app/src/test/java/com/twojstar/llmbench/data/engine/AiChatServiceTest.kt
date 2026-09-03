@@ -2,6 +2,7 @@ package com.twojstar.llmbench.data.engine
 
 import com.twojstar.llmbench.data.model.AiProvider
 import com.twojstar.llmbench.data.model.ModelChatMessage
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
@@ -96,6 +97,57 @@ class AiChatServiceTest {
         assertFalse(simulatedAnswer in contents)
         assertFalse(otherProviderAnswer in contents)
         assertTrue(liveAnswer in contents)
+    }
+
+    @Test
+    fun directProviderHistoryUsesNativeRolesAndProviderScopedAnswers() {
+        val prompt = "follow up"
+        val history = listOf(
+            ModelChatMessage(id = "u1", sender = "user", text = "first question"),
+            ModelChatMessage(
+                id = "gpt", sender = "assistant", provider = AiProvider.CHATGPT, text = "openai answer"
+            ),
+            ModelChatMessage(
+                id = "claude", sender = "assistant", provider = AiProvider.CLAUDE, text = "claude answer"
+            ),
+            ModelChatMessage(
+                id = "gemini", sender = "assistant", provider = AiProvider.GEMINI, text = "gemini answer"
+            ),
+            ModelChatMessage(
+                id = "simulated", sender = "assistant", provider = AiProvider.CHATGPT,
+                text = "simulated answer", isSimulated = true
+            ),
+            ModelChatMessage(
+                id = "error", sender = "assistant", provider = AiProvider.CLAUDE,
+                text = "error answer", isError = true
+            ),
+            ModelChatMessage(id = "u2", sender = "user", text = prompt)
+        )
+        val service = AiChatService()
+
+        val gemini = service.buildGeminiContents(prompt, history)
+        assertEquals(listOf("user", "model", "user"), gemini.map {
+            it.jsonObject.getValue("role").jsonPrimitive.content
+        })
+        assertEquals(listOf("first question", "gemini answer", prompt), gemini.map {
+            it.jsonObject.getValue("parts").jsonArray.first().jsonObject.getValue("text").jsonPrimitive.content
+        })
+
+        val openAi = service.buildOpenAiResponseInput(prompt, history)
+        assertEquals(listOf("user", "assistant", "user"), openAi.map {
+            it.jsonObject.getValue("role").jsonPrimitive.content
+        })
+        assertEquals(listOf("first question", "openai answer", prompt), openAi.map {
+            it.jsonObject.getValue("content").jsonPrimitive.content
+        })
+
+        val claude = service.buildClaudeMessages(prompt, history)
+        assertEquals(listOf("user", "assistant", "user"), claude.map {
+            it.jsonObject.getValue("role").jsonPrimitive.content
+        })
+        assertEquals(listOf("first question", "claude answer", prompt), claude.map {
+            it.jsonObject.getValue("content").jsonPrimitive.content
+        })
     }
 
     @Test
