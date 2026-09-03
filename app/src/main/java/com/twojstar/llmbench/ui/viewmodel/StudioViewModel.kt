@@ -46,7 +46,9 @@ data class StudioUiState(
     val includeSystemProfileInChat: Boolean = true,
     val isChatGenerating: Boolean = false,
     val activeGeneratingProviders: Set<AiProvider> = emptySet(),
-    val showApiKeyDialog: Boolean = false
+    val showApiKeyDialog: Boolean = false,
+    val gatewayModelOptions: Map<AiProvider, List<String>> = emptyMap(),
+    val refreshingGatewayCatalogs: Set<AiProvider> = emptySet()
 )
 
 enum class NavigationTab {
@@ -117,17 +119,61 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
     // --- Chat Screen Actions ---
 
     fun setChatProvider(provider: AiProvider) {
-        val newModel = if (provider == AiProvider.ALL) "all" else provider.defaultModel
+        val knownModels = _uiState.value.gatewayModelOptions[provider] ?: provider.availableModels
+        val newModel = when {
+            provider == AiProvider.ALL -> "all"
+            knownModels.isNotEmpty() -> knownModels.first()
+            else -> provider.defaultModel
+        }
         _uiState.update {
             it.copy(
                 selectedChatProvider = provider,
                 selectedChatModel = newModel
             )
         }
+        if (provider.usesLiveFreeModelCatalog()) refreshGatewayModelCatalog(provider)
     }
 
     fun setChatModel(modelName: String) {
         _uiState.update { it.copy(selectedChatModel = modelName) }
+    }
+
+    fun refreshGatewayModelCatalog(provider: AiProvider) {
+        if (!provider.usesLiveFreeModelCatalog()) return
+        val state = _uiState.value
+        if (provider in state.refreshingGatewayCatalogs) return
+        val apiKeys = state.apiKeyConfig
+        _uiState.update {
+            it.copy(refreshingGatewayCatalogs = it.refreshingGatewayCatalogs + provider)
+        }
+
+        viewModelScope.launch {
+            try {
+                val models = aiChatService.fetchFreeGatewayModels(provider, apiKeys)
+                if (models.isNotEmpty()) {
+                    _uiState.update { current ->
+                        val selectedModel = if (
+                            current.selectedChatProvider == provider &&
+                            current.selectedChatModel !in models
+                        ) {
+                            models.first()
+                        } else {
+                            current.selectedChatModel
+                        }
+                        current.copy(
+                            gatewayModelOptions = current.gatewayModelOptions + (provider to models),
+                            selectedChatModel = selectedModel
+                        )
+                    }
+                }
+            } catch (_: Exception) {
+                // Keep the last successful catalog or bundled fallback.
+            } finally {
+                _uiState.update {
+                    it.copy(refreshingGatewayCatalogs = it.refreshingGatewayCatalogs - provider)
+                }
+            }
+        }
     }
 
     fun toggleIncludeSystemProfile(include: Boolean) {
@@ -165,6 +211,10 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
             )
         }
         showSnackbar(if (stored) "API keys stored securely on device." else "API keys updated for this session only.")
+        val selectedProvider = _uiState.value.selectedChatProvider
+        if (selectedProvider.usesLiveFreeModelCatalog()) {
+            refreshGatewayModelCatalog(selectedProvider)
+        }
     }
 
     fun clearChatHistory() {

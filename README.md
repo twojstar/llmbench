@@ -30,7 +30,7 @@ AI Studio intentionally opens in the system browser because Google OAuth policy 
 
 ### Native / free-provider layer
 
-The native/free-provider layer supports OpenRouter Free and AIHubMix through the shared OpenAI-compatible gateway adapter. Both gateways stay outside the default All Models comparison to avoid duplicate aggregator routing. All Models dispatches only to direct providers with configured API keys and reports API failures without substituting simulated answers; single-provider demo or fallback responses are labeled as simulated. Provider-specific details belong behind adapters rather than being spread through UI code.
+The native/free-provider layer supports OpenRouter Free and AIHubMix through the shared OpenAI-compatible gateway adapter. Their model pickers refresh from each gateway's live catalog and keep only zero-cost text models, with bundled models as an offline fallback. Both gateways stay outside the default All Models comparison to avoid duplicate aggregator routing. All Models dispatches only to direct providers with configured API keys and reports API failures without substituting simulated answers; single-provider demo or fallback responses are labeled as simulated. Provider-specific details belong behind adapters rather than being spread through UI code.
 
 ## Provider support matrix
 
