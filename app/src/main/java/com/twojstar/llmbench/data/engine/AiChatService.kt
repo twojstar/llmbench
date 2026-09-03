@@ -705,8 +705,6 @@ class AiChatService {
             if (continuation.isActive) continuation.resume(text)
         } catch (e: IOException) {
             if (continuation.isActive) continuation.resumeWithException(e)
-        } catch (e: RuntimeException) {
-            if (continuation.isActive) continuation.resumeWithException(e)
         }
     }
 
@@ -739,7 +737,11 @@ class AiChatService {
                 }
                 delta?.takeIf { it.isNotEmpty() }?.let { text ->
                     collected.append(text)
-                    onTextDelta(text)
+                    try {
+                        onTextDelta(text)
+                    } catch (e: RuntimeException) {
+                        throw IOException("Streaming text callback failed", e)
+                    }
                 }
                 if (eventComplete) completed = true
             }

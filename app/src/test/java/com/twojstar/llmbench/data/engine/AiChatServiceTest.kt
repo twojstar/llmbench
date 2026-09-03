@@ -342,7 +342,7 @@ class AiChatServiceTest {
         }
 
         assertTrue(result.isFailure)
-        assertEquals("UI callback failed", result.exceptionOrNull()?.message)
+        assertEquals("Streaming text callback failed", result.exceptionOrNull()?.message)
     }
 
 }
