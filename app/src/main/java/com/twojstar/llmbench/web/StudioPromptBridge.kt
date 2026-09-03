@@ -1,0 +1,175 @@
+package com.twojstar.llmbench.web
+
+import android.webkit.WebView
+import com.twojstar.llmbench.data.model.WebAiService
+import org.json.JSONObject
+
+internal enum class StudioPromptApplyResult {
+    INSERTED,
+    NO_EDITOR,
+    NOT_EMPTY,
+    REJECTED,
+    OFF_PROVIDER,
+    FAILED
+}
+
+private const val STUDIO_PROMPT_TRACKER_KEY = "__llmbenchStudioPromptTarget"
+
+private fun providerRuntimeGuardScript(service: WebAiService, offProviderResult: String): String {
+    val allowedHosts = ProviderWebTweakRegistry.ownedHosts(service)
+        .joinToString(prefix = "[", postfix = "]") { JSONObject.quote(it) }
+    return """
+        var allowedHosts = $allowedHosts;
+        var currentHost = String(location.hostname || '').toLowerCase();
+        if (currentHost.slice(-1) === '.') currentHost = currentHost.slice(0, -1);
+        var owned = allowedHosts.some(function(host) {
+            return currentHost === host || currentHost.slice(-(host.length + 1)) === '.' + host;
+        });
+        if (String(location.protocol || '').toLowerCase() !== 'https:' || !owned) {
+            return $offProviderResult;
+        }
+    """.trimIndent()
+}
+
+private fun editableFinderScript(): String = """
+    function llmbenchFindEditable(node) {
+        while (node && node !== document.documentElement) {
+            var tag = String(node.tagName || '').toLowerCase();
+            if (tag === 'textarea') return node;
+            if (tag === 'input') {
+                var type = String(node.type || 'text').toLowerCase();
+                return ['text', 'search', 'email', 'url', 'tel'].indexOf(type) >= 0 ? node : null;
+            }
+            if (node.isContentEditable === true) return node;
+            node = node.parentElement;
+        }
+        return null;
+    }
+""".trimIndent()
+
+internal fun studioPromptTargetTrackerScript(
+    service: WebAiService,
+    pageUrl: String
+): String? {
+    if (!providerUrlMatches(service, pageUrl)) return null
+    val providerId = JSONObject.quote(service.id)
+    return """
+        (() => {
+            ${providerRuntimeGuardScript(service, "false")}
+            ${editableFinderScript()}
+            var key = ${JSONObject.quote(STUDIO_PROMPT_TRACKER_KEY)};
+            var state = window[key] || { target: null, installed: false, providerId: $providerId };
+            window[key] = state;
+            state.providerId = $providerId;
+            function remember(node) {
+                var target = llmbenchFindEditable(node);
+                if (target) state.target = target;
+            }
+            remember(document.activeElement);
+            if (!state.installed) {
+                document.addEventListener('focusin', function(event) {
+                    remember(event.target);
+                }, true);
+                state.installed = true;
+            }
+            return true;
+        })();
+    """.trimIndent()
+}
+
+internal fun studioPromptApplyScript(
+    service: WebAiService,
+    pageUrl: String,
+    prompt: String
+): String? {
+    if (!providerUrlMatches(service, pageUrl)) return null
+    val text = JSONObject.quote(prompt)
+    return """
+        (() => {
+            ${providerRuntimeGuardScript(service, "'off-provider'")}
+            ${editableFinderScript()}
+            var key = ${JSONObject.quote(STUDIO_PROMPT_TRACKER_KEY)};
+            var state = window[key];
+            var target = llmbenchFindEditable(document.activeElement);
+            if (!target && state && state.target && state.target.isConnected !== false) {
+                target = llmbenchFindEditable(state.target);
+            }
+            if (!target || target.isConnected === false) return 'no-editor';
+
+            var tag = String(target.tagName || '').toLowerCase();
+            var current = tag === 'input' || tag === 'textarea'
+                ? String(target.value || '')
+                : String(target.innerText || target.textContent || '');
+            if (current.trim().length > 0) return 'not-empty';
+
+            if (typeof target.focus === 'function') target.focus();
+            var beforeInput = typeof InputEvent === 'function'
+                ? new InputEvent('beforeinput', { bubbles: true, cancelable: true, inputType: 'insertText', data: $text })
+                : new Event('beforeinput', { bubbles: true, cancelable: true });
+            if (typeof target.dispatchEvent === 'function' && !target.dispatchEvent(beforeInput)) {
+                return 'rejected';
+            }
+
+            if (tag === 'input' || tag === 'textarea') {
+                var prototype = Object.getPrototypeOf(target);
+                var descriptor = prototype && Object.getOwnPropertyDescriptor(prototype, 'value');
+                if (descriptor && typeof descriptor.set === 'function') {
+                    descriptor.set.call(target, $text);
+                } else {
+                    target.value = $text;
+                }
+            } else {
+                target.textContent = $text;
+            }
+
+            if (typeof target.dispatchEvent === 'function') {
+                var inputEvent = typeof InputEvent === 'function'
+                    ? new InputEvent('input', { bubbles: true, inputType: 'insertText', data: $text })
+                    : new Event('input', { bubbles: true });
+                target.dispatchEvent(inputEvent);
+                target.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+            return 'inserted';
+        })();
+    """.trimIndent()
+}
+
+internal fun installStudioPromptTargetTracker(
+    webView: WebView,
+    service: WebAiService,
+    pageUrl: String
+) {
+    val script = studioPromptTargetTrackerScript(service, pageUrl) ?: return
+    webView.evaluateJavascript(script, null)
+}
+
+internal fun applyStudioPromptToFocusedEditor(
+    webView: WebView,
+    service: WebAiService,
+    prompt: String,
+    onResult: (StudioPromptApplyResult) -> Unit
+) {
+    val pageUrl = webView.url
+    if (pageUrl == null) {
+        onResult(StudioPromptApplyResult.OFF_PROVIDER)
+        return
+    }
+    val script = studioPromptApplyScript(service, pageUrl, prompt)
+    if (script == null) {
+        onResult(StudioPromptApplyResult.OFF_PROVIDER)
+        return
+    }
+    webView.evaluateJavascript(script) { raw ->
+        onResult(parseStudioPromptApplyResult(raw))
+    }
+}
+
+internal fun parseStudioPromptApplyResult(rawResult: String?): StudioPromptApplyResult =
+    when (rawResult?.trim()?.removeSurrounding("\"")) {
+        "inserted" -> StudioPromptApplyResult.INSERTED
+        "no-editor" -> StudioPromptApplyResult.NO_EDITOR
+        "not-empty" -> StudioPromptApplyResult.NOT_EMPTY
+        "rejected" -> StudioPromptApplyResult.REJECTED
+        "off-provider" -> StudioPromptApplyResult.OFF_PROVIDER
+        else -> StudioPromptApplyResult.FAILED
+    }
