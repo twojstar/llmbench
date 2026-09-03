@@ -10,6 +10,9 @@ import org.mozilla.javascript.Context
 class StudioPromptBridgeTest {
     private companion object {
         const val CHATGPT_URL = "https://chatgpt.com/"
+        const val CHATGPT_HOST = "chatgpt.com"
+        const val RUNTIME_HOST_TOKEN = "__RUNTIME_HOST__"
+        const val RUNTIME_HREF_TOKEN = "__RUNTIME_HREF__"
         const val SAMPLE_PROFILE = "Profile"
         const val STUDIO_PROFILE = "Studio profile"
         const val INSERTED_RESULT = "inserted"
@@ -144,8 +147,8 @@ class StudioPromptBridgeTest {
             context.languageVersion = Context.VERSION_ES6
             val scope = context.initStandardObjects()
             val runtime = browserMocks
-                .replace("__RUNTIME_HOST__", "chatgpt.com")
-                .replace("__RUNTIME_HREF__", CHATGPT_URL)
+                .replace(RUNTIME_HOST_TOKEN, CHATGPT_HOST)
+                .replace(RUNTIME_HREF_TOKEN, CHATGPT_URL)
             context.evaluateString(scope, runtime, "tracker-setup", 1, null)
             context.evaluateString(scope, script, "tracker-install", 1, null)
             context.evaluateString(scope, textAreaSetup("", active = false), "tracker-target", 1, null)
@@ -185,8 +188,8 @@ class StudioPromptBridgeTest {
             context.languageVersion = Context.VERSION_ES6
             val scope = context.initStandardObjects()
             val runtime = browserMocks
-                .replace("__RUNTIME_HOST__", "chatgpt.com")
-                .replace("__RUNTIME_HREF__", CHATGPT_URL)
+                .replace(RUNTIME_HOST_TOKEN, CHATGPT_HOST)
+                .replace(RUNTIME_HREF_TOKEN, CHATGPT_URL)
             context.evaluateString(scope, runtime + "\n" + textAreaSetup("", active = true), "focus-setup", 1, null)
             context.evaluateString(scope, script, "focus-tracker", 1, null)
             context.evaluateString(
@@ -250,7 +253,7 @@ class StudioPromptBridgeTest {
     private fun runApply(
         targetSetup: String,
         prompt: String,
-        runtimeHost: String = "chatgpt.com",
+        runtimeHost: String = CHATGPT_HOST,
         runtimeHref: String = CHATGPT_URL
     ): ScriptOutcome {
         val script = requireNotNull(
@@ -266,8 +269,8 @@ class StudioPromptBridgeTest {
             context.languageVersion = Context.VERSION_ES6
             val scope = context.initStandardObjects()
             val runtime = browserMocks
-                .replace("__RUNTIME_HOST__", runtimeHost)
-                .replace("__RUNTIME_HREF__", runtimeHref)
+                .replace(RUNTIME_HOST_TOKEN, runtimeHost)
+                .replace(RUNTIME_HREF_TOKEN, runtimeHref)
             context.evaluateString(scope, runtime + "\n" + targetSetup, "studio-setup", 1, null)
             val result = Context.toString(
                 context.evaluateString(scope, script, "studio-apply", 1, null)
