@@ -172,9 +172,24 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
         showSnackbar("Chat history cleared.")
     }
 
-    fun sendChatMessage(prompt: String) {
+    fun sendChatMessage(prompt: String): Boolean {
         val trimmed = prompt.trim()
-        if (trimmed.isBlank() || _uiState.value.isChatGenerating) return
+        if (trimmed.isBlank() || _uiState.value.isChatGenerating) return false
+
+        val state = _uiState.value
+        val targetProvider = state.selectedChatProvider
+        val apiKeys = state.apiKeyConfig
+        val providersToRun = if (targetProvider == AiProvider.ALL) {
+            apiKeys.configuredDirectProviders()
+        } else {
+            listOf(targetProvider)
+        }
+
+        if (targetProvider == AiProvider.ALL && providersToRun.isEmpty()) {
+            _uiState.update { it.copy(showApiKeyDialog = true) }
+            showSnackbar("Add at least one direct provider API key to use All Models.")
+            return false
+        }
 
         val userMessage = ModelChatMessage(
             id = "user_${System.currentTimeMillis()}",
@@ -182,15 +197,7 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
             text = trimmed,
             timestamp = System.currentTimeMillis()
         )
-
-        val targetProvider = _uiState.value.selectedChatProvider
-        val currentMessages = _uiState.value.chatMessages + userMessage
-
-        val providersToRun = if (targetProvider == AiProvider.ALL) {
-            AiProvider.concreteProviders
-        } else {
-            listOf(targetProvider)
-        }
+        val currentMessages = state.chatMessages + userMessage
 
         _uiState.update {
             it.copy(
@@ -211,8 +218,6 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
             } else {
                 null
             }
-            val apiKeys = _uiState.value.apiKeyConfig
-
             if (targetProvider == AiProvider.ALL) {
                 // Run concurrent requests for every native provider
                 val tasks = providersToRun.map { provider ->
@@ -225,7 +230,8 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
                             apiKeys = apiKeys,
                             systemInstruction = systemPrompt,
                             profile = activeProfile,
-                            conversationHistory = currentMessages
+                            conversationHistory = currentMessages,
+                            allowSimulationFallback = false
                         )
                     }
                 }
@@ -258,6 +264,7 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
                 }
             }
         }
+        return true
     }
 
     // --- Profile & Studio Customization Actions ---

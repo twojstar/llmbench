@@ -380,8 +380,9 @@ fun ChatScreen(
                             onClick = {
                                 if (promptInput.isNotBlank() && !uiState.isChatGenerating) {
                                     val textToSend = promptInput
-                                    promptInput = ""
-                                    viewModel.sendChatMessage(textToSend)
+                                    if (viewModel.sendChatMessage(textToSend)) {
+                                        promptInput = ""
+                                    }
                                 }
                             },
                             shape = CircleShape,
@@ -515,6 +516,22 @@ fun ChatMessageItem(
                         fontSize = 10.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                }
+                if (message.isSimulated) {
+                    Surface(
+                        shape = RoundedCornerShape(4.dp),
+                        color = MaterialTheme.colorScheme.tertiaryContainer,
+                        modifier = Modifier.testTag("badge_simulated_${message.id}")
+                    ) {
+                        Text(
+                            text = "SIMULATED",
+                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp),
+                            style = MaterialTheme.typography.labelSmall,
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onTertiaryContainer
+                        )
+                    }
                 }
                 if (message.latencyMs != null) {
                     Text(

@@ -209,6 +209,20 @@ data class ApiKeyConfig(
     val aiHubMixKey: String = ""
 )
 
+fun ApiKeyConfig.hasKeyFor(provider: AiProvider): Boolean = when (provider) {
+    AiProvider.GEMINI -> geminiKey.isNotBlank()
+    AiProvider.CHATGPT -> openAiKey.isNotBlank()
+    AiProvider.CLAUDE -> claudeKey.isNotBlank()
+    AiProvider.DEEPSEEK -> deepseekKey.isNotBlank()
+    AiProvider.KIMI -> kimiKey.isNotBlank()
+    AiProvider.OPENROUTER -> openRouterKey.isNotBlank()
+    AiProvider.AIHUBMIX -> aiHubMixKey.isNotBlank()
+    AiProvider.ALL -> false
+}
+
+fun ApiKeyConfig.configuredDirectProviders(): List<AiProvider> =
+    AiProvider.concreteProviders.filter { hasKeyFor(it) }
+
 @Serializable
 data class ModelChatMessage(
     val id: String,
