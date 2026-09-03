@@ -264,9 +264,8 @@ class AiChatService {
                         activeProfileNotes = activeNotes
                     )
                 }
-            } catch (cancelled: CancellationException) {
-                throw cancelled
             } catch (e: Exception) {
+                if (e is CancellationException) throw e
                 val latency = System.currentTimeMillis() - startTime
                 val errorDetails = e.localizedMessage ?: e.message ?: "Unknown error"
                 if (!allowSimulationFallback) {
@@ -625,19 +624,22 @@ class AiChatService {
             .ifEmpty { "Received empty content block from Claude." }
     }
 
-    internal fun extractStreamError(event: JsonObject): String? {
-        val geminiCandidate = event[JSON_CANDIDATES_KEY]?.jsonArray?.firstOrNull() as? JsonObject
-        val geminiFinishReason = geminiCandidate?.get("finishReason")?.jsonPrimitive?.contentOrNull
-        if (geminiFinishReason != null && geminiFinishReason != "STOP") {
-            val finishMessage = geminiCandidate["finishMessage"]?.jsonPrimitive?.contentOrNull
-            return buildString {
-                append("Gemini stopped with ").append(geminiFinishReason)
-                if (!finishMessage.isNullOrBlank()) append(": ").append(finishMessage)
-            }
-        }
+    internal fun extractStreamError(event: JsonObject): String? =
+        extractGeminiStreamError(event) ?: extractTypedStreamError(event)
 
-        val type = event[STREAM_TYPE_KEY]?.jsonPrimitive?.contentOrNull
-        return when (type) {
+    private fun extractGeminiStreamError(event: JsonObject): String? {
+        val candidate = event[JSON_CANDIDATES_KEY]?.jsonArray?.firstOrNull() as? JsonObject
+        val finishReason = candidate?.get("finishReason")?.jsonPrimitive?.contentOrNull ?: return null
+        if (finishReason == "STOP") return null
+        val finishMessage = candidate["finishMessage"]?.jsonPrimitive?.contentOrNull
+        return buildString {
+            append("Gemini stopped with ").append(finishReason)
+            if (!finishMessage.isNullOrBlank()) append(": ").append(finishMessage)
+        }
+    }
+
+    private fun extractTypedStreamError(event: JsonObject): String? {
+        return when (event[STREAM_TYPE_KEY]?.jsonPrimitive?.contentOrNull) {
             OPENAI_RESPONSE_FAILED -> event[STREAM_RESPONSE_KEY]?.jsonObject
                 ?.get(STREAM_ERROR_KEY)?.jsonObject
                 ?.get(STREAM_MESSAGE_KEY)?.jsonPrimitive?.contentOrNull
@@ -647,15 +649,16 @@ class AiChatService {
                 ?.get(OPENAI_INCOMPLETE_REASON_KEY)?.jsonPrimitive?.contentOrNull
                 ?.let { "OpenAI response incomplete: $it" }
                 ?: "OpenAI response incomplete"
-            STREAM_ERROR_KEY -> {
-                val error = event[STREAM_ERROR_KEY]
-                when (error) {
-                    is JsonObject -> error[STREAM_MESSAGE_KEY]?.jsonPrimitive?.contentOrNull ?: error.toString()
-                    is JsonPrimitive -> error.contentOrNull
-                    else -> event[STREAM_MESSAGE_KEY]?.jsonPrimitive?.contentOrNull ?: "Streaming API error"
-                }
-            }
+            STREAM_ERROR_KEY -> extractGenericStreamError(event)
             else -> null
+        }
+    }
+
+    private fun extractGenericStreamError(event: JsonObject): String? {
+        return when (val error = event[STREAM_ERROR_KEY]) {
+            is JsonObject -> error[STREAM_MESSAGE_KEY]?.jsonPrimitive?.contentOrNull ?: error.toString()
+            is JsonPrimitive -> error.contentOrNull
+            else -> event[STREAM_MESSAGE_KEY]?.jsonPrimitive?.contentOrNull ?: "Streaming API error"
         }
     }
 
