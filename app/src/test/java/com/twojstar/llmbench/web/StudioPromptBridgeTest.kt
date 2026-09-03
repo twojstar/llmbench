@@ -13,6 +13,8 @@ class StudioPromptBridgeTest {
         const val SAMPLE_PROFILE = "Profile"
         const val STUDIO_PROFILE = "Studio profile"
         const val INSERTED_RESULT = "inserted"
+        const val NO_EDITOR_RESULT = "no-editor"
+        const val OFF_PROVIDER_RESULT = "off-provider"
         const val INPUT_EVENTS = "beforeinput,input,change"
     }
 
@@ -58,7 +60,20 @@ class StudioPromptBridgeTest {
             runtimeHost = "accounts.example.com"
         )
 
-        assertEquals("off-provider", outcome.result)
+        assertEquals(OFF_PROVIDER_RESULT, outcome.result)
+        assertEquals("", outcome.value)
+        assertEquals("", outcome.events)
+    }
+
+    @Test
+    fun runtimeGuardRejectsSameProviderNavigationToDifferentDocument() {
+        val outcome = runApply(
+            targetSetup = textAreaSetup(value = "", active = true),
+            prompt = STUDIO_PROFILE,
+            runtimeHref = "https://chatgpt.com/settings"
+        )
+
+        assertEquals(OFF_PROVIDER_RESULT, outcome.result)
         assertEquals("", outcome.value)
         assertEquals("", outcome.events)
     }
@@ -82,7 +97,7 @@ class StudioPromptBridgeTest {
                 targetSetup = inputSetup(type = type, value = "", active = true),
                 prompt = STUDIO_PROFILE
             )
-            assertEquals("no-editor", outcome.result)
+            assertEquals(NO_EDITOR_RESULT, outcome.result)
             assertEquals("", outcome.value)
         }
     }
@@ -103,9 +118,9 @@ class StudioPromptBridgeTest {
             prompt = STUDIO_PROFILE
         )
 
-        assertEquals("no-editor", hidden.result)
-        assertEquals("no-editor", disabled.result)
-        assertEquals("no-editor", readOnly.result)
+        assertEquals(NO_EDITOR_RESULT, hidden.result)
+        assertEquals(NO_EDITOR_RESULT, disabled.result)
+        assertEquals(NO_EDITOR_RESULT, readOnly.result)
     }
 
     @Test
@@ -115,7 +130,7 @@ class StudioPromptBridgeTest {
             prompt = STUDIO_PROFILE
         )
 
-        assertEquals("no-editor", outcome.result)
+        assertEquals(NO_EDITOR_RESULT, outcome.result)
         assertEquals("", outcome.value)
     }
     @Test
@@ -128,7 +143,9 @@ class StudioPromptBridgeTest {
             context.optimizationLevel = -1
             context.languageVersion = Context.VERSION_ES6
             val scope = context.initStandardObjects()
-            val runtime = browserMocks.replace("__RUNTIME_HOST__", "chatgpt.com")
+            val runtime = browserMocks
+                .replace("__RUNTIME_HOST__", "chatgpt.com")
+                .replace("__RUNTIME_HREF__", CHATGPT_URL)
             context.evaluateString(scope, runtime, "tracker-setup", 1, null)
             context.evaluateString(scope, script, "tracker-install", 1, null)
             context.evaluateString(scope, textAreaSetup("", active = false), "tracker-target", 1, null)
@@ -186,7 +203,8 @@ class StudioPromptBridgeTest {
     private fun runApply(
         targetSetup: String,
         prompt: String,
-        runtimeHost: String = "chatgpt.com"
+        runtimeHost: String = "chatgpt.com",
+        runtimeHref: String = CHATGPT_URL
     ): ScriptOutcome {
         val script = requireNotNull(
             studioPromptApplyScript(
@@ -200,7 +218,9 @@ class StudioPromptBridgeTest {
             context.optimizationLevel = -1
             context.languageVersion = Context.VERSION_ES6
             val scope = context.initStandardObjects()
-            val runtime = browserMocks.replace("__RUNTIME_HOST__", runtimeHost)
+            val runtime = browserMocks
+                .replace("__RUNTIME_HOST__", runtimeHost)
+                .replace("__RUNTIME_HREF__", runtimeHref)
             context.evaluateString(scope, runtime + "\n" + targetSetup, "studio-setup", 1, null)
             val result = Context.toString(
                 context.evaluateString(scope, script, "studio-apply", 1, null)
@@ -263,6 +283,6 @@ class StudioPromptBridgeTest {
             addEventListener: function(type, listener) { this.listeners[type] = listener; }
         };
         var window = {};
-        var location = { protocol: 'https:', hostname: '__RUNTIME_HOST__' };
+        var location = { protocol: 'https:', hostname: '__RUNTIME_HOST__', href: '__RUNTIME_HREF__' };
     """.trimIndent()
 }

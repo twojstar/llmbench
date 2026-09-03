@@ -32,6 +32,18 @@ private fun providerRuntimeGuardScript(service: WebAiService, offProviderResult:
     """.trimIndent()
 }
 
+private fun documentRuntimeGuardScript(pageUrl: String, offProviderResult: String): String {
+    val expectedUrl = JSONObject.quote(pageUrl.substringBefore('#'))
+    return """
+        function llmbenchDocumentUrl(value) {
+            return String(value || '').split('#')[0];
+        }
+        if (llmbenchDocumentUrl(location.href) !== $expectedUrl) {
+            return $offProviderResult;
+        }
+    """.trimIndent()
+}
+
 private fun editableFinderScript(): String = """
     function llmbenchIsEligibleEditor(node) {
         if (!node || node.hidden === true || node.disabled === true || node.readOnly === true) return false;
@@ -72,6 +84,7 @@ internal fun studioPromptTargetTrackerScript(
     return """
         (() => {
             ${providerRuntimeGuardScript(service, "false")}
+            ${documentRuntimeGuardScript(pageUrl, "false")}
             ${editableFinderScript()}
             var key = ${JSONObject.quote(STUDIO_PROMPT_TRACKER_KEY)};
             var state = window[key] || { target: null, focusedAt: 0, installed: false, providerId: $providerId };
@@ -106,6 +119,7 @@ internal fun studioPromptApplyScript(
     return """
         (() => {
             ${providerRuntimeGuardScript(service, "'off-provider'")}
+            ${documentRuntimeGuardScript(pageUrl, "'off-provider'")}
             ${editableFinderScript()}
             var key = ${JSONObject.quote(STUDIO_PROMPT_TRACKER_KEY)};
             var state = window[key];
