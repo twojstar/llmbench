@@ -700,14 +700,12 @@ class AiChatService {
         isComplete: (JsonObject) -> Boolean,
         onTextDelta: (String) -> Unit
     ) {
-        try {
-            val text = readSseResponse(response, extractText, isComplete, onTextDelta)
-            if (continuation.isActive) continuation.resume(text)
-        } catch (cancelled: CancellationException) {
-            if (continuation.isActive) continuation.resumeWithException(cancelled)
-        } catch (e: IOException) {
-            if (continuation.isActive) continuation.resumeWithException(e)
-        }
+        val result = runCatching { readSseResponse(response, extractText, isComplete, onTextDelta) }
+        if (!continuation.isActive) return
+        result.fold(
+            onSuccess = continuation::resume,
+            onFailure = continuation::resumeWithException
+        )
     }
 
     internal fun readSseResponse(
@@ -716,42 +714,57 @@ class AiChatService {
         isComplete: (JsonObject) -> Boolean,
         onTextDelta: (String) -> Unit
     ): String {
+        validateStreamingResponse(response)
+        val source = response.body?.source() ?: throw IOException("Empty streaming response body")
         val collected = StringBuilder()
         var completed = false
         response.use {
-            if (!response.isSuccessful) {
-                val responseBody = response.body?.string().orEmpty()
-                throw IOException(
-                    parseErrorMessage(responseBody) ?: "HTTP ${response.code}: ${response.message}"
-                )
-            }
-            val source = response.body?.source() ?: throw IOException("Empty streaming response body")
             while (!source.exhausted()) {
-                val line = source.readUtf8Line() ?: break
-                if (!line.startsWith(SSE_DATA_PREFIX)) continue
-                val payload = line.removePrefix(SSE_DATA_PREFIX).trim()
-                val event = parseSseEvent(payload) ?: continue
-                val (delta, eventComplete) = try {
-                    extractStreamError(event)?.let { throw IOException(it) }
-                    extractText(event) to isComplete(event)
-                } catch (e: IllegalArgumentException) {
-                    throw IOException(MALFORMED_STREAM_EVENT, e)
-                }
-                delta?.takeIf { it.isNotEmpty() }?.let { text ->
-                    collected.append(text)
-                    val callbackFailure = runCatching { onTextDelta(text) }.exceptionOrNull()
-                    when (callbackFailure) {
-                        null -> Unit
-                        is CancellationException -> throw callbackFailure
-                        is RuntimeException -> throw IOException("Streaming text callback failed", callbackFailure)
-                        else -> throw callbackFailure
-                    }
-                }
-                if (eventComplete) completed = true
+                val event = source.readUtf8Line()?.toSseEvent() ?: continue
+                val (delta, eventComplete) = decodeSseEvent(event, extractText, isComplete)
+                appendStreamDelta(collected, delta, onTextDelta)
+                completed = completed || eventComplete
             }
         }
         if (!completed) throw IOException("Streaming response ended before completion")
         return collected.toString()
+    }
+
+    private fun validateStreamingResponse(response: Response) {
+        if (response.isSuccessful) return
+        val responseBody = response.body?.string().orEmpty()
+        throw IOException(parseErrorMessage(responseBody) ?: "HTTP ${response.code}: ${response.message}")
+    }
+
+    private fun String.toSseEvent(): JsonObject? {
+        if (!startsWith(SSE_DATA_PREFIX)) return null
+        return parseSseEvent(removePrefix(SSE_DATA_PREFIX).trim())
+    }
+
+    private fun decodeSseEvent(
+        event: JsonObject,
+        extractText: (JsonObject) -> String?,
+        isComplete: (JsonObject) -> Boolean
+    ): Pair<String?, Boolean> = try {
+        extractStreamError(event)?.let { throw IOException(it) }
+        extractText(event) to isComplete(event)
+    } catch (e: IllegalArgumentException) {
+        throw IOException(MALFORMED_STREAM_EVENT, e)
+    }
+
+    private fun appendStreamDelta(
+        collected: StringBuilder,
+        delta: String?,
+        onTextDelta: (String) -> Unit
+    ) {
+        val text = delta?.takeIf { it.isNotEmpty() } ?: return
+        collected.append(text)
+        val callbackFailure = runCatching { onTextDelta(text) }.exceptionOrNull() ?: return
+        when (callbackFailure) {
+            is CancellationException -> throw callbackFailure
+            is RuntimeException -> throw IOException("Streaming text callback failed", callbackFailure)
+            else -> throw callbackFailure
+        }
     }
 
     private fun parseSseEvent(payload: String): JsonObject? {
