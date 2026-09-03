@@ -257,7 +257,7 @@ class AiChatServiceTest {
             """{"type":"response.completed","response":{"id":"resp_1"}}"""
         ).jsonObject
         val openAiIncomplete = Json.parseToJsonElement(
-            """{"type":"response.incomplete","response":{"id":"resp_2"}}"""
+            """{"type":"response.incomplete","response":{"id":"resp_2","incomplete_details":{"reason":"max_output_tokens"}}}"""
         ).jsonObject
         val claude = Json.parseToJsonElement(
             """{"type":"message_delta","delta":{"stop_reason":"end_turn"}}"""
@@ -277,7 +277,7 @@ class AiChatServiceTest {
             """{"type":"response.completed","response":{"id":"resp_1"}}"""
         ).jsonObject
         val openAiIncomplete = Json.parseToJsonElement(
-            """{"type":"response.incomplete","response":{"id":"resp_2"}}"""
+            """{"type":"response.incomplete","response":{"id":"resp_2","incomplete_details":{"reason":"max_output_tokens"}}}"""
         ).jsonObject
         val claude = Json.parseToJsonElement(
             """{"type":"message_stop"}"""
@@ -285,7 +285,8 @@ class AiChatServiceTest {
 
         assertTrue(service.isGeminiStreamComplete(gemini))
         assertTrue(service.isOpenAiStreamComplete(openAi))
-        assertTrue(service.isOpenAiStreamComplete(openAiIncomplete))
+        assertFalse(service.isOpenAiStreamComplete(openAiIncomplete))
+        assertEquals("OpenAI response incomplete: max_output_tokens", service.extractStreamError(openAiIncomplete))
         assertTrue(service.isClaudeStreamComplete(claude))
     }
 

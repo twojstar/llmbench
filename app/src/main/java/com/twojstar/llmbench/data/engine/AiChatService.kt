@@ -42,6 +42,8 @@ private const val STREAM_RESPONSE_KEY = "response"
 private const val OPENAI_RESPONSE_FAILED = "response.failed"
 private const val OPENAI_RESPONSE_COMPLETED = "response.completed"
 private const val OPENAI_RESPONSE_INCOMPLETE = "response.incomplete"
+private const val OPENAI_INCOMPLETE_DETAILS_KEY = "incomplete_details"
+private const val OPENAI_INCOMPLETE_REASON_KEY = "reason"
 private const val CLAUDE_MESSAGE_STOP = "message_stop"
 private const val OPENAI_OUTPUT_TEXT = "output_text"
 private const val OPENAI_OUTPUT_TEXT_DELTA = "response.output_text.delta"
@@ -625,6 +627,11 @@ class AiChatService {
                 ?.get(STREAM_ERROR_KEY)?.jsonObject
                 ?.get(STREAM_MESSAGE_KEY)?.jsonPrimitive?.contentOrNull
                 ?: "OpenAI response failed"
+            OPENAI_RESPONSE_INCOMPLETE -> event[STREAM_RESPONSE_KEY]?.jsonObject
+                ?.get(OPENAI_INCOMPLETE_DETAILS_KEY)?.jsonObject
+                ?.get(OPENAI_INCOMPLETE_REASON_KEY)?.jsonPrimitive?.contentOrNull
+                ?.let { "OpenAI response incomplete: $it" }
+                ?: "OpenAI response incomplete"
             STREAM_ERROR_KEY -> {
                 val error = event[STREAM_ERROR_KEY]
                 when (error) {
@@ -643,8 +650,7 @@ class AiChatService {
             ?.get("finishReason")?.jsonPrimitive?.contentOrNull == "STOP"
 
     internal fun isOpenAiStreamComplete(event: JsonObject): Boolean =
-        event[STREAM_TYPE_KEY]?.jsonPrimitive?.contentOrNull in
-            setOf(OPENAI_RESPONSE_COMPLETED, OPENAI_RESPONSE_INCOMPLETE)
+        event[STREAM_TYPE_KEY]?.jsonPrimitive?.contentOrNull == OPENAI_RESPONSE_COMPLETED
 
     internal fun isClaudeStreamComplete(event: JsonObject): Boolean =
         event[STREAM_TYPE_KEY]?.jsonPrimitive?.contentOrNull == CLAUDE_MESSAGE_STOP
