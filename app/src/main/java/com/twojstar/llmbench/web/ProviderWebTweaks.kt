@@ -34,7 +34,8 @@ internal object ProviderWebTweakRegistry {
 
     // Canonical hosts come from WebAiService.url. Add only verified provider-owned aliases here.
     private val ownedHostAliases = mapOf(
-        WebAiService.KIMI to setOf("kimi.com")
+        WebAiService.KIMI to setOf("kimi.com"),
+        WebAiService.META_AI to setOf("alpha.meta.ai")
     )
 
     private val providerTweaks = WebAiService.entries.associateWith { listOf(mobileBaseline) }

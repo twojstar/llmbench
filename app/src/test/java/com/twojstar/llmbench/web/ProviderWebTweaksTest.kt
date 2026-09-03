@@ -30,6 +30,14 @@ class ProviderWebTweaksTest {
     }
 
     @Test
+    fun acceptsVerifiedMetaLoginAliasWithoutAcceptingSuffixSpoofs() {
+        assertTrue(providerHostMatches(WebAiService.META_AI, "alpha.meta.ai"))
+        assertTrue(providerHostMatches(WebAiService.META_AI, "www.alpha.meta.ai"))
+        assertFalse(providerHostMatches(WebAiService.META_AI, "notalpha.meta.ai"))
+        assertFalse(providerHostMatches(WebAiService.META_AI, "alpha.meta.ai.evil.example"))
+    }
+
+    @Test
     fun requiresHttpsForProviderPages() {
         assertTrue(providerUrlMatches(WebAiService.CHATGPT, "https://chatgpt.com/"))
         assertFalse(providerUrlMatches(WebAiService.CHATGPT, "http://chatgpt.com/"))
