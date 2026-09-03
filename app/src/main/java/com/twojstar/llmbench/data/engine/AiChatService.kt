@@ -703,7 +703,9 @@ class AiChatService {
         try {
             val text = readSseResponse(response, extractText, isComplete, onTextDelta)
             if (continuation.isActive) continuation.resume(text)
-        } catch (e: Exception) {
+        } catch (e: IOException) {
+            if (continuation.isActive) continuation.resumeWithException(e)
+        } catch (e: RuntimeException) {
             if (continuation.isActive) continuation.resumeWithException(e)
         }
     }
