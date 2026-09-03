@@ -63,8 +63,11 @@ import com.twojstar.llmbench.data.model.webChatActivityStatusAfterEviction
 import com.twojstar.llmbench.ui.theme.*
 import com.twojstar.llmbench.ui.viewmodel.StudioUiState
 import com.twojstar.llmbench.ui.viewmodel.StudioViewModel
+import com.twojstar.llmbench.web.StudioPromptApplyResult
 import com.twojstar.llmbench.web.applyProviderWebTweaks
+import com.twojstar.llmbench.web.applyStudioPromptToFocusedEditor
 import com.twojstar.llmbench.web.installProviderGenerationTracker
+import com.twojstar.llmbench.web.installStudioPromptTargetTracker
 import com.twojstar.llmbench.web.probeProviderGenerationActivity
 import com.twojstar.llmbench.web.providerUrlMatches
 import com.twojstar.llmbench.web.providerGenerationTrackingSupported
@@ -284,6 +287,39 @@ fun WebChatScreen(
 
     val activeWebView = webViewMap[selectedService]
     val isDesktopMode = desktopModes[selectedService] == true
+    val studioPrompt = uiState.renderedInstructions.ifBlank {
+        "You are an expert AI assistant configured via LlmBench."
+    }
+
+    fun copyStudioPrompt(message: String) {
+        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        clipboard.setPrimaryClip(ClipData.newPlainText("AI Profile Instructions", studioPrompt))
+        viewModel.showSnackbar(message)
+    }
+
+    fun applyStudioPrompt() {
+        val webView = activeWebView
+        if (webView == null) {
+            copyStudioPrompt("Provider is not ready yet; Studio instructions copied instead.")
+            return
+        }
+        applyStudioPromptToFocusedEditor(webView, selectedService, studioPrompt) { result ->
+            when (result) {
+                StudioPromptApplyResult.INSERTED ->
+                    viewModel.showSnackbar("Studio instructions inserted into ${selectedService.shortName}.")
+                StudioPromptApplyResult.NOT_EMPTY ->
+                    copyStudioPrompt("Composer already has text; Studio instructions copied instead.")
+                StudioPromptApplyResult.NO_EDITOR ->
+                    copyStudioPrompt("Tap the provider composer first; Studio instructions copied too.")
+                StudioPromptApplyResult.REJECTED ->
+                    copyStudioPrompt("The provider rejected insertion; Studio instructions copied instead.")
+                StudioPromptApplyResult.OFF_PROVIDER ->
+                    copyStudioPrompt("Return to the provider chat; Studio instructions copied instead.")
+                StudioPromptApplyResult.FAILED ->
+                    copyStudioPrompt("Could not insert Studio instructions; copied them instead.")
+            }
+        }
+    }
 
     BackHandler(enabled = canGoBack && drawerState.currentValue == DrawerValue.Closed) {
         activeWebView?.let {
@@ -343,6 +379,7 @@ fun WebChatScreen(
                     isLoading = isLoading,
                     loadingProgress = loadingProgress,
                     onOpenDrawer = { drawerScope.launch { drawerState.open() } },
+                    onApplyStudio = ::applyStudioPrompt,
                     onShowPromptHelper = { showPromptHelperDialog = true },
                     onToggleDesktopMode = {
                         val service = selectedService
@@ -497,12 +534,10 @@ fun WebChatScreen(
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     Text(
-                        text = "Copy instructions or prompts to paste directly into ${selectedService.shortName}:",
+                        text = "Tap ${selectedService.shortName}'s composer, then apply the current Studio profile. LlmBench only inserts into an empty focused editor.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-
-                    val renderedPrompt = uiState.renderedInstructions.ifBlank { "You are an expert AI assistant configured via LlmBench." }
 
                     OutlinedCard(
                         modifier = Modifier
@@ -510,7 +545,7 @@ fun WebChatScreen(
                             .heightIn(max = 180.dp)
                     ) {
                         Text(
-                            text = renderedPrompt,
+                            text = studioPrompt,
                             style = MaterialTheme.typography.bodySmall,
                             fontSize = 11.sp,
                             modifier = Modifier.padding(10.dp)
@@ -519,17 +554,27 @@ fun WebChatScreen(
 
                     Button(
                         onClick = {
-                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                            clipboard.setPrimaryClip(ClipData.newPlainText("AI Profile Instructions", renderedPrompt))
-                            viewModel.showSnackbar("Copied Studio instructions to clipboard!")
+                            applyStudioPrompt()
                             showPromptHelperDialog = false
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = AccentCyan),
                         modifier = Modifier.fillMaxWidth()
                     ) {
+                        Icon(Icons.Default.Tune, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Apply Studio to focused composer")
+                    }
+
+                    OutlinedButton(
+                        onClick = {
+                            copyStudioPrompt("Copied Studio instructions to clipboard.")
+                            showPromptHelperDialog = false
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
                         Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(Modifier.width(6.dp))
-                        Text("Copy Studio Instructions to Clipboard")
+                        Text("Copy Studio Instructions")
                     }
                 }
             },
@@ -587,6 +632,7 @@ private fun WebChatToolbar(
     isLoading: Boolean,
     loadingProgress: Int,
     onOpenDrawer: () -> Unit,
+    onApplyStudio: () -> Unit,
     onShowPromptHelper: () -> Unit,
     onToggleDesktopMode: () -> Unit,
     onShowSnackbar: (String) -> Unit
@@ -638,6 +684,15 @@ private fun WebChatToolbar(
                 Spacer(Modifier.width(8.dp))
                 WebProviderActivityIndicator(selectedService, activityStatus, brandColor)
                 Spacer(Modifier.weight(1f))
+
+                IconButton(
+                    onClick = onApplyStudio,
+                    modifier = Modifier
+                        .size(40.dp)
+                        .testTag("btn_web_apply_studio")
+                ) {
+                    Icon(Icons.Default.Tune, contentDescription = "Apply Studio profile")
+                }
 
                 Box {
                     IconButton(
@@ -1097,6 +1152,7 @@ private fun createConfiguredWebView(
                     onUrlChanged(pageUrl)
                     view?.let { webView ->
                         applyProviderWebTweaks(webView, service, pageUrl)
+                        installStudioPromptTargetTracker(webView, service, pageUrl)
                         installProviderGenerationTracker(
                             webView,
                             service,

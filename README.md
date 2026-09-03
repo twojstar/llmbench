@@ -114,6 +114,7 @@ Backends are optional, not the default. If a feature truly needs one, prefer a t
 - [x] migrate portable domain/provider logic to KMP `shared`
 - [x] add mobile WebView LRU/memory-pressure handling for long chats
 - [x] implement reliable provider file uploads through the platform file picker
+- [x] apply rendered Studio instructions to an empty focused web composer with clipboard fallback
 - [x] add Gemini AI Studio through a browser-backed platform flow
 - [x] add AIHubMix and OpenRouter-compatible free-provider gateways
 - [x] create a provider-tweak/userscript interface instead of hard-coded WebView hacks
