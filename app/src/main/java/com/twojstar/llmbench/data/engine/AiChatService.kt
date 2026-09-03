@@ -22,6 +22,7 @@ private const val JSON_ROLE_KEY = "role"
 private const val JSON_CONTENT_KEY = "content"
 private const val JSON_PARTS_KEY = "parts"
 private const val JSON_TEXT_KEY = "text"
+private const val JSON_MODEL_KEY = "model"
 
 class AiChatService {
 
@@ -114,7 +115,7 @@ class AiChatService {
                         id = id,
                         inputPriceUsd = pricing?.get("prompt").asDoubleOrNull(),
                         outputPriceUsd = pricing?.get("completion").asDoubleOrNull(),
-                        supportsTextOutput = outputModalities?.contains("text") == true
+                        supportsTextOutput = outputModalities?.contains(JSON_TEXT_KEY) == true
                     )
                 }
                 AiProvider.AIHUBMIX -> {
@@ -275,7 +276,7 @@ class AiChatService {
             prompt, conversationHistory, AiProvider.GEMINI, systemInstruction
         ).forEach { turn ->
             addJsonObject {
-                put(JSON_ROLE_KEY, if (turn.role == CHAT_ROLE_ASSISTANT) "model" else CHAT_ROLE_USER)
+                put(JSON_ROLE_KEY, if (turn.role == CHAT_ROLE_ASSISTANT) JSON_MODEL_KEY else CHAT_ROLE_USER)
                 putJsonArray(JSON_PARTS_KEY) {
                     addJsonObject { put(JSON_TEXT_KEY, turn.text) }
                 }
@@ -354,7 +355,7 @@ class AiChatService {
                 ?.get(JSON_CONTENT_KEY)?.jsonObject
                 ?.get(JSON_PARTS_KEY)?.jsonArray
                 .orEmpty()
-                .mapNotNull { it.jsonObject["text"]?.jsonPrimitive?.contentOrNull }
+                .mapNotNull { it.jsonObject[JSON_TEXT_KEY]?.jsonPrimitive?.contentOrNull }
                 .joinToString(separator = "")
                 .takeIf { it.isNotEmpty() }
 
@@ -373,7 +374,7 @@ class AiChatService {
         val url = "https://api.openai.com/v1/responses"
 
         val requestPayload = buildJsonObject {
-            put("model", model)
+            put(JSON_MODEL_KEY, model)
             put("input", buildOpenAiResponseInput(prompt, conversationHistory, systemInstruction))
             put("store", false)
             if (!systemInstruction.isNullOrBlank()) {
@@ -400,10 +401,10 @@ class AiChatService {
             val text = parsed["output"]?.jsonArray.orEmpty().asSequence()
                 .mapNotNull { it as? JsonObject }
                 .filter { it["type"]?.jsonPrimitive?.contentOrNull == "message" }
-                .flatMap { message -> message["content"]?.jsonArray.orEmpty().asSequence() }
+                .flatMap { message -> message[JSON_CONTENT_KEY]?.jsonArray.orEmpty().asSequence() }
                 .mapNotNull { it as? JsonObject }
                 .filter { it["type"]?.jsonPrimitive?.contentOrNull == "output_text" }
-                .mapNotNull { it["text"]?.jsonPrimitive?.contentOrNull }
+                .mapNotNull { it[JSON_TEXT_KEY]?.jsonPrimitive?.contentOrNull }
                 .joinToString(separator = "")
                 .takeIf { it.isNotEmpty() }
 
@@ -423,7 +424,7 @@ class AiChatService {
         val messagesArray = buildClaudeMessages(prompt, conversationHistory, systemInstruction)
 
         val requestPayload = buildJsonObject {
-            put("model", model)
+            put(JSON_MODEL_KEY, model)
             put("max_tokens", 2048)
             if (!systemInstruction.isNullOrBlank()) {
                 put("system", systemInstruction)
@@ -448,10 +449,10 @@ class AiChatService {
             }
 
             val parsed = json.parseToJsonElement(responseBody).jsonObject
-            val text = parsed["content"]?.jsonArray.orEmpty()
+            val text = parsed[JSON_CONTENT_KEY]?.jsonArray.orEmpty()
                 .mapNotNull { it as? JsonObject }
-                .filter { it["type"]?.jsonPrimitive?.contentOrNull == "text" }
-                .mapNotNull { it["text"]?.jsonPrimitive?.contentOrNull }
+                .filter { it["type"]?.jsonPrimitive?.contentOrNull == JSON_TEXT_KEY }
+                .mapNotNull { it[JSON_TEXT_KEY]?.jsonPrimitive?.contentOrNull }
                 .joinToString(separator = "")
                 .takeIf { it.isNotEmpty() }
 
@@ -477,7 +478,7 @@ class AiChatService {
         )
 
         val requestPayload = buildJsonObject {
-            put("model", model)
+            put(JSON_MODEL_KEY, model)
             put("messages", messagesArray)
         }
 
