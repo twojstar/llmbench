@@ -264,4 +264,33 @@ class AiChatServiceTest {
         assertEquals(null, service.extractClaudeStreamText(claude))
     }
 
+    @Test
+    fun recognizesNativeStreamingCompletionEvents() {
+        val service = AiChatService()
+        val gemini = Json.parseToJsonElement(
+            """{"candidates":[{"finishReason":"STOP"}]}"""
+        ).jsonObject
+        val openAi = Json.parseToJsonElement(
+            """{"type":"response.completed","response":{"id":"resp_1"}}"""
+        ).jsonObject
+        val claude = Json.parseToJsonElement(
+            """{"type":"message_stop"}"""
+        ).jsonObject
+
+        assertTrue(service.isGeminiStreamComplete(gemini))
+        assertTrue(service.isOpenAiStreamComplete(openAi))
+        assertTrue(service.isClaudeStreamComplete(claude))
+    }
+
+    @Test
+    fun extractsOpenAiResponseFailedError() {
+        val service = AiChatService()
+        val failed = Json.parseToJsonElement(
+            """{"type":"response.failed","response":{"error":{"message":"quota exhausted"}}}"""
+        ).jsonObject
+
+        assertEquals("quota exhausted", service.extractStreamError(failed))
+        assertFalse(service.isOpenAiStreamComplete(failed))
+    }
+
 }

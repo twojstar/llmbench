@@ -15,6 +15,7 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import java.util.concurrent.atomic.AtomicLong
 
 data class ChatMessage(
     val id: String,
@@ -75,7 +76,7 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
     private val _uiState = MutableStateFlow(StudioUiState())
     private val pendingGatewayCatalogRefreshes = mutableSetOf<AiProvider>()
     private var chatGenerationJob: Job? = null
-    private var activeChatGenerationId: Long = 0
+    private val activeChatGenerationId = AtomicLong(0)
     val uiState: StateFlow<StudioUiState> = _uiState.asStateFlow()
 
     init {
@@ -239,7 +240,7 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
 
     fun cancelChatGeneration() {
         if (!_uiState.value.isChatGenerating) return
-        activeChatGenerationId++
+        activeChatGenerationId.incrementAndGet()
         chatGenerationJob?.cancel()
         chatGenerationJob = null
         _uiState.update { state ->
@@ -266,9 +267,9 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
         model: String,
         delta: String
     ) {
-        if (delta.isEmpty() || generationId != activeChatGenerationId) return
+        if (delta.isEmpty() || generationId != activeChatGenerationId.get()) return
         _uiState.update { state ->
-            if (generationId != activeChatGenerationId) return@update state
+            if (generationId != activeChatGenerationId.get()) return@update state
             val index = state.chatMessages.indexOfFirst { it.id == messageId }
             val messages = if (index >= 0) {
                 state.chatMessages.toMutableList().apply {
@@ -294,9 +295,9 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
         provider: AiProvider,
         response: ModelChatMessage
     ) {
-        if (generationId != activeChatGenerationId) return
+        if (generationId != activeChatGenerationId.get()) return
         _uiState.update { state ->
-            if (generationId != activeChatGenerationId) return@update state
+            if (generationId != activeChatGenerationId.get()) return@update state
             val finalMessage = response.copy(id = messageId, isPartial = false)
             val index = state.chatMessages.indexOfFirst { it.id == messageId }
             val messages = if (index >= 0) {
@@ -341,7 +342,7 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
             timestamp = System.currentTimeMillis()
         )
         val currentMessages = state.chatMessages + userMessage
-        val generationId = ++activeChatGenerationId
+        val generationId = activeChatGenerationId.incrementAndGet()
 
         _uiState.update {
             it.copy(
@@ -396,7 +397,7 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
                     )
                 }
             } finally {
-                if (generationId == activeChatGenerationId) {
+                if (generationId == activeChatGenerationId.get()) {
                     chatGenerationJob = null
                     _uiState.update {
                         it.copy(

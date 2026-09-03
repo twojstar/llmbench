@@ -11,22 +11,28 @@ import com.twojstar.llmbench.data.model.freeGatewayModelOptions
 import com.twojstar.llmbench.data.model.Profile
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.*
 import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.Call
+import okhttp3.Callback
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.Response
 import okhttp3.RequestBody.Companion.toRequestBody
+import java.io.IOException
 import java.util.concurrent.TimeUnit
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 
 private const val JSON_ROLE_KEY = "role"
 private const val JSON_CONTENT_KEY = "content"
 private const val JSON_PARTS_KEY = "parts"
 private const val JSON_TEXT_KEY = "text"
 private const val JSON_MODEL_KEY = "model"
+private const val SSE_DATA_PREFIX = "data:"
+private const val SSE_DONE = "[DONE]"
 
 class AiChatService {
 
@@ -532,7 +538,7 @@ class AiChatService {
             .url(url)
             .post(requestPayload.toString().toRequestBody("application/json".toMediaType()))
             .build()
-        return executeSse(request, ::extractGeminiStreamText, onTextDelta)
+        return executeSse(request, ::extractGeminiStreamText, ::isGeminiStreamComplete, onTextDelta)
             .ifEmpty { "Received empty content response from Gemini." }
     }
 
@@ -557,7 +563,7 @@ class AiChatService {
             .addHeader("Content-Type", "application/json")
             .post(requestPayload.toString().toRequestBody("application/json".toMediaType()))
             .build()
-        return executeSse(request, ::extractOpenAiStreamText, onTextDelta)
+        return executeSse(request, ::extractOpenAiStreamText, ::isOpenAiStreamComplete, onTextDelta)
             .ifEmpty { "Received empty message content from OpenAI." }
     }
 
@@ -583,53 +589,117 @@ class AiChatService {
             .addHeader("content-type", "application/json")
             .post(requestPayload.toString().toRequestBody("application/json".toMediaType()))
             .build()
-        return executeSse(request, ::extractClaudeStreamText, onTextDelta)
+        return executeSse(request, ::extractClaudeStreamText, ::isClaudeStreamComplete, onTextDelta)
             .ifEmpty { "Received empty content block from Claude." }
     }
+
+    internal fun extractStreamError(event: JsonObject): String? {
+        val type = event["type"]?.jsonPrimitive?.contentOrNull
+        return when (type) {
+            "response.failed" -> event["response"]?.jsonObject
+                ?.get("error")?.jsonObject
+                ?.get("message")?.jsonPrimitive?.contentOrNull
+                ?: "OpenAI response failed"
+            "error" -> {
+                val error = event["error"]
+                when (error) {
+                    is JsonObject -> error["message"]?.jsonPrimitive?.contentOrNull ?: error.toString()
+                    is JsonPrimitive -> error.contentOrNull
+                    else -> event["message"]?.jsonPrimitive?.contentOrNull ?: "Streaming API error"
+                }
+            }
+            else -> null
+        }
+    }
+
+    internal fun isGeminiStreamComplete(event: JsonObject): Boolean =
+        event["candidates"]?.jsonArray
+            ?.firstOrNull()?.jsonObject
+            ?.get("finishReason")?.jsonPrimitive?.contentOrNull != null
+
+    internal fun isOpenAiStreamComplete(event: JsonObject): Boolean =
+        event["type"]?.jsonPrimitive?.contentOrNull == "response.completed"
+
+    internal fun isClaudeStreamComplete(event: JsonObject): Boolean =
+        event["type"]?.jsonPrimitive?.contentOrNull == "message_stop"
 
     private suspend fun executeSse(
         request: Request,
         extractText: (JsonObject) -> String?,
+        isComplete: (JsonObject) -> Boolean,
         onTextDelta: (String) -> Unit
-    ): String {
+    ): String = suspendCancellableCoroutine { continuation ->
         val call = streamingHttpClient.newCall(request)
-        val cancellationHandle = currentCoroutineContext()[Job]?.invokeOnCompletion { cause ->
-            if (cause is CancellationException) call.cancel()
-        }
-        val collected = StringBuilder()
-        try {
-            call.execute().use { response ->
-                if (!response.isSuccessful) {
-                    val responseBody = response.body?.string().orEmpty()
-                    val errorMsg = parseErrorMessage(responseBody)
-                        ?: "HTTP ${response.code}: ${response.message}"
-                    throw Exception(errorMsg)
-                }
-                val source = response.body?.source() ?: throw Exception("Empty streaming response body")
-                while (!source.exhausted()) {
-                    currentCoroutineContext().ensureActive()
-                    val line = source.readUtf8Line() ?: break
-                    if (!line.startsWith("data:")) continue
-                    val payload = line.removePrefix("data:").trim()
-                    if (payload.isBlank() || payload == "[DONE]") continue
-                    val event = runCatching { json.parseToJsonElement(payload).jsonObject }.getOrNull() ?: continue
-                    if (event["type"]?.jsonPrimitive?.contentOrNull == "error") {
-                        throw Exception(parseErrorMessage(payload) ?: event.toString())
+        continuation.invokeOnCancellation { call.cancel() }
+        call.enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) {
+                if (continuation.isActive) continuation.resumeWithException(e)
+            }
+
+            override fun onResponse(call: Call, response: Response) {
+                try {
+                    val collected = StringBuilder()
+                    var completed = false
+                    response.use {
+                        if (!response.isSuccessful) {
+                            val responseBody = response.body?.string().orEmpty()
+                            throw IOException(
+                                parseErrorMessage(responseBody) ?: "HTTP ${response.code}: ${response.message}"
+                            )
+                        }
+                        val source = response.body?.source() ?: throw IOException("Empty streaming response body")
+                        while (!source.exhausted()) {
+                            val line = source.readUtf8Line() ?: break
+                            if (!line.startsWith(SSE_DATA_PREFIX)) continue
+                            val payload = line.removePrefix(SSE_DATA_PREFIX).trim()
+                            if (payload.isBlank() || payload == SSE_DONE) continue
+                            val event = json.parseToJsonElement(payload).jsonObject
+                            extractStreamError(event)?.let { throw IOException(it) }
+                            extractText(event)?.takeIf { it.isNotEmpty() }?.let { delta ->
+                                collected.append(delta)
+                                onTextDelta(delta)
+                            }
+                            if (isComplete(event)) completed = true
+                        }
                     }
-                    extractText(event)?.takeIf { it.isNotEmpty() }?.let { delta ->
-                        collected.append(delta)
-                        onTextDelta(delta)
-                    }
+                    if (!completed) throw IOException("Streaming response ended before completion")
+                    if (continuation.isActive) continuation.resume(collected.toString())
+                } catch (e: Exception) {
+                    if (continuation.isActive) continuation.resumeWithException(e)
                 }
             }
-        } finally {
-            cancellationHandle?.dispose()
-        }
-        return collected.toString()
+        })
     }
 
+    private suspend fun executeCancellableJson(request: Request): String =
+        suspendCancellableCoroutine { continuation ->
+            val call = httpClient.newCall(request)
+            continuation.invokeOnCancellation { call.cancel() }
+            call.enqueue(object : Callback {
+                override fun onFailure(call: Call, e: IOException) {
+                    if (continuation.isActive) continuation.resumeWithException(e)
+                }
+
+                override fun onResponse(call: Call, response: Response) {
+                    try {
+                        response.use {
+                            val responseBody = response.body?.string() ?: throw IOException("Empty response from server")
+                            if (!response.isSuccessful) {
+                                throw IOException(
+                                    parseErrorMessage(responseBody) ?: "HTTP ${response.code}: ${response.message}"
+                                )
+                            }
+                            if (continuation.isActive) continuation.resume(responseBody)
+                        }
+                    } catch (e: Exception) {
+                        if (continuation.isActive) continuation.resumeWithException(e)
+                    }
+                }
+            })
+        }
+
     // --- OpenAI-compatible provider/gateway boundary ---
-    private fun callOpenAiCompatibleApi(
+    private suspend fun callOpenAiCompatibleApi(
         config: OpenAiCompatibleProviderConfig,
         prompt: String,
         model: String,
@@ -658,21 +728,14 @@ class AiChatService {
         config.extraHeaders.forEach { (name, value) -> requestBuilder.addHeader(name, value) }
         val request = requestBuilder.post(body).build()
 
-        httpClient.newCall(request).execute().use { response ->
-            val responseBody = response.body?.string() ?: throw Exception("Empty response from server")
-            if (!response.isSuccessful) {
-                val errorMsg = parseErrorMessage(responseBody) ?: "HTTP ${response.code}: ${response.message}"
-                throw Exception(errorMsg)
-            }
+        val responseBody = executeCancellableJson(request)
+        val parsed = json.parseToJsonElement(responseBody).jsonObject
+        val choices = parsed["choices"]?.jsonArray
+        val firstChoice = choices?.getOrNull(0)?.jsonObject
+        val message = firstChoice?.get("message")?.jsonObject
+        val content = message?.get(JSON_CONTENT_KEY)?.jsonPrimitive?.contentOrNull
 
-            val parsed = json.parseToJsonElement(responseBody).jsonObject
-            val choices = parsed["choices"]?.jsonArray
-            val firstChoice = choices?.getOrNull(0)?.jsonObject
-            val message = firstChoice?.get("message")?.jsonObject
-            val content = message?.get(JSON_CONTENT_KEY)?.jsonPrimitive?.contentOrNull
-
-            return content ?: "Received empty message content."
-        }
+        return content ?: "Received empty message content."
     }
 
     internal fun buildOpenAiCompatibleMessages(
