@@ -72,6 +72,7 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
     private val apiKeyStore = ApiKeyStore(application.applicationContext)
 
     private val _uiState = MutableStateFlow(StudioUiState())
+    private val pendingGatewayCatalogRefreshes = mutableSetOf<AiProvider>()
     val uiState: StateFlow<StudioUiState> = _uiState.asStateFlow()
 
     init {
@@ -143,7 +144,10 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
     fun refreshGatewayModelCatalog(provider: AiProvider) {
         if (!provider.usesLiveFreeModelCatalog()) return
         val state = _uiState.value
-        if (provider in state.refreshingGatewayCatalogs) return
+        if (provider in state.refreshingGatewayCatalogs) {
+            pendingGatewayCatalogRefreshes += provider
+            return
+        }
         val apiKeys = state.apiKeyConfig
         _uiState.update {
             it.copy(refreshingGatewayCatalogs = it.refreshingGatewayCatalogs + provider)
@@ -175,6 +179,9 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
             } finally {
                 _uiState.update {
                     it.copy(refreshingGatewayCatalogs = it.refreshingGatewayCatalogs - provider)
+                }
+                if (pendingGatewayCatalogRefreshes.remove(provider)) {
+                    refreshGatewayModelCatalog(provider)
                 }
             }
         }
