@@ -264,8 +264,9 @@ class AiChatService {
                         activeProfileNotes = activeNotes
                     )
                 }
+            } catch (cancelled: CancellationException) { // skipcq: KT-W1064 - Cancellation propagates from suspend provider calls.
+                throw cancelled
             } catch (e: Exception) {
-                if (e is CancellationException) throw e
                 val latency = System.currentTimeMillis() - startTime
                 val errorDetails = e.localizedMessage ?: e.message ?: "Unknown error"
                 if (!allowSimulationFallback) {
