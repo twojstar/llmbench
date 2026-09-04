@@ -161,6 +161,12 @@ jobs:
           old_moved=false
           promoted=false
 
+          release_id_for_tag() {
+            local wanted="$1"
+            gh api --paginate "repos/$GH_REPO/releases?per_page=100" \
+              --jq ".[] | select(.tag_name == \"$wanted\") | .id"
+          }
+
           cleanup_failed_promotion() {
             status=$?
             trap - EXIT
@@ -179,7 +185,7 @@ jobs:
                 || gh api --method DELETE "repos/$GH_REPO/releases/$release_id" >/dev/null 2>&1 \
                 || true
             else
-              staged_id="$(gh api "repos/$GH_REPO/releases/tags/$stage" --jq .id 2>/dev/null || true)"
+              staged_id="$(release_id_for_tag "$stage" 2>/dev/null || true)"
               if [ -n "$staged_id" ]; then
                 gh api --method DELETE "repos/$GH_REPO/releases/$staged_id" >/dev/null 2>&1 || true
               fi
@@ -236,10 +242,14 @@ jobs:
           printf 'Signed Android builds from `%s`.\n\nRolling release. Assets are replaced after each successful build of `main`.\nApp version: `%s`.\n' \
             "$GITHUB_SHA" "$RELEASE_VERSION" > release-notes.md
 
-          gh release create "$stage" --draft --target "$GITHUB_SHA" \
+          gh release create "$stage" dist/llmbench.apk dist/llmbench.aab \
+            --draft --target "$GITHUB_SHA" \
             --title "LlmBench · rolling" --notes-file release-notes.md
-          release_id="$(gh api "repos/$GH_REPO/releases/tags/$stage" --jq .id)"
-          gh release upload "$stage" dist/llmbench.apk dist/llmbench.aab
+          release_id="$(release_id_for_tag "$stage")"
+          if [ -z "$release_id" ]; then
+            echo "::error::Could not resolve the staged draft release."
+            exit 1
+          fi
 
           asset_count="$(gh api "repos/$GH_REPO/releases/$release_id/assets" --jq 'length')"
           test "$asset_count" -eq 2
