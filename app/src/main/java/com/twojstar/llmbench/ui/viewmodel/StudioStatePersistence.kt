@@ -48,13 +48,13 @@ internal fun StudioViewModel.restoreStudioSnapshot(snapshot: StudioStateSnapshot
 
     restoreEditableBaseProfile(snapshot.baseProfile)
 
+    val selectedBuiltInOverlayId = snapshot.selectedBuiltInOverlayId
+    val selectedCustomOverlayIndex = snapshot.selectedCustomOverlayIndex
     val selectedOverlay = when {
-        snapshot.selectedBuiltInOverlayId != null -> builtIns.firstOrNull {
-            it.id == snapshot.selectedBuiltInOverlayId
+        selectedBuiltInOverlayId != null -> builtIns.firstOrNull {
+            it.id == selectedBuiltInOverlayId
         }
-        snapshot.selectedCustomOverlayIndex != null -> restoredCustoms.getOrNull(
-            snapshot.selectedCustomOverlayIndex
-        )
+        selectedCustomOverlayIndex != null -> restoredCustoms.getOrNull(selectedCustomOverlayIndex)
         else -> null
     }
     applyOverlay(selectedOverlay)
