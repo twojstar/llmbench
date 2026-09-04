@@ -24,6 +24,7 @@ import com.twojstar.llmbench.ui.viewmodel.NavigationTab
 import com.twojstar.llmbench.ui.viewmodel.StudioViewModel
 import com.twojstar.llmbench.ui.viewmodel.restoreStudioSnapshot
 import com.twojstar.llmbench.ui.viewmodel.toStudioStateSnapshot
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
