@@ -162,9 +162,17 @@ jobs:
           promoted=false
 
           release_id_for_tag() {
-            local wanted="$1"
-            gh api --paginate "repos/$GH_REPO/releases?per_page=100" \
-              --jq ".[] | select(.tag_name == \"$wanted\") | .id"
+            local wanted="$1" attempt output
+            for attempt in 1 2 3; do
+              if output="$(gh api --paginate "repos/$GH_REPO/releases?per_page=100" \
+                --jq ".[] | select(.tag_name == \"$wanted\") | .id" 2>&1)"; then
+                printf '%s\n' "$output"
+                return 0
+              fi
+              [ "$attempt" -eq 3 ] || sleep "$attempt"
+            done
+            printf '%s\n' "$output" >&2
+            return 1
           }
 
           cleanup_failed_promotion() {
@@ -185,9 +193,12 @@ jobs:
                 || gh api --method DELETE "repos/$GH_REPO/releases/$release_id" >/dev/null 2>&1 \
                 || true
             else
-              staged_id="$(release_id_for_tag "$stage" 2>/dev/null || true)"
-              if [ -n "$staged_id" ]; then
-                gh api --method DELETE "repos/$GH_REPO/releases/$staged_id" >/dev/null 2>&1 || true
+              if staged_id="$(release_id_for_tag "$stage")"; then
+                if [ -n "$staged_id" ]; then
+                  gh api --method DELETE "repos/$GH_REPO/releases/$staged_id" >/dev/null 2>&1 || true
+                fi
+              else
+                echo "::warning::Could not query the staged draft release after retries; manual cleanup may be required."
               fi
             fi
 
