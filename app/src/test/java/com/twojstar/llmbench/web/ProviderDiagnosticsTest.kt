@@ -78,34 +78,53 @@ class ProviderDiagnosticsTest {
     }
 
     @Test
+    fun probeScriptAddsStructuralSignalsWithoutReadingUserContent() {
+        val script = requireNotNull(
+            providerDiagnosticsProbeScript(WebAiService.QWEN, "https://qwen.ai/")
+        )
+
+        assertTrue(script.contains("autocomplete~=\"username\""))
+        assertTrue(script.contains("input[type=\"password\"]"))
+        assertTrue(script.contains("node.multiple === true"))
+        assertTrue(!script.contains(".value"))
+        assertTrue(!script.contains("innerText"))
+        assertTrue(!script.contains("textContent"))
+        assertTrue(!script.contains("outerHTML"))
+    }
+
+    @Test
     fun parserAcceptsNonNegativeCapabilityCountsAndKnownEditorKinds() {
         assertEquals(
             ProviderDiagnosticsProbeResult.Ready(
                 ProviderDomCapabilities(
                     textareas = 2,
                     contentEditables = 1,
+                    identityInputs = 1,
+                    passwordInputs = 1,
                     fileInputs = 3,
+                    multipleFileInputs = 2,
                     activeEditorKind = "textarea"
                 )
             ),
-            parseProviderDiagnosticsProbeResult("\"2|1|3|textarea\"")
+            parseProviderDiagnosticsProbeResult("\"2|1|1|1|3|2|textarea\"")
         )
         assertEquals(
             ProviderDiagnosticsProbeResult.Ready(
                 ProviderDomCapabilities(
                     textareas = 0,
                     contentEditables = 0,
+                    identityInputs = 0,
+                    passwordInputs = 0,
                     fileInputs = 0,
+                    multipleFileInputs = 0,
                     activeEditorKind = null
                 )
             ),
-            parseProviderDiagnosticsProbeResult("\"0|0|0|none\"")
+            parseProviderDiagnosticsProbeResult("\"0|0|0|0|0|0|none\"")
         )
         assertEquals(
-            ProviderDiagnosticsProbeResult.Ready(
-                ProviderDomCapabilities(1, 0, 0, null)
-            ),
-            parseProviderDiagnosticsProbeResult("\"1|0|0|unexpected\"")
+            ProviderDiagnosticsProbeResult.Failed,
+            parseProviderDiagnosticsProbeResult("\"1|0|0|0|0|0|unexpected\"")
         )
     }
 
@@ -124,7 +143,8 @@ class ProviderDiagnosticsTest {
             fileChooserHost = "chat.example.test",
             fileChooserAcceptTypes = "image/*",
             fileChooserOutcome = "selected (1)",
-            domProbeSummary = "textarea=1, contenteditable=0, file=1, active=textarea"
+            domProbeSummary = "textarea=1, contenteditable=0, identity=1, password=1, " +
+                "file=1, multi-file=0, active=textarea"
         ).safeReport()
 
         assertTrue(report.contains("Host: chat.example.test"))
@@ -143,7 +163,11 @@ class ProviderDiagnosticsTest {
         )
         assertEquals(
             ProviderDiagnosticsProbeResult.Failed,
-            parseProviderDiagnosticsProbeResult("\"-1|0|0|none\"")
+            parseProviderDiagnosticsProbeResult("\"-1|0|0|0|0|0|none\"")
+        )
+        assertEquals(
+            ProviderDiagnosticsProbeResult.Failed,
+            parseProviderDiagnosticsProbeResult("\"0|0|0|0|1|2|none\"")
         )
         assertEquals(
             ProviderDiagnosticsProbeResult.Failed,
