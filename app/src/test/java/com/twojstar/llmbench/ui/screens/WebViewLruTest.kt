@@ -1,5 +1,6 @@
 package com.twojstar.llmbench.ui.screens
 
+import android.view.View
 import com.twojstar.llmbench.data.model.WebAiService
 import org.junit.Assert.assertEquals
 import org.junit.Test
@@ -18,5 +19,10 @@ class WebViewLruTest {
 
         val revisit = nextWebViewLru(eviction, WebAiService.CHATGPT)
         assertEquals(listOf(WebAiService.CHATGPT, WebAiService.GEMINI), revisit)
+    }
+    @Test
+    fun hidesInactiveProviderWebViewsAtTheViewLevel() {
+        assertEquals(View.VISIBLE, providerWebViewVisibility(isCurrentService = true))
+        assertEquals(View.GONE, providerWebViewVisibility(isCurrentService = false))
     }
 }
