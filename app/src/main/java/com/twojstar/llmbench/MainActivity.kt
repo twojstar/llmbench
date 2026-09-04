@@ -16,21 +16,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.lifecycleScope
-import com.twojstar.llmbench.data.preferences.StudioStateStore
 import com.twojstar.llmbench.ui.screens.*
 import com.twojstar.llmbench.ui.theme.LlmBenchTheme
 import com.twojstar.llmbench.ui.viewmodel.NavigationTab
 import com.twojstar.llmbench.ui.viewmodel.StudioViewModel
-import com.twojstar.llmbench.ui.viewmodel.restoreStudioSnapshot
-import com.twojstar.llmbench.ui.viewmodel.toStudioStateSnapshot
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.collect
-import kotlinx.coroutines.flow.conflate
-import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 internal fun profilePlaygroundDestination(): NavigationTab = NavigationTab.PLAYGROUND
 
@@ -43,20 +32,6 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-
-        val studioStateStore = StudioStateStore(applicationContext)
-        studioStateStore.load()?.let { snapshot -> viewModel.restoreStudioSnapshot(snapshot) }
-        lifecycleScope.launch {
-            viewModel.uiState
-                .map { it.toStudioStateSnapshot() }
-                .distinctUntilChanged()
-                .conflate()
-                .collect { snapshot ->
-                    withContext(Dispatchers.IO) {
-                        studioStateStore.save(snapshot)
-                    }
-                }
-        }
 
         setContent {
             LlmBenchTheme {
