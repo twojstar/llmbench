@@ -81,31 +81,29 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
     private val pendingGatewayCatalogRefreshes = mutableSetOf<AiProvider>()
     private var chatGenerationJob: Job? = null
     private var studioPersistenceJob: Job? = null
+    private var studioPersistenceOwnerId: Long? = null
     private val activeChatGenerationId = AtomicLong(0)
     val uiState: StateFlow<StudioUiState> = _uiState.asStateFlow()
 
     init {
         _uiState.update { it.copy(apiKeyConfig = apiKeyStore.load()) }
-        val persistedStudioState = StudioStateWriter.currentSnapshot()
+        val cachedStudioState = StudioStateWriter.currentSnapshot()
+        val primaryStudioState = cachedStudioState
             ?.let(StudioStateDecodeResult::Success)
             ?: studioStateStore.load()
-        val persistenceEnabled = when (persistedStudioState) {
-            is StudioStateDecodeResult.Success -> {
-                restoreStudioSnapshot(persistedStudioState.snapshot)
-                true
-            }
-            is StudioStateDecodeResult.UnsupportedVersion -> {
-                recompute()
-                false
-            }
-            StudioStateDecodeResult.MissingOrInvalid -> {
-                recompute()
-                true
-            }
+        val useFallbackPersistence = primaryStudioState is StudioStateDecodeResult.UnsupportedVersion
+        val persistedStudioState = if (useFallbackPersistence && cachedStudioState == null) {
+            studioStateStore.loadFallback()
+        } else {
+            primaryStudioState
+        }
+        when (persistedStudioState) {
+            is StudioStateDecodeResult.Success -> restoreStudioSnapshot(persistedStudioState.snapshot)
+            else -> recompute()
         }
         initPlaygroundWelcome()
         initChatWelcome()
-        if (persistenceEnabled) startStudioPersistence()
+        startStudioPersistence(useFallbackPersistence)
     }
 
     private fun initPlaygroundWelcome() {
@@ -716,21 +714,25 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    private fun startStudioPersistence() {
-        val writer = StudioStateWriter.getInstance(studioStateStore).also { studioStateWriter = it }
-        writer.enqueue(uiState.value.toStudioStateSnapshot())
+    private fun startStudioPersistence(useFallback: Boolean) {
+        val writer = StudioStateWriter.getInstance(studioStateStore, fallback = useFallback)
+            .also { studioStateWriter = it }
+        val ownerId = writer.registerOwner().also { studioPersistenceOwnerId = it }
+        writer.enqueue(uiState.value.toStudioStateSnapshot(), ownerId)
         studioPersistenceJob = viewModelScope.launch {
             uiState
                 .map { it.toStudioStateSnapshot() }
                 .distinctUntilChanged()
-                .collect { snapshot -> writer.enqueue(snapshot) }
+                .collect { snapshot -> writer.enqueue(snapshot, ownerId) }
         }
     }
 
     override fun onCleared() {
         val latestSnapshot = uiState.value.toStudioStateSnapshot()
         studioPersistenceJob?.cancel()
-        studioStateWriter?.enqueue(latestSnapshot)
+        studioPersistenceOwnerId?.let { ownerId ->
+            studioStateWriter?.enqueue(latestSnapshot, ownerId)
+        }
         super.onCleared()
     }
 
