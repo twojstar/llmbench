@@ -70,6 +70,8 @@ Google documents the embedded-user-agent restriction in its [OAuth 2.0 policies]
 
 Account sessions persist, but LlmBench must not keep every heavy provider SPA alive forever. The Android host uses a small LRU pool, pauses inactive WebViews and evicts them under memory pressure while cookies/session state remain provider-owned. Provider tweaks live in a small, auditable in-app registry: scripts are static, scoped to the matching provider host and applied after page load; remote userscript code is never fetched.
 
+Provider diagnostics expose only the provider host, WebView package/version, capability counts, activity-tracking support and file-picker events. They never collect page text, full URLs, form values, file names, cookies or authentication tokens.
+
 LlmBench must not scrape passwords, session cookies, OAuth tokens or other login credentials. Authentication remains between the embedded provider page and that provider.
 
 ## Relationship to `.ai`
@@ -118,6 +120,7 @@ Backends are optional, not the default. If a feature truly needs one, prefer a t
 - [x] add Gemini AI Studio through a browser-backed platform flow
 - [x] add AIHubMix and OpenRouter-compatible free-provider gateways
 - [x] create a provider-tweak/userscript interface instead of hard-coded WebView hacks
+- [x] add privacy-safe provider diagnostics for embedded capability verification
 - [x] show generating and unread response status on ChatGPT, Claude, Gemini, DeepSeek, Kimi and Vibe web tabs
 - [x] add Qwen, Microsoft Copilot, Z.ai, Grok, Character.AI, Venice and Meta AI account-backed WebView entries
 - [ ] verify embedded sign-in, embedded upload flows and provider-specific generation activity probes for Qwen, Copilot, Z.ai, Grok, Character.AI, Venice and Meta AI
