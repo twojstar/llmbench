@@ -3,34 +3,59 @@ package com.twojstar.llmbench.ui.viewmodel
 import com.twojstar.llmbench.data.model.PresetProfiles
 import com.twojstar.llmbench.data.model.Profile
 import com.twojstar.llmbench.data.model.ProfileOverlay
-import com.twojstar.llmbench.data.preferences.StudioStateSnapshot
+import com.twojstar.llmbench.data.model.StudioStateSnapshot
 
 private val SUPPORTED_RENDER_LANGUAGES = setOf("auto", "en", "pl")
 
 internal fun StudioUiState.toStudioStateSnapshot(): StudioStateSnapshot {
-    val builtInIds = PresetProfiles.BuiltInOverlays.mapTo(mutableSetOf()) { it.id }
+    val builtIns = PresetProfiles.BuiltInOverlays
+    val customOverlays = availableOverlays.filterNot { candidate ->
+        builtIns.any { builtIn -> builtIn === candidate }
+    }
+    val selectedBuiltIn = selectedOverlay?.let { selected ->
+        builtIns.firstOrNull { builtIn -> builtIn === selected }
+    }
+    val selectedCustomIndex = selectedOverlay?.let { selected ->
+        customOverlays.indexOfFirst { custom -> custom === selected }.takeIf { it >= 0 }
+    }
+
     return StudioStateSnapshot(
         baseProfile = baseProfile,
-        selectedOverlayId = selectedOverlay?.id,
-        customOverlays = availableOverlays
-            .filterNot { it.id in builtInIds }
-            .distinctBy { it.id },
+        selectedBuiltInOverlayId = selectedBuiltIn?.id,
+        selectedCustomOverlayIndex = selectedCustomIndex,
+        customOverlays = customOverlays,
         language = language
     )
 }
 
 internal fun StudioViewModel.restoreStudioSnapshot(snapshot: StudioStateSnapshot) {
-    val builtInIds = PresetProfiles.BuiltInOverlays.mapTo(mutableSetOf()) { it.id }
+    val builtIns = PresetProfiles.BuiltInOverlays
+    val existingCustoms = uiState.value.availableOverlays
+        .filterNot { candidate -> builtIns.any { builtIn -> builtIn === candidate } }
+        .toMutableList()
+    val occupiedIds = uiState.value.availableOverlays.mapTo(mutableSetOf()) { it.id }
 
-    snapshot.customOverlays
-        .filterNot { it.id in builtInIds }
-        .distinctBy { it.id }
-        .forEach { overlay -> restoreCustomOverlay(overlay) }
+    val restoredCustoms = snapshot.customOverlays.map { persisted ->
+        val existingIndex = existingCustoms.indexOfFirst { existing ->
+            existing.matchesPersistedCustom(persisted)
+        }
+        if (existingIndex >= 0) {
+            existingCustoms.removeAt(existingIndex)
+        } else {
+            restoreCustomOverlay(persisted, occupiedIds)
+        }
+    }
 
     restoreEditableBaseProfile(snapshot.baseProfile)
 
-    val selectedOverlay = snapshot.selectedOverlayId?.let { selectedId ->
-        uiState.value.availableOverlays.firstOrNull { it.id == selectedId }
+    val selectedOverlay = when {
+        snapshot.selectedBuiltInOverlayId != null -> builtIns.firstOrNull {
+            it.id == snapshot.selectedBuiltInOverlayId
+        }
+        snapshot.selectedCustomOverlayIndex != null -> restoredCustoms.getOrNull(
+            snapshot.selectedCustomOverlayIndex
+        )
+        else -> null
     }
     applyOverlay(selectedOverlay)
     setLanguage(snapshot.language.takeIf { it in SUPPORTED_RENDER_LANGUAGES } ?: "auto")
@@ -40,7 +65,34 @@ internal fun StudioViewModel.restoreStudioSnapshot(snapshot: StudioStateSnapshot
     dismissSnackbar()
 }
 
-private fun StudioViewModel.restoreCustomOverlay(overlay: ProfileOverlay) {
+private fun ProfileOverlay.matchesPersistedCustom(persisted: ProfileOverlay): Boolean {
+    val nameMatches = name == persisted.name || name.startsWith("${persisted.name} (")
+    return nameMatches &&
+        description == persisted.description &&
+        personalityBase == persisted.personalityBase &&
+        personalityIntensity == persisted.personalityIntensity &&
+        modifierOverrides == persisted.modifierOverrides &&
+        verification == persisted.verification &&
+        initiative == persisted.initiative
+}
+
+internal fun uniqueRestoredOverlayName(preferredName: String, occupiedIds: Set<String>): String {
+    val baseName = preferredName.ifBlank { "Custom Overlay" }
+    var candidate = baseName
+    var suffix = 2
+    while (overlayIdForName(candidate) in occupiedIds) {
+        candidate = "$baseName ($suffix)"
+        suffix += 1
+    }
+    return candidate
+}
+
+private fun overlayIdForName(name: String): String = name.lowercase().replace(" ", "-")
+
+private fun StudioViewModel.restoreCustomOverlay(
+    overlay: ProfileOverlay,
+    occupiedIds: MutableSet<String>
+): ProfileOverlay {
     val defaultBase = PresetProfiles.DefaultBaseProfile
     val modifierNames = uiState.value.baseProfile.personality.modifiers.keys + overlay.modifierOverrides.keys
 
@@ -56,7 +108,12 @@ private fun StudioViewModel.restoreCustomOverlay(overlay: ProfileOverlay) {
         "initiative",
         overlay.initiative ?: defaultBase.collaboration.initiative
     )
-    saveCustomOverlay(overlay.name, overlay.description)
+
+    val restoredName = uniqueRestoredOverlayName(overlay.name, occupiedIds)
+    saveCustomOverlay(restoredName, overlay.description)
+    return requireNotNull(uiState.value.selectedOverlay).also { restored ->
+        occupiedIds += restored.id
+    }
 }
 
 private fun StudioViewModel.restoreEditableBaseProfile(profile: Profile) {
