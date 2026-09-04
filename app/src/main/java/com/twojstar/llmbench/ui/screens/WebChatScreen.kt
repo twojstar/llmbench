@@ -606,11 +606,7 @@ fun WebChatScreen(
                                     }
                                 }
                             ).also { wv ->
-                                wv.visibility = if (isCurrentService) {
-                                    android.view.View.VISIBLE
-                                } else {
-                                    android.view.View.GONE
-                                }
+                                wv.visibility = providerWebViewVisibility(isCurrentService)
                                 webViewMap[service] = wv
                                 if (pendingDesktopMode != null &&
                                     pendingDesktopModes[service] == pendingDesktopMode
@@ -621,11 +617,7 @@ fun WebChatScreen(
                             }
                         },
                         update = { wv ->
-                            wv.visibility = if (isCurrentService) {
-                                android.view.View.VISIBLE
-                            } else {
-                                android.view.View.GONE
-                            }
+                            wv.visibility = providerWebViewVisibility(isCurrentService)
                             if (isCurrentService && lifecycleStarted) {
                                 wv.onResume()
                             } else {
@@ -1321,6 +1313,9 @@ private fun ExternalIntentConfirmationDialog(
         }
     )
 }
+
+internal fun providerWebViewVisibility(isCurrentService: Boolean): Int =
+    if (isCurrentService) android.view.View.VISIBLE else android.view.View.GONE
 
 internal fun nextWebViewLru(
     current: List<WebAiService>,
