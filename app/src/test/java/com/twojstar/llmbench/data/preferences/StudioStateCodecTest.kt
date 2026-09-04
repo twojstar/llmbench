@@ -2,10 +2,10 @@ package com.twojstar.llmbench.data.preferences
 
 import com.twojstar.llmbench.data.model.PresetProfiles
 import com.twojstar.llmbench.data.model.ProfileOverlay
-import kotlin.test.Test
-import kotlin.test.assertEquals
-import kotlin.test.assertNull
-import kotlin.test.assertTrue
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Test
 
 class StudioStateCodecTest {
     @Test
