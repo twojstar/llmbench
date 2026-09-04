@@ -498,11 +498,15 @@ fun WebChatScreen(
                     val isCurrentService = selectedService == service
 
                     Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .then(if (isCurrentService) Modifier else Modifier.size(0.dp))
-                ) {
-                    AndroidView(
+                        modifier = if (isCurrentService) {
+                            Modifier.fillMaxSize()
+                        } else {
+                            // Do not chain size(0.dp) after fillMaxSize(): the exact full-size
+                            // constraints win, leaving the inactive WebView visible on top.
+                            Modifier.size(0.dp)
+                        }
+                    ) {
+                        AndroidView(
                         factory = { ctx ->
                             val pendingDesktopMode = pendingDesktopModes[service]
                             val initialDesktopMode = pendingDesktopMode ?: (desktopModes[service] == true)
