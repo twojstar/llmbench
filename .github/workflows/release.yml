@@ -4,6 +4,7 @@ on: # yamllint disable-line rule:truthy
   push:
     branches: ["main"]
     paths:
+      - "gradlew"
       - "app/**"
       - "shared/**"
       - "build.gradle.kts"
@@ -84,6 +85,7 @@ jobs:
 
           keystore="$RUNNER_TEMP/release.keystore"
           printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$keystore"
+          test -s "$keystore"
           check_store="$RUNNER_TEMP/release-check.p12"
           check_password="$(openssl rand -hex 24)"
           valid=false
@@ -148,32 +150,34 @@ jobs:
           GH_REPO: ${{ github.repository }}
           RELEASE_VERSION: ${{ steps.release.outputs.version }}
         run: |
+          set -euo pipefail
           tag="llmbench-latest"
+          stage="llmbench-stage-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
 
-          cat > release-notes.md <<EOF
-          Signed Android builds from \`${GITHUB_SHA}\`.
+          printf 'Signed Android builds from `%s`.\n\nRolling release. Assets are replaced after each successful build of `main`.\nApp version: `%s`.\n' \
+            "$GITHUB_SHA" "$RELEASE_VERSION" > release-notes.md
 
-          Rolling release. Assets are replaced after each successful build of \`main\`.
-          App version: \`${RELEASE_VERSION}\`.
-          EOF
+          # Build the complete replacement privately first. The previous public
+          # rolling release remains untouched if staging or verification fails.
+          gh release create "$stage" --draft --target "$GITHUB_SHA" \
+            --title "LlmBench · rolling" --notes-file release-notes.md
+          gh release upload "$stage" dist/llmbench.apk dist/llmbench.aab
 
-          if gh release view "$tag" >/dev/null 2>&1; then
-            gh api --method PATCH "repos/$GH_REPO/git/refs/tags/$tag" \
-              -f sha="$GITHUB_SHA" \
-              -F force=true
-            gh release edit "$tag" \
-              --title "LlmBench · rolling" \
-              --notes-file release-notes.md
-          else
-            gh release create "$tag" \
-              --draft \
-              --target "$GITHUB_SHA" \
-              --title "LlmBench · rolling" \
-              --notes-file release-notes.md
+          release_id="$(gh api "repos/$GH_REPO/releases/tags/$stage" --jq .id)"
+          asset_count="$(gh api "repos/$GH_REPO/releases/$release_id/assets" --jq 'length')"
+          test "$asset_count" -eq 2
+
+          # Swap only after the staged release is complete. This keeps failures
+          # before this point from corrupting the existing public release.
+          if old_id="$(gh api "repos/$GH_REPO/releases/tags/$tag" --jq .id 2>/dev/null)"; then
+            gh api --method DELETE "repos/$GH_REPO/releases/$old_id"
+          fi
+          if gh api "repos/$GH_REPO/git/ref/tags/$tag" >/dev/null 2>&1; then
+            gh api --method DELETE "repos/$GH_REPO/git/refs/tags/$tag"
           fi
 
-          gh release upload "$tag" \
-            dist/llmbench.apk \
-            dist/llmbench.aab \
-            --clobber
-          gh release edit "$tag" --draft=false --latest
+          gh api --method PATCH "repos/$GH_REPO/releases/$release_id" \
+            -f tag_name="$tag" -f target_commitish="$GITHUB_SHA" \
+            -f name='LlmBench · rolling' -F draft=false -F prerelease=false \
+            -f make_latest=true >/dev/null
+          gh api --method DELETE "repos/$GH_REPO/git/refs/tags/$stage" 2>/dev/null || true
