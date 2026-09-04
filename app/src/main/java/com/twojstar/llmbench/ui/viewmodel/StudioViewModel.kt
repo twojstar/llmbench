@@ -86,7 +86,10 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
 
     init {
         _uiState.update { it.copy(apiKeyConfig = apiKeyStore.load()) }
-        val persistenceEnabled = when (val persistedStudioState = studioStateStore.load()) {
+        val persistedStudioState = StudioStateWriter.currentSnapshot()
+            ?.let(StudioStateDecodeResult::Success)
+            ?: studioStateStore.load()
+        val persistenceEnabled = when (persistedStudioState) {
             is StudioStateDecodeResult.Success -> {
                 restoreStudioSnapshot(persistedStudioState.snapshot)
                 true
@@ -714,7 +717,8 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     private fun startStudioPersistence() {
-        val writer = StudioStateWriter(studioStateStore).also { studioStateWriter = it }
+        val writer = StudioStateWriter.getInstance(studioStateStore).also { studioStateWriter = it }
+        writer.enqueue(uiState.value.toStudioStateSnapshot())
         studioPersistenceJob = viewModelScope.launch {
             uiState
                 .map { it.toStudioStateSnapshot() }
@@ -726,7 +730,7 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
     override fun onCleared() {
         val latestSnapshot = uiState.value.toStudioStateSnapshot()
         studioPersistenceJob?.cancel()
-        studioStateWriter?.closeWith(latestSnapshot)
+        studioStateWriter?.enqueue(latestSnapshot)
         super.onCleared()
     }
 
