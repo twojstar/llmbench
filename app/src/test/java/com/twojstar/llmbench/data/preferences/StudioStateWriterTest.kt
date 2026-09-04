@@ -56,7 +56,10 @@ class StudioStateWriterTest {
         try {
             val oldOwner = writer.registerOwner()
             val newOwner = writer.registerOwner()
-            val newer = StudioStateSnapshot(PresetProfiles.DefaultBaseProfile, language = "pl")
+            val newer = StudioStateSnapshot(
+                baseProfile = PresetProfiles.DefaultBaseProfile,
+                language = "pl"
+            )
             val stale = newer.copy(language = "en")
 
             writer.enqueue(newer, newOwner)
@@ -83,7 +86,10 @@ class StudioStateWriterTest {
         )
         try {
             val ownerId = writer.registerOwner()
-            writer.enqueue(StudioStateSnapshot(PresetProfiles.DefaultBaseProfile), ownerId)
+            writer.enqueue(
+                StudioStateSnapshot(baseProfile = PresetProfiles.DefaultBaseProfile),
+                ownerId
+            )
 
             assertTrue(saved.await(2, TimeUnit.SECONDS))
             assertEquals(2, attempts.get())
