@@ -63,7 +63,12 @@ import com.twojstar.llmbench.data.model.webChatActivityStatusAfterEviction
 import com.twojstar.llmbench.ui.theme.*
 import com.twojstar.llmbench.ui.viewmodel.StudioUiState
 import com.twojstar.llmbench.ui.viewmodel.StudioViewModel
+import com.twojstar.llmbench.web.ProviderDiagnosticsProbeResult
+import com.twojstar.llmbench.web.ProviderDiagnosticsSnapshot
 import com.twojstar.llmbench.web.StudioPromptApplyResult
+import com.twojstar.llmbench.web.probeProviderDiagnostics
+import com.twojstar.llmbench.web.providerDiagnosticsHost
+import com.twojstar.llmbench.web.providerDiagnosticsProbeSummary
 import com.twojstar.llmbench.web.applyProviderWebTweaks
 import com.twojstar.llmbench.web.applyStudioPromptToFocusedEditor
 import com.twojstar.llmbench.web.installProviderGenerationTracker
@@ -71,6 +76,7 @@ import com.twojstar.llmbench.web.installStudioPromptTargetTracker
 import com.twojstar.llmbench.web.probeProviderGenerationActivity
 import com.twojstar.llmbench.web.providerUrlMatches
 import com.twojstar.llmbench.web.providerGenerationTrackingSupported
+import com.twojstar.llmbench.web.sanitizeProviderAcceptTypes
 import com.twojstar.llmbench.web.setProviderGenerationTrackerSelected
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -131,14 +137,24 @@ fun WebChatScreen(
     var canGoBack by remember { mutableStateOf(false) }
     var canGoForward by remember { mutableStateOf(false) }
     var showPromptHelperDialog by remember { mutableStateOf(false) }
+    var showProviderDiagnosticsDialog by remember { mutableStateOf(false) }
+    var diagnosticsProbeResult by remember { mutableStateOf<ProviderDiagnosticsProbeResult?>(null) }
     var pendingExternalIntentUri by remember { mutableStateOf<Uri?>(null) }
     val pendingFileCallback = remember { mutableStateOf<ValueCallback<Array<Uri>>?>(null) }
+    val pendingFileService = remember { mutableStateOf<WebAiService?>(null) }
+    val fileChooserRequestCounts = remember { mutableStateMapOf<WebAiService, Int>() }
+    val fileChooserAcceptTypes = remember { mutableStateMapOf<WebAiService, String>() }
+    val fileChooserModes = remember { mutableStateMapOf<WebAiService, String>() }
+    val fileChooserHosts = remember { mutableStateMapOf<WebAiService, String>() }
+    val fileChooserOutcomes = remember { mutableStateMapOf<WebAiService, String>() }
 
     val fileChooserLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
         val callback = pendingFileCallback.value ?: return@rememberLauncherForActivityResult
+        val service = pendingFileService.value
         pendingFileCallback.value = null
+        pendingFileService.value = null
         val resultData = result.data
         val selectedUris = if (result.resultCode == Activity.RESULT_OK && resultData != null) {
             WebChromeClient.FileChooserParams.parseResult(result.resultCode, resultData)
@@ -146,6 +162,11 @@ fun WebChatScreen(
                 ?.toTypedArray()
                 ?.takeIf { it.isNotEmpty() }
         } else null
+        service?.let {
+            fileChooserOutcomes[it] = selectedUris
+                ?.let { uris -> "selected (${uris.size})" }
+                ?: "cancelled / no accepted file"
+        }
         callback.onReceiveValue(selectedUris)
     }
 
@@ -279,6 +300,7 @@ fun WebChatScreen(
         onDispose {
             pendingFileCallback.value?.onReceiveValue(null)
             pendingFileCallback.value = null
+            pendingFileService.value = null
             val webViews = webViewMap.values.toList()
             webViewMap.clear()
             webViews.forEach(::releaseWebView)
@@ -295,6 +317,26 @@ fun WebChatScreen(
         val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         clipboard.setPrimaryClip(ClipData.newPlainText("AI Profile Instructions", studioPrompt))
         viewModel.showSnackbar(message)
+    }
+
+    fun refreshProviderDiagnostics() {
+        val service = selectedService
+        val webView = webViewMap[service]
+        diagnosticsProbeResult = null
+        if (webView == null) {
+            diagnosticsProbeResult = ProviderDiagnosticsProbeResult.Failed
+            return
+        }
+        probeProviderDiagnostics(webView, service) { result ->
+            if (selectedService == service && webViewMap[service] === webView) {
+                diagnosticsProbeResult = result
+            }
+        }
+    }
+
+    fun openProviderDiagnostics() {
+        showProviderDiagnosticsDialog = true
+        refreshProviderDiagnostics()
     }
 
     fun applyStudioPrompt() {
@@ -381,6 +423,7 @@ fun WebChatScreen(
                     onOpenDrawer = { drawerScope.launch { drawerState.open() } },
                     onApplyStudio = ::applyStudioPrompt,
                     onShowPromptHelper = { showPromptHelperDialog = true },
+                    onShowDiagnostics = ::openProviderDiagnostics,
                     onToggleDesktopMode = {
                         val service = selectedService
                         val currentMode = pendingDesktopModes[service] ?: isDesktopMode
@@ -448,21 +491,38 @@ fun WebChatScreen(
                                 onExternalIntentRequested = { uri ->
                                     pendingExternalIntentUri = uri
                                 },
-                                onFileChooserRequested = { callback, params ->
+                                onFileChooserRequested = { callback, params, pageUrl ->
+                                    pendingFileService.value?.let { previousService ->
+                                        fileChooserOutcomes[previousService] = "replaced by a newer request"
+                                    }
                                     pendingFileCallback.value?.onReceiveValue(null)
                                     pendingFileCallback.value = callback
+                                    pendingFileService.value = service
+                                    fileChooserRequestCounts[service] =
+                                        (fileChooserRequestCounts[service] ?: 0) + 1
+                                    fileChooserHosts[service] = providerDiagnosticsHost(pageUrl) ?: "unavailable"
+                                    fileChooserModes[service] = if (
+                                        params.mode == WebChromeClient.FileChooserParams.MODE_OPEN_MULTIPLE
+                                    ) "multiple" else "single"
+                                    fileChooserAcceptTypes[service] =
+                                        sanitizeProviderAcceptTypes(params.acceptTypes)
+                                    fileChooserOutcomes[service] = "picker launched"
                                     try {
                                         fileChooserLauncher.launch(params.createIntent())
                                         true
                                     } catch (error: ActivityNotFoundException) {
                                         Log.w(WEBVIEW_LOG_TAG, "No file picker available", error)
                                         pendingFileCallback.value = null
+                                        pendingFileService.value = null
+                                        fileChooserOutcomes[service] = "no picker available"
                                         callback.onReceiveValue(null)
                                         viewModel.showSnackbar("No file picker available")
                                         true
                                     } catch (error: SecurityException) {
                                         Log.w(WEBVIEW_LOG_TAG, "File picker launch blocked", error)
                                         pendingFileCallback.value = null
+                                        pendingFileService.value = null
+                                        fileChooserOutcomes[service] = "picker blocked"
                                         callback.onReceiveValue(null)
                                         viewModel.showSnackbar("File picker was blocked")
                                         true
@@ -513,6 +573,34 @@ fun WebChatScreen(
             openExternalIntentUri(context, pendingUri)
         }
     )
+
+    if (showProviderDiagnosticsDialog) {
+        val webViewPackage = WebView.getCurrentWebViewPackage()?.let { packageInfo ->
+            listOfNotNull(packageInfo.packageName, packageInfo.versionName).joinToString(" ")
+        } ?: "Unavailable"
+        ProviderDiagnosticsDialog(
+            service = selectedService,
+            host = providerDiagnosticsHost(currentUrl) ?: "Unavailable",
+            providerOwned = providerUrlMatches(selectedService, currentUrl),
+            webViewPackage = webViewPackage,
+            isDesktopMode = isDesktopMode,
+            activityTrackingSupported = providerGenerationTrackingSupported(selectedService),
+            activityStatus = activityStatuses[selectedService] ?: WebChatActivityStatus.IDLE,
+            fileChooserRequests = fileChooserRequestCounts[selectedService] ?: 0,
+            fileChooserMode = fileChooserModes[selectedService],
+            fileChooserHost = fileChooserHosts[selectedService],
+            fileChooserAcceptTypes = fileChooserAcceptTypes[selectedService],
+            fileChooserOutcome = fileChooserOutcomes[selectedService],
+            probeResult = diagnosticsProbeResult,
+            onRefresh = ::refreshProviderDiagnostics,
+            onDismiss = { showProviderDiagnosticsDialog = false },
+            onCopyReport = { report ->
+                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                clipboard.setPrimaryClip(ClipData.newPlainText("LlmBench provider diagnostics", report))
+                viewModel.showSnackbar("Copied privacy-safe provider diagnostics.")
+            }
+        )
+    }
 
     if (showPromptHelperDialog) {
         AlertDialog(
@@ -588,6 +676,121 @@ fun WebChatScreen(
 }
 
 @Composable
+private fun ProviderDiagnosticsDialog(
+    service: WebAiService,
+    host: String,
+    providerOwned: Boolean,
+    webViewPackage: String,
+    isDesktopMode: Boolean,
+    activityTrackingSupported: Boolean,
+    activityStatus: WebChatActivityStatus,
+    fileChooserRequests: Int,
+    fileChooserMode: String?,
+    fileChooserHost: String?,
+    fileChooserAcceptTypes: String?,
+    fileChooserOutcome: String?,
+    probeResult: ProviderDiagnosticsProbeResult?,
+    onRefresh: () -> Unit,
+    onDismiss: () -> Unit,
+    onCopyReport: (String) -> Unit
+) {
+    val probeSummary = providerDiagnosticsProbeSummary(probeResult)
+    val snapshot = ProviderDiagnosticsSnapshot(
+        providerName = service.shortName,
+        host = host,
+        providerOwned = providerOwned,
+        webViewPackage = webViewPackage,
+        siteMode = if (isDesktopMode) "desktop" else "mobile",
+        activityTracking = if (activityTrackingSupported) "verified" else "not verified",
+        activityState = activityStatus.name.lowercase(),
+        fileChooserRequests = fileChooserRequests,
+        fileChooserMode = fileChooserMode ?: "none",
+        fileChooserHost = fileChooserHost ?: "none",
+        fileChooserAcceptTypes = fileChooserAcceptTypes ?: "none",
+        fileChooserOutcome = fileChooserOutcome ?: "none",
+        domProbeSummary = probeSummary
+    )
+    val safeReport = snapshot.safeReport()
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Icon(Icons.Default.BugReport, contentDescription = null, tint = AccentCyan)
+                Text("Provider diagnostics", fontWeight = FontWeight.Bold)
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 440.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(
+                    "Privacy-safe diagnostics only: no page text, full URLs, cookies, tokens, form values or file names are collected.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                HorizontalDivider()
+                DiagnosticsLine("Provider", service.shortName)
+                DiagnosticsLine("Host", host)
+                DiagnosticsLine("Provider-owned page", if (providerOwned) "Yes" else "No")
+                DiagnosticsLine("WebView", webViewPackage)
+                DiagnosticsLine("Site mode", if (isDesktopMode) "Desktop" else "Mobile")
+                DiagnosticsLine(
+                    "Activity tracking",
+                    if (activityTrackingSupported) "Verified" else "Not verified"
+                )
+                DiagnosticsLine("Current activity", activityStatus.name.lowercase())
+                HorizontalDivider()
+                DiagnosticsLine("File chooser requests", fileChooserRequests.toString())
+                DiagnosticsLine("Picker mode", fileChooserMode ?: "None yet")
+                DiagnosticsLine("Last picker host", fileChooserHost ?: "None yet")
+                DiagnosticsLine("Accept types", fileChooserAcceptTypes ?: "None yet")
+                DiagnosticsLine("Last picker outcome", fileChooserOutcome ?: "None yet")
+                HorizontalDivider()
+                DiagnosticsLine("DOM capability probe", probeSummary)
+                Text(
+                    "DOM counts are capability hints for verification, not proof that sign-in, upload or generation tracking works end to end.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onRefresh) {
+                Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(4.dp))
+                Text("Refresh")
+            }
+        },
+        dismissButton = {
+            Row {
+                TextButton(onClick = { onCopyReport(safeReport) }) {
+                    Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("Copy")
+                }
+                TextButton(onClick = onDismiss) { Text("Close") }
+            }
+        }
+    )
+}
+
+@Composable
+private fun DiagnosticsLine(label: String, value: String) {
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(value, style = MaterialTheme.typography.bodySmall)
+    }
+}
+
+@Composable
 private fun rememberWebViewLifecycleStarted(
     webViewMap: Map<WebAiService, WebView>,
     selectedService: WebAiService
@@ -634,6 +837,7 @@ private fun WebChatToolbar(
     onOpenDrawer: () -> Unit,
     onApplyStudio: () -> Unit,
     onShowPromptHelper: () -> Unit,
+    onShowDiagnostics: () -> Unit,
     onToggleDesktopMode: () -> Unit,
     onShowSnackbar: (String) -> Unit
 ) {
@@ -758,6 +962,14 @@ private fun WebChatToolbar(
                             onClick = {
                                 menuExpanded = false
                                 onShowPromptHelper()
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Provider diagnostics") },
+                            leadingIcon = { Icon(Icons.Default.BugReport, contentDescription = null) },
+                            onClick = {
+                                menuExpanded = false
+                                onShowDiagnostics()
                             }
                         )
                         DropdownMenuItem(
@@ -1055,7 +1267,8 @@ private fun createConfiguredWebView(
     onExternalIntentRequested: (Uri) -> Unit,
     onFileChooserRequested: (
         ValueCallback<Array<Uri>>,
-        WebChromeClient.FileChooserParams
+        WebChromeClient.FileChooserParams,
+        pageUrl: String?
     ) -> Boolean
 ): WebView {
     val webView = WebView(context).apply {
@@ -1132,7 +1345,7 @@ private fun createConfiguredWebView(
             ): Boolean {
                 val callback = filePathCallback ?: return false
                 val params = fileChooserParams ?: return false
-                return onFileChooserRequested(callback, params)
+                return onFileChooserRequested(callback, params, webView?.url)
             }
         }
 

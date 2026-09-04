@@ -2,7 +2,6 @@ package com.twojstar.llmbench.web
 
 import android.webkit.WebView
 import com.twojstar.llmbench.data.model.WebAiService
-import org.json.JSONObject
 import java.net.URI
 
 internal data class ProviderWebTweak(
@@ -105,22 +104,13 @@ internal fun applyProviderWebTweaks(
 ) {
     if (!providerUrlMatches(service, pageUrl)) return
 
-    val providerId = JSONObject.quote(service.id)
-    val allowedHosts = ProviderWebTweakRegistry.ownedHosts(service)
-        .joinToString(prefix = "[", postfix = "]") { JSONObject.quote(it) }
-
+    val providerId = javascriptStringLiteral(service.id)
     ProviderWebTweakRegistry.forProvider(service).forEach { tweak ->
-        val styleId = JSONObject.quote("llmbench-${service.id}-${tweak.id}")
-        val css = JSONObject.quote(tweak.css)
+        val styleId = javascriptStringLiteral("llmbench-${service.id}-${tweak.id}")
+        val css = javascriptStringLiteral(tweak.css)
         val script = """
             (() => {
-                const allowedHosts = $allowedHosts;
-                let currentHost = location.hostname.toLowerCase();
-                if (currentHost.endsWith('.')) currentHost = currentHost.slice(0, -1);
-                const owned = allowedHosts.some(host =>
-                    currentHost === host || currentHost.endsWith('.' + host)
-                );
-                if (location.protocol !== 'https:' || !owned) return;
+                ${providerRuntimeGuardScript(service, "undefined")}
 
                 const root = document.documentElement;
                 if (!root) return;
