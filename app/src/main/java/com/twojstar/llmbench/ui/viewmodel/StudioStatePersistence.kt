@@ -25,7 +25,7 @@ internal fun StudioViewModel.restoreStudioSnapshot(snapshot: StudioStateSnapshot
     snapshot.customOverlays
         .filterNot { it.id in builtInIds }
         .distinctBy { it.id }
-        .forEach(::restoreCustomOverlay)
+        .forEach { overlay -> restoreCustomOverlay(overlay) }
 
     restoreEditableBaseProfile(snapshot.baseProfile)
 
