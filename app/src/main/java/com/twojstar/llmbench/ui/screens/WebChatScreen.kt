@@ -606,6 +606,11 @@ fun WebChatScreen(
                                     }
                                 }
                             ).also { wv ->
+                                wv.visibility = if (isCurrentService) {
+                                    android.view.View.VISIBLE
+                                } else {
+                                    android.view.View.GONE
+                                }
                                 webViewMap[service] = wv
                                 if (pendingDesktopMode != null &&
                                     pendingDesktopModes[service] == pendingDesktopMode
@@ -616,6 +621,11 @@ fun WebChatScreen(
                             }
                         },
                         update = { wv ->
+                            wv.visibility = if (isCurrentService) {
+                                android.view.View.VISIBLE
+                            } else {
+                                android.view.View.GONE
+                            }
                             if (isCurrentService && lifecycleStarted) {
                                 wv.onResume()
                             } else {
