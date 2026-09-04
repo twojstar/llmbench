@@ -45,6 +45,13 @@ class StudioStateCodecTest {
             StudioStateSnapshot(baseProfile = PresetProfiles.DefaultBaseProfile)
         ).replace("\"version\":1", "\"version\":2")
         assertNull(StudioStateCodec.decode(future))
+        val futureResult = StudioStateCodec.decodeResult(future)
+        assertTrue(futureResult is StudioStateDecodeResult.UnsupportedVersion)
+        assertEquals(2, (futureResult as StudioStateDecodeResult.UnsupportedVersion).version)
+        assertEquals(
+            StudioStateDecodeResult.MissingOrInvalid,
+            StudioStateCodec.decodeResult("{ definitely-not-json")
+        )
     }
 
     @Test

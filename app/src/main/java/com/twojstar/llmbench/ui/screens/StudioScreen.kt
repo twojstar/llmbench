@@ -222,7 +222,7 @@ fun StudioScreen(
                                 )
                             }
                             items(uiState.availableOverlays) { overlay ->
-                                val isSelected = uiState.selectedOverlay?.id == overlay.id
+                                val isSelected = uiState.selectedOverlay === overlay
                                 FilterChip(
                                     selected = isSelected,
                                     onClick = { viewModel.applyOverlay(overlay) },

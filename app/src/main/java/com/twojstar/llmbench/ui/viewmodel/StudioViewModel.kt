@@ -75,7 +75,7 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
     private val aiChatService = AiChatService()
     private val apiKeyStore = ApiKeyStore(application.applicationContext)
     private val studioStateStore = StudioStateStore(application.applicationContext)
-    private val studioStateWriter = StudioStateWriter(studioStateStore)
+    private var studioStateWriter: StudioStateWriter? = null
 
     private val _uiState = MutableStateFlow(StudioUiState())
     private val pendingGatewayCatalogRefreshes = mutableSetOf<AiProvider>()
@@ -86,23 +86,38 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
 
     init {
         _uiState.update { it.copy(apiKeyConfig = apiKeyStore.load()) }
-        val persistedStudioState = studioStateStore.load()
-        if (persistedStudioState != null) {
-            restoreStudioSnapshot(persistedStudioState)
-        } else {
-            recompute()
+        val persistenceEnabled = when (val persistedStudioState = studioStateStore.load()) {
+            is StudioStateDecodeResult.Success -> {
+                restoreStudioSnapshot(persistedStudioState.snapshot)
+                true
+            }
+            is StudioStateDecodeResult.UnsupportedVersion -> {
+                recompute()
+                false
+            }
+            StudioStateDecodeResult.MissingOrInvalid -> {
+                recompute()
+                true
+            }
         }
         initPlaygroundWelcome()
         initChatWelcome()
-        startStudioPersistence()
+        if (persistenceEnabled) startStudioPersistence()
     }
 
     private fun initPlaygroundWelcome() {
+        val state = _uiState.value
+        val activeProfile = state.mergedProfile
+        val profileName = state.selectedOverlay?.name ?: if (activeProfile == PresetProfiles.DefaultBaseProfile) {
+            "Default Friendly"
+        } else {
+            activeProfile.personality.base.replaceFirstChar { it.uppercase() }
+        }
         val welcomeMsg = ChatMessage(
             id = "welcome",
             sender = "assistant",
             text = "Hello! I am ready to assist. Adjust personality knobs, overlays, or collaboration policies in the Studio tab, and ask me any question to test how my responses adapt to your style profile.",
-            notes = listOf("Active Profile: Default Friendly (intensity: 1)")
+            notes = listOf("Active Profile: $profileName (intensity: ${activeProfile.personality.intensity ?: 1})")
         )
         _uiState.update { it.copy(playgroundMessages = listOf(welcomeMsg)) }
     }
@@ -699,18 +714,19 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     private fun startStudioPersistence() {
+        val writer = StudioStateWriter(studioStateStore).also { studioStateWriter = it }
         studioPersistenceJob = viewModelScope.launch {
             uiState
                 .map { it.toStudioStateSnapshot() }
                 .distinctUntilChanged()
-                .collect { snapshot -> studioStateWriter.enqueue(snapshot) }
+                .collect { snapshot -> writer.enqueue(snapshot) }
         }
     }
 
     override fun onCleared() {
         val latestSnapshot = uiState.value.toStudioStateSnapshot()
         studioPersistenceJob?.cancel()
-        studioStateWriter.closeWith(latestSnapshot)
+        studioStateWriter?.closeWith(latestSnapshot)
         super.onCleared()
     }
 
