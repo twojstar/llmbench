@@ -10,16 +10,13 @@ import com.twojstar.llmbench.data.engine.ValidationResult
 import com.twojstar.llmbench.data.engine.YamlParser
 import com.twojstar.llmbench.data.model.*
 import com.twojstar.llmbench.data.preferences.StudioStateStore
+import com.twojstar.llmbench.data.preferences.StudioStateWriter
 import com.twojstar.llmbench.data.security.ApiKeyStore
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.withContext
 import java.util.concurrent.atomic.AtomicLong
 
 data class ChatMessage(
@@ -78,6 +75,7 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
     private val aiChatService = AiChatService()
     private val apiKeyStore = ApiKeyStore(application.applicationContext)
     private val studioStateStore = StudioStateStore(application.applicationContext)
+    private val studioStateWriter = StudioStateWriter(studioStateStore)
 
     private val _uiState = MutableStateFlow(StudioUiState())
     private val pendingGatewayCatalogRefreshes = mutableSetOf<AiProvider>()
@@ -705,23 +703,14 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
             uiState
                 .map { it.toStudioStateSnapshot() }
                 .distinctUntilChanged()
-                .conflate()
-                .collect { snapshot ->
-                    withContext(Dispatchers.IO) {
-                        studioStateStore.save(snapshot)
-                    }
-                }
+                .collect { snapshot -> studioStateWriter.enqueue(snapshot) }
         }
     }
 
     override fun onCleared() {
         val latestSnapshot = uiState.value.toStudioStateSnapshot()
-        runBlocking {
-            studioPersistenceJob?.cancelAndJoin()
-            withContext(Dispatchers.IO) {
-                studioStateStore.save(latestSnapshot)
-            }
-        }
+        studioPersistenceJob?.cancel()
+        studioStateWriter.closeWith(latestSnapshot)
         super.onCleared()
     }
 
