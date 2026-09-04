@@ -7,7 +7,10 @@ import java.net.URI
 internal data class ProviderDomCapabilities(
     val textareas: Int,
     val contentEditables: Int,
+    val identityInputs: Int,
+    val passwordInputs: Int,
     val fileInputs: Int,
+    val multipleFileInputs: Int,
     val activeEditorKind: String?
 )
 
@@ -55,7 +58,9 @@ internal fun providerDiagnosticsProbeSummary(result: ProviderDiagnosticsProbeRes
     ProviderDiagnosticsProbeResult.OffProvider -> "Off provider page"
     ProviderDiagnosticsProbeResult.Failed -> "Unavailable"
     is ProviderDiagnosticsProbeResult.Ready -> with(result.capabilities) {
-        "textarea=$textareas, contenteditable=$contentEditables, file=$fileInputs, active=${activeEditorKind ?: "none"}"
+        "textarea=$textareas, contenteditable=$contentEditables, identity=$identityInputs, " +
+            "password=$passwordInputs, file=$fileInputs, multi-file=$multipleFileInputs, " +
+            "active=${activeEditorKind ?: "none"}"
     }
 }
 
@@ -118,7 +123,22 @@ internal fun providerDiagnosticsProbeScript(
                         !(node.parentElement && node.parentElement.isContentEditable === true);
                 }
             ).length;
-            var fileInputs = document.querySelectorAll('input[type="file"]').length;
+            var identityInputs = Array.prototype.filter.call(
+                document.querySelectorAll(
+                    'input[type="email"], input[autocomplete="email"], input[autocomplete="username"]'
+                ),
+                llmbenchVisible
+            ).length;
+            var passwordInputs = Array.prototype.filter.call(
+                document.querySelectorAll('input[type="password"]'),
+                llmbenchVisible
+            ).length;
+            var fileNodes = document.querySelectorAll('input[type="file"]');
+            var fileInputs = fileNodes.length;
+            var multipleFileInputs = Array.prototype.filter.call(
+                fileNodes,
+                function(node) { return node.multiple === true; }
+            ).length;
 
             var active = document.activeElement;
             var activeKind = 'none';
@@ -128,7 +148,15 @@ internal fun providerDiagnosticsProbeScript(
                 else if (active.isContentEditable === true) activeKind = 'contenteditable';
                 else if (tag === 'input') activeKind = 'input';
             }
-            return [textareas, contentEditables, fileInputs, activeKind].join('|');
+            return [
+                textareas,
+                contentEditables,
+                identityInputs,
+                passwordInputs,
+                fileInputs,
+                multipleFileInputs,
+                activeKind
+            ].join('|');
         })();
     """.trimIndent()
 }
@@ -137,17 +165,33 @@ internal fun parseProviderDiagnosticsProbeResult(rawResult: String?): ProviderDi
     val token = rawResult?.trim()?.removeSurrounding("\"") ?: return ProviderDiagnosticsProbeResult.Failed
     if (token == "off-provider") return ProviderDiagnosticsProbeResult.OffProvider
     val parts = token.split('|')
-    if (parts.size != 4) return ProviderDiagnosticsProbeResult.Failed
+    if (parts.size != 7) return ProviderDiagnosticsProbeResult.Failed
     val textareas = parts[0].toIntOrNull() ?: return ProviderDiagnosticsProbeResult.Failed
     val contentEditables = parts[1].toIntOrNull() ?: return ProviderDiagnosticsProbeResult.Failed
-    val fileInputs = parts[2].toIntOrNull() ?: return ProviderDiagnosticsProbeResult.Failed
-    if (textareas < 0 || contentEditables < 0 || fileInputs < 0) return ProviderDiagnosticsProbeResult.Failed
-    val activeKind = parts[3].takeIf { it in setOf("textarea", "contenteditable", "input") }
+    val identityInputs = parts[2].toIntOrNull() ?: return ProviderDiagnosticsProbeResult.Failed
+    val passwordInputs = parts[3].toIntOrNull() ?: return ProviderDiagnosticsProbeResult.Failed
+    val fileInputs = parts[4].toIntOrNull() ?: return ProviderDiagnosticsProbeResult.Failed
+    val multipleFileInputs = parts[5].toIntOrNull() ?: return ProviderDiagnosticsProbeResult.Failed
+    val counts = listOf(
+        textareas,
+        contentEditables,
+        identityInputs,
+        passwordInputs,
+        fileInputs,
+        multipleFileInputs
+    )
+    if (counts.any { it < 0 } || multipleFileInputs > fileInputs) {
+        return ProviderDiagnosticsProbeResult.Failed
+    }
+    val activeKind = parts[6].takeIf { it in setOf("textarea", "contenteditable", "input") }
     return ProviderDiagnosticsProbeResult.Ready(
         ProviderDomCapabilities(
             textareas = textareas,
             contentEditables = contentEditables,
+            identityInputs = identityInputs,
+            passwordInputs = passwordInputs,
             fileInputs = fileInputs,
+            multipleFileInputs = multipleFileInputs,
             activeEditorKind = activeKind
         )
     )
