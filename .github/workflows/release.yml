@@ -185,25 +185,37 @@ jobs:
               fi
             fi
 
+            tag_restored=true
             if [ "$had_old_ref" = true ]; then
               if gh api "repos/$GH_REPO/git/ref/tags/$tag" >/dev/null 2>&1; then
-                gh api --method PATCH "repos/$GH_REPO/git/refs/tags/$tag" \
-                  -f sha="$old_ref_sha" -F force=true >/dev/null 2>&1 || true
-              else
-                gh api --method POST "repos/$GH_REPO/git/refs" \
-                  -f ref="refs/tags/$tag" -f sha="$old_ref_sha" >/dev/null 2>&1 || true
+                if ! gh api --method PATCH "repos/$GH_REPO/git/refs/tags/$tag" \
+                  -f sha="$old_ref_sha" -F force=true >/dev/null 2>&1; then
+                  tag_restored=false
+                fi
+              elif ! gh api --method POST "repos/$GH_REPO/git/refs" \
+                -f ref="refs/tags/$tag" -f sha="$old_ref_sha" >/dev/null 2>&1; then
+                tag_restored=false
               fi
-            else
-              gh api --method DELETE "repos/$GH_REPO/git/refs/tags/$tag" >/dev/null 2>&1 || true
+            elif gh api "repos/$GH_REPO/git/ref/tags/$tag" >/dev/null 2>&1; then
+              if ! gh api --method DELETE "repos/$GH_REPO/git/refs/tags/$tag" >/dev/null 2>&1; then
+                tag_restored=false
+              fi
+            fi
+            if [ "$tag_restored" != true ]; then
+              echo "::error::Could not restore the previous rolling tag; recovery remains under $backup."
             fi
 
-            restored=true
+            release_restored=true
             if [ "$old_moved" = true ]; then
-              if ! gh api --method PATCH "repos/$GH_REPO/releases/$old_id" \
-                -f tag_name="$tag" -F draft=false -F prerelease=false \
-                -f make_latest=true >/dev/null 2>&1; then
-                restored=false
-                echo "::error::Could not restore the previous rolling release; backup remains under $backup."
+              if [ "$tag_restored" = true ]; then
+                if ! gh api --method PATCH "repos/$GH_REPO/releases/$old_id" \
+                  -f tag_name="$tag" -F draft=false -F prerelease=false \
+                  -f make_latest=true >/dev/null 2>&1; then
+                  release_restored=false
+                  echo "::error::Could not restore the previous rolling release; backup remains under $backup."
+                fi
+              else
+                release_restored=false
               fi
             fi
 
@@ -211,8 +223,10 @@ jobs:
               gh api --method DELETE "repos/$GH_REPO/releases/$release_id" >/dev/null 2>&1 || true
             fi
             gh api --method DELETE "repos/$GH_REPO/git/refs/tags/$stage" >/dev/null 2>&1 || true
-            if [ "$restored" = true ]; then
+            if [ "$tag_restored" = true ] && [ "$release_restored" = true ]; then
               gh api --method DELETE "repos/$GH_REPO/git/refs/tags/$backup" >/dev/null 2>&1 || true
+            elif [ "$old_moved" = true ]; then
+              echo "::warning::Recovery backup kept as $backup for manual repair."
             fi
 
             exit "$status"
