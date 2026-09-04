@@ -16,10 +16,17 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.lifecycleScope
+import com.twojstar.llmbench.data.preferences.StudioStateStore
 import com.twojstar.llmbench.ui.screens.*
 import com.twojstar.llmbench.ui.theme.LlmBenchTheme
 import com.twojstar.llmbench.ui.viewmodel.NavigationTab
 import com.twojstar.llmbench.ui.viewmodel.StudioViewModel
+import com.twojstar.llmbench.ui.viewmodel.restoreStudioSnapshot
+import com.twojstar.llmbench.ui.viewmodel.toStudioStateSnapshot
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
 
 internal fun profilePlaygroundDestination(): NavigationTab = NavigationTab.PLAYGROUND
 
@@ -32,6 +39,15 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+
+        val studioStateStore = StudioStateStore(applicationContext)
+        studioStateStore.load()?.let(viewModel::restoreStudioSnapshot)
+        lifecycleScope.launch {
+            viewModel.uiState
+                .map { it.toStudioStateSnapshot() }
+                .distinctUntilChanged()
+                .collect { snapshot -> studioStateStore.save(snapshot) }
+        }
 
         setContent {
             LlmBenchTheme {
