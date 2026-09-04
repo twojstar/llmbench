@@ -14,7 +14,8 @@ internal class StudioStateStore(context: Context) {
     fun save(snapshot: StudioStateSnapshot): Boolean = runCatching {
         preferences.edit()
             .putString(SNAPSHOT_KEY, StudioStateCodec.encode(snapshot))
-            .commit()
+            .apply()
+        true
     }.getOrDefault(false)
 
     private companion object {
