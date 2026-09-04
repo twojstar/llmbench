@@ -9,12 +9,17 @@ import com.twojstar.llmbench.data.engine.ProfileMerger
 import com.twojstar.llmbench.data.engine.ValidationResult
 import com.twojstar.llmbench.data.engine.YamlParser
 import com.twojstar.llmbench.data.model.*
+import com.twojstar.llmbench.data.preferences.StudioStateStore
 import com.twojstar.llmbench.data.security.ApiKeyStore
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import java.util.concurrent.atomic.AtomicLong
 
 data class ChatMessage(
@@ -72,18 +77,26 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
 
     private val aiChatService = AiChatService()
     private val apiKeyStore = ApiKeyStore(application.applicationContext)
+    private val studioStateStore = StudioStateStore(application.applicationContext)
 
     private val _uiState = MutableStateFlow(StudioUiState())
     private val pendingGatewayCatalogRefreshes = mutableSetOf<AiProvider>()
     private var chatGenerationJob: Job? = null
+    private var studioPersistenceJob: Job? = null
     private val activeChatGenerationId = AtomicLong(0)
     val uiState: StateFlow<StudioUiState> = _uiState.asStateFlow()
 
     init {
         _uiState.update { it.copy(apiKeyConfig = apiKeyStore.load()) }
-        recompute()
+        val persistedStudioState = studioStateStore.load()
+        if (persistedStudioState != null) {
+            restoreStudioSnapshot(persistedStudioState)
+        } else {
+            recompute()
+        }
         initPlaygroundWelcome()
         initChatWelcome()
+        startStudioPersistence()
     }
 
     private fun initPlaygroundWelcome() {
@@ -522,6 +535,23 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
         recompute()
     }
 
+    internal fun replacePersistedStudioState(
+        baseProfile: Profile,
+        customOverlays: List<ProfileOverlay>,
+        selectedOverlay: ProfileOverlay?,
+        language: String
+    ) {
+        _uiState.update { current ->
+            current.copy(
+                baseProfile = baseProfile,
+                availableOverlays = PresetProfiles.BuiltInOverlays + customOverlays,
+                selectedOverlay = selectedOverlay,
+                language = language
+            )
+        }
+        recompute()
+    }
+
     fun resetToDefault() {
         _uiState.update {
             it.copy(
@@ -668,6 +698,31 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
                 yamlRepresentation = yaml
             )
         }
+    }
+
+    private fun startStudioPersistence() {
+        studioPersistenceJob = viewModelScope.launch {
+            uiState
+                .map { it.toStudioStateSnapshot() }
+                .distinctUntilChanged()
+                .conflate()
+                .collect { snapshot ->
+                    withContext(Dispatchers.IO) {
+                        studioStateStore.save(snapshot)
+                    }
+                }
+        }
+    }
+
+    override fun onCleared() {
+        val latestSnapshot = uiState.value.toStudioStateSnapshot()
+        runBlocking {
+            studioPersistenceJob?.cancelAndJoin()
+            withContext(Dispatchers.IO) {
+                studioStateStore.save(latestSnapshot)
+            }
+        }
+        super.onCleared()
     }
 
     fun showSnackbar(msg: String) {
