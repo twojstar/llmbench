@@ -4,6 +4,8 @@ Kotlin Multiplatform workspace for using multiple AI services from one client wi
 
 > Status: early prototype. Android is the first client; shared domain/provider logic is moving to Kotlin Multiplatform so desktop and iOS clients can reuse the same core.
 
+Rolling Android build: [download the signed APK](https://github.com/twojstar/llmbench/releases/download/llmbench-latest/llmbench.apk). The asset is replaced after each successful release build from `main`.
+
 ## What it is
 
 LlmBench is intended to combine three layers:

@@ -4,6 +4,17 @@ plugins {
     alias(libs.plugins.kotlin.serialization)
 }
 
+// Release signing is opt-in. GitHub Actions injects these values from repository
+// secrets; local/debug builds stay unsigned and no key material is stored in Git.
+val releaseKeystorePath = System.getenv("LLMBENCH_KEYSTORE")?.takeIf { it.isNotBlank() }
+val releaseStorePassword = System.getenv("LLMBENCH_KEYSTORE_PASSWORD")?.takeIf { it.isNotBlank() }
+val releaseKeyAlias = System.getenv("LLMBENCH_KEY_ALIAS")?.takeIf { it.isNotBlank() }
+val releaseKeyPassword = System.getenv("LLMBENCH_KEY_PASSWORD")?.takeIf { it.isNotBlank() }
+val releaseSigningValues = listOf(releaseStorePassword, releaseKeyAlias, releaseKeyPassword)
+if (releaseKeystorePath != null && releaseSigningValues.any { it == null }) {
+    error("LLMBENCH_KEYSTORE requires non-blank signing password and alias environment variables")
+}
+
 android {
     namespace = "com.twojstar.llmbench"
     compileSdk = 35
@@ -18,6 +29,17 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    signingConfigs {
+        if (releaseKeystorePath != null) {
+            create("release") {
+                storeFile = file(releaseKeystorePath)
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
@@ -25,6 +47,9 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            if (releaseKeystorePath != null) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
     compileOptions {
