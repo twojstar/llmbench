@@ -24,10 +24,13 @@ import com.twojstar.llmbench.ui.viewmodel.NavigationTab
 import com.twojstar.llmbench.ui.viewmodel.StudioViewModel
 import com.twojstar.llmbench.ui.viewmodel.restoreStudioSnapshot
 import com.twojstar.llmbench.ui.viewmodel.toStudioStateSnapshot
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 internal fun profilePlaygroundDestination(): NavigationTab = NavigationTab.PLAYGROUND
 
@@ -42,12 +45,17 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
 
         val studioStateStore = StudioStateStore(applicationContext)
-        studioStateStore.load()?.let(viewModel::restoreStudioSnapshot)
+        studioStateStore.load()?.let { snapshot -> viewModel.restoreStudioSnapshot(snapshot) }
         lifecycleScope.launch {
             viewModel.uiState
                 .map { it.toStudioStateSnapshot() }
                 .distinctUntilChanged()
-                .collect { snapshot -> studioStateStore.save(snapshot) }
+                .conflate()
+                .collect { snapshot ->
+                    withContext(Dispatchers.IO) {
+                        studioStateStore.save(snapshot)
+                    }
+                }
         }
 
         setContent {
