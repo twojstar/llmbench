@@ -68,6 +68,7 @@ import com.twojstar.llmbench.web.ProviderDiagnosticsSnapshot
 import com.twojstar.llmbench.web.StudioPromptApplyResult
 import com.twojstar.llmbench.web.probeProviderDiagnostics
 import com.twojstar.llmbench.web.providerDiagnosticsHost
+import com.twojstar.llmbench.web.providerDiagnosticsDocumentMatches
 import com.twojstar.llmbench.web.providerDiagnosticsProbeSummary
 import com.twojstar.llmbench.web.applyProviderWebTweaks
 import com.twojstar.llmbench.web.applyStudioPromptToFocusedEditor
@@ -83,6 +84,7 @@ import kotlinx.coroutines.launch
 
 private const val WEBVIEW_LOG_TAG = "LlmBenchWeb"
 private const val MAX_LIVE_WEBVIEWS = 2
+private const val DIAGNOSTIC_NONE_YET = "None yet"
 
 internal fun shouldApplyWebChatObservation(
     observation: WebChatGenerationObservation,
@@ -139,6 +141,7 @@ fun WebChatScreen(
     var showPromptHelperDialog by remember { mutableStateOf(false) }
     var showProviderDiagnosticsDialog by remember { mutableStateOf(false) }
     var diagnosticsProbeResult by remember { mutableStateOf<ProviderDiagnosticsProbeResult?>(null) }
+    var diagnosticsProbeRequestId by remember { mutableIntStateOf(0) }
     var pendingExternalIntentUri by remember { mutableStateOf<Uri?>(null) }
     val pendingFileCallback = remember { mutableStateOf<ValueCallback<Array<Uri>>?>(null) }
     val pendingFileService = remember { mutableStateOf<WebAiService?>(null) }
@@ -147,6 +150,7 @@ fun WebChatScreen(
     val fileChooserModes = remember { mutableStateMapOf<WebAiService, String>() }
     val fileChooserHosts = remember { mutableStateMapOf<WebAiService, String>() }
     val fileChooserOutcomes = remember { mutableStateMapOf<WebAiService, String>() }
+    val documentRevisions = remember { mutableStateMapOf<WebAiService, Int>() }
 
     val fileChooserLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -322,21 +326,43 @@ fun WebChatScreen(
     fun refreshProviderDiagnostics() {
         val service = selectedService
         val webView = webViewMap[service]
+        val requestedUrl = webView?.url
+        val requestedDocumentRevision = documentRevisions[service] ?: 0
+        val requestId = diagnosticsProbeRequestId + 1
+        diagnosticsProbeRequestId = requestId
         diagnosticsProbeResult = null
-        if (webView == null) {
+        if (webView == null || requestedUrl == null) {
             diagnosticsProbeResult = ProviderDiagnosticsProbeResult.Failed
             return
         }
         probeProviderDiagnostics(webView, service) { result ->
-            if (selectedService == service && webViewMap[service] === webView) {
-                diagnosticsProbeResult = result
-            }
+            val stillCurrent = diagnosticsProbeRequestId == requestId &&
+                selectedService == service &&
+                webViewMap[service] === webView &&
+                documentRevisions[service] == requestedDocumentRevision &&
+                providerDiagnosticsDocumentMatches(requestedUrl, webView.url)
+            if (stillCurrent) diagnosticsProbeResult = result
         }
     }
 
     fun openProviderDiagnostics() {
         showProviderDiagnosticsDialog = true
         refreshProviderDiagnostics()
+    }
+
+    fun recordFileChooserRequest(
+        service: WebAiService,
+        params: WebChromeClient.FileChooserParams,
+        pageUrl: String?,
+        outcome: String
+    ) {
+        fileChooserRequestCounts[service] = (fileChooserRequestCounts[service] ?: 0) + 1
+        fileChooserHosts[service] = providerDiagnosticsHost(pageUrl) ?: "unavailable"
+        fileChooserModes[service] = if (
+            params.mode == WebChromeClient.FileChooserParams.MODE_OPEN_MULTIPLE
+        ) "multiple" else "single"
+        fileChooserAcceptTypes[service] = sanitizeProviderAcceptTypes(params.acceptTypes)
+        fileChooserOutcomes[service] = outcome
     }
 
     fun applyStudioPrompt() {
@@ -466,6 +492,12 @@ fun WebChatScreen(
                                 initialUrl = lastKnownUrls[service] ?: service.url,
                                 isDesktop = initialDesktopMode,
                                 isServiceSelected = { selectedService == service },
+                                onDocumentStarted = {
+                                    documentRevisions[service] = (documentRevisions[service] ?: 0) + 1
+                                    if (selectedService == service && showProviderDiagnosticsDialog) {
+                                        diagnosticsProbeResult = ProviderDiagnosticsProbeResult.Failed
+                                    }
+                                },
                                 onUrlChanged = { url ->
                                     lastKnownUrls[service] = url
                                     if (selectedService == service) {
@@ -492,40 +524,46 @@ fun WebChatScreen(
                                     pendingExternalIntentUri = uri
                                 },
                                 onFileChooserRequested = { callback, params, pageUrl ->
-                                    pendingFileService.value?.let { previousService ->
-                                        fileChooserOutcomes[previousService] = "replaced by a newer request"
-                                    }
-                                    pendingFileCallback.value?.onReceiveValue(null)
-                                    pendingFileCallback.value = callback
-                                    pendingFileService.value = service
-                                    fileChooserRequestCounts[service] =
-                                        (fileChooserRequestCounts[service] ?: 0) + 1
-                                    fileChooserHosts[service] = providerDiagnosticsHost(pageUrl) ?: "unavailable"
-                                    fileChooserModes[service] = if (
-                                        params.mode == WebChromeClient.FileChooserParams.MODE_OPEN_MULTIPLE
-                                    ) "multiple" else "single"
-                                    fileChooserAcceptTypes[service] =
-                                        sanitizeProviderAcceptTypes(params.acceptTypes)
-                                    fileChooserOutcomes[service] = "picker launched"
-                                    try {
-                                        fileChooserLauncher.launch(params.createIntent())
-                                        true
-                                    } catch (error: ActivityNotFoundException) {
-                                        Log.w(WEBVIEW_LOG_TAG, "No file picker available", error)
-                                        pendingFileCallback.value = null
-                                        pendingFileService.value = null
-                                        fileChooserOutcomes[service] = "no picker available"
+                                    if (pendingFileCallback.value != null) {
+                                        recordFileChooserRequest(
+                                            service,
+                                            params,
+                                            pageUrl,
+                                            "rejected: picker already active"
+                                        )
                                         callback.onReceiveValue(null)
-                                        viewModel.showSnackbar("No file picker available")
                                         true
-                                    } catch (error: SecurityException) {
-                                        Log.w(WEBVIEW_LOG_TAG, "File picker launch blocked", error)
-                                        pendingFileCallback.value = null
-                                        pendingFileService.value = null
-                                        fileChooserOutcomes[service] = "picker blocked"
-                                        callback.onReceiveValue(null)
-                                        viewModel.showSnackbar("File picker was blocked")
-                                        true
+                                    } else {
+                                        pendingFileCallback.value = callback
+                                        pendingFileService.value = service
+                                        recordFileChooserRequest(service, params, pageUrl, "picker launched")
+                                        try {
+                                            fileChooserLauncher.launch(params.createIntent())
+                                            true
+                                        } catch (error: ActivityNotFoundException) {
+                                            Log.w(WEBVIEW_LOG_TAG, "No file picker available", error)
+                                            pendingFileCallback.value = null
+                                            pendingFileService.value = null
+                                            fileChooserOutcomes[service] = "no picker available"
+                                            callback.onReceiveValue(null)
+                                            viewModel.showSnackbar("No file picker available")
+                                            true
+                                        } catch (error: SecurityException) {
+                                            Log.w(WEBVIEW_LOG_TAG, "File picker launch blocked", error)
+                                            pendingFileCallback.value = null
+                                            pendingFileService.value = null
+                                            fileChooserOutcomes[service] = "picker blocked"
+                                            callback.onReceiveValue(null)
+                                            viewModel.showSnackbar("File picker was blocked")
+                                            true
+                                        } catch (error: IllegalStateException) {
+                                            Log.w(WEBVIEW_LOG_TAG, "File picker already active", error)
+                                            pendingFileCallback.value = null
+                                            pendingFileService.value = null
+                                            fileChooserOutcomes[service] = "picker already active"
+                                            callback.onReceiveValue(null)
+                                            true
+                                        }
                                     }
                                 }
                             ).also { wv ->
@@ -749,10 +787,10 @@ private fun ProviderDiagnosticsDialog(
                 DiagnosticsLine("Current activity", activityStatus.name.lowercase())
                 HorizontalDivider()
                 DiagnosticsLine("File chooser requests", fileChooserRequests.toString())
-                DiagnosticsLine("Picker mode", fileChooserMode ?: "None yet")
-                DiagnosticsLine("Last picker host", fileChooserHost ?: "None yet")
-                DiagnosticsLine("Accept types", fileChooserAcceptTypes ?: "None yet")
-                DiagnosticsLine("Last picker outcome", fileChooserOutcome ?: "None yet")
+                DiagnosticsLine("Picker mode", fileChooserMode ?: DIAGNOSTIC_NONE_YET)
+                DiagnosticsLine("Last picker host", fileChooserHost ?: DIAGNOSTIC_NONE_YET)
+                DiagnosticsLine("Accept types", fileChooserAcceptTypes ?: DIAGNOSTIC_NONE_YET)
+                DiagnosticsLine("Last picker outcome", fileChooserOutcome ?: DIAGNOSTIC_NONE_YET)
                 HorizontalDivider()
                 DiagnosticsLine("DOM capability probe", probeSummary)
                 Text(
@@ -1259,6 +1297,7 @@ private fun createConfiguredWebView(
     initialUrl: String,
     isDesktop: Boolean,
     isServiceSelected: () -> Boolean,
+    onDocumentStarted: () -> Unit,
     onUrlChanged: (String) -> Unit,
     onTitleChanged: (String) -> Unit,
     onFaviconChanged: (Bitmap) -> Unit,
@@ -1351,6 +1390,7 @@ private fun createConfiguredWebView(
 
         webViewClient = object : WebViewClient() {
             override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
+                onDocumentStarted()
                 url?.let { pageUrl ->
                     onUrlChanged(pageUrl)
                     if (favicon != null && providerUrlMatches(service, pageUrl)) {

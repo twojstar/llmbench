@@ -64,6 +64,11 @@ internal fun providerDiagnosticsHost(url: String?): String? = url
     ?.trimEnd('.')
     ?.lowercase()
 
+internal fun providerDiagnosticsDocumentMatches(expectedUrl: String?, currentUrl: String?): Boolean {
+    if (expectedUrl == null || currentUrl == null) return false
+    return expectedUrl.substringBefore('#') == currentUrl.substringBefore('#')
+}
+
 private val SAFE_ACCEPT_TYPE = Regex("^[A-Za-z0-9.+*_-]+/[A-Za-z0-9.+*_-]+$")
 
 internal fun sanitizeProviderAcceptTypes(values: Array<out String>?): String = values

@@ -17,6 +17,28 @@ class ProviderDiagnosticsTest {
     }
 
     @Test
+    fun documentMatchIgnoresFragmentsButRejectsNavigation() {
+        assertTrue(
+            providerDiagnosticsDocumentMatches(
+                "https://chatgpt.com/c/123#first",
+                "https://chatgpt.com/c/123#second"
+            )
+        )
+        assertTrue(
+            !providerDiagnosticsDocumentMatches(
+                "https://chatgpt.com/c/123",
+                "https://chatgpt.com/c/456"
+            )
+        )
+        assertTrue(
+            !providerDiagnosticsDocumentMatches(
+                "https://chatgpt.com/c/123?mode=a",
+                "https://chatgpt.com/c/123?mode=b"
+            )
+        )
+    }
+
+    @Test
     fun acceptTypesKeepOnlyBoundedMimeTokens() {
         assertEquals(
             "image/*, application/pdf",
