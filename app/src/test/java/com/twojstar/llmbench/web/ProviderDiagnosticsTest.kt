@@ -83,7 +83,7 @@ class ProviderDiagnosticsTest {
             providerDiagnosticsProbeScript(WebAiService.QWEN, "https://qwen.ai/")
         )
 
-        assertTrue(script.contains("autocomplete=\"username\""))
+        assertTrue(script.contains("autocomplete~=\"username\""))
         assertTrue(script.contains("input[type=\"password\"]"))
         assertTrue(script.contains("node.multiple === true"))
         assertTrue(!script.contains(".value"))
@@ -123,17 +123,7 @@ class ProviderDiagnosticsTest {
             parseProviderDiagnosticsProbeResult("\"0|0|0|0|0|0|none\"")
         )
         assertEquals(
-            ProviderDiagnosticsProbeResult.Ready(
-                ProviderDomCapabilities(
-                    textareas = 1,
-                    contentEditables = 0,
-                    identityInputs = 0,
-                    passwordInputs = 0,
-                    fileInputs = 0,
-                    multipleFileInputs = 0,
-                    activeEditorKind = null
-                )
-            ),
+            ProviderDiagnosticsProbeResult.Failed,
             parseProviderDiagnosticsProbeResult("\"1|0|0|0|0|0|unexpected\"")
         )
     }

@@ -125,7 +125,7 @@ internal fun providerDiagnosticsProbeScript(
             ).length;
             var identityInputs = Array.prototype.filter.call(
                 document.querySelectorAll(
-                    'input[type="email"], input[autocomplete="email"], input[autocomplete="username"]'
+                    'input[type="email"], input[autocomplete~="email"], input[autocomplete~="username"]'
                 ),
                 llmbenchVisible
             ).length;
@@ -183,7 +183,11 @@ internal fun parseProviderDiagnosticsProbeResult(rawResult: String?): ProviderDi
     if (counts.any { it < 0 } || multipleFileInputs > fileInputs) {
         return ProviderDiagnosticsProbeResult.Failed
     }
-    val activeKind = parts[6].takeIf { it in setOf("textarea", "contenteditable", "input") }
+    val activeKind = when (parts[6]) {
+        "none" -> null
+        "textarea", "contenteditable", "input" -> parts[6]
+        else -> return ProviderDiagnosticsProbeResult.Failed
+    }
     return ProviderDiagnosticsProbeResult.Ready(
         ProviderDomCapabilities(
             textareas = textareas,
