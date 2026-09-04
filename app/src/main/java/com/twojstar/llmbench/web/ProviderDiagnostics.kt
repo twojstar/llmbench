@@ -64,6 +64,13 @@ internal fun providerDiagnosticsHost(url: String?): String? = url
     ?.trimEnd('.')
     ?.lowercase()
 
+internal fun providerDiagnosticsPageHost(service: WebAiService, pageUrl: String?): String =
+    if (pageUrl != null && providerUrlMatches(service, pageUrl)) {
+        providerDiagnosticsHost(pageUrl) ?: "unavailable"
+    } else {
+        "off-provider"
+    }
+
 internal fun providerDiagnosticsDocumentMatches(expectedUrl: String?, currentUrl: String?): Boolean {
     if (expectedUrl == null || currentUrl == null) return false
     return expectedUrl.substringBefore('#') == currentUrl.substringBefore('#')

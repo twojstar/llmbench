@@ -17,6 +17,19 @@ class ProviderDiagnosticsTest {
     }
 
     @Test
+    fun pickerHostIsRecordedOnlyForProviderOwnedPages() {
+        assertEquals(
+            "chatgpt.com",
+            providerDiagnosticsPageHost(WebAiService.CHATGPT, "https://chatgpt.com/c/123")
+        )
+        assertEquals(
+            "off-provider",
+            providerDiagnosticsPageHost(WebAiService.CHATGPT, "https://accounts.example.com/upload")
+        )
+        assertEquals("off-provider", providerDiagnosticsPageHost(WebAiService.CHATGPT, null))
+    }
+
+    @Test
     fun documentMatchIgnoresFragmentsButRejectsNavigation() {
         assertTrue(
             providerDiagnosticsDocumentMatches(

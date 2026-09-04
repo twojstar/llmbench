@@ -68,6 +68,7 @@ import com.twojstar.llmbench.web.ProviderDiagnosticsSnapshot
 import com.twojstar.llmbench.web.StudioPromptApplyResult
 import com.twojstar.llmbench.web.probeProviderDiagnostics
 import com.twojstar.llmbench.web.providerDiagnosticsHost
+import com.twojstar.llmbench.web.providerDiagnosticsPageHost
 import com.twojstar.llmbench.web.providerDiagnosticsDocumentMatches
 import com.twojstar.llmbench.web.providerDiagnosticsProbeSummary
 import com.twojstar.llmbench.web.applyProviderWebTweaks
@@ -165,7 +166,7 @@ fun WebChatScreen(
         nextFileChooserRequestId = requestId
         fileChooserLatestRequestIds[service] = requestId
         fileChooserRequestCounts[service] = (fileChooserRequestCounts[service] ?: 0) + 1
-        fileChooserHosts[service] = providerDiagnosticsHost(pageUrl) ?: "unavailable"
+        fileChooserHosts[service] = providerDiagnosticsPageHost(service, pageUrl)
         fileChooserModes[service] = if (
             params.mode == WebChromeClient.FileChooserParams.MODE_OPEN_MULTIPLE
         ) "multiple" else "single"
@@ -562,23 +563,25 @@ fun WebChatScreen(
                                         pendingFileCallback.value = callback
                                         pendingFileService.value = service
                                         pendingFileRequestId.value = requestId
-                                        try {
+                                        val launchError = runCatching {
                                             fileChooserLauncher.launch(params.createIntent())
+                                        }.exceptionOrNull()
+                                        if (launchError == null) {
                                             true
-                                        } catch (error: RuntimeException) {
-                                            val outcome = when (error) {
+                                        } else {
+                                            val outcome = when (launchError) {
                                                 is ActivityNotFoundException -> {
-                                                    Log.w(WEBVIEW_LOG_TAG, "No file picker available", error)
+                                                    Log.w(WEBVIEW_LOG_TAG, "No file picker available", launchError)
                                                     viewModel.showSnackbar("No file picker available")
                                                     "no picker available"
                                                 }
                                                 is SecurityException -> {
-                                                    Log.w(WEBVIEW_LOG_TAG, "File picker launch blocked", error)
+                                                    Log.w(WEBVIEW_LOG_TAG, "File picker launch blocked", launchError)
                                                     viewModel.showSnackbar("File picker was blocked")
                                                     "picker blocked"
                                                 }
                                                 is IllegalStateException -> {
-                                                    Log.w(WEBVIEW_LOG_TAG, "File picker already active", error)
+                                                    Log.w(WEBVIEW_LOG_TAG, "File picker already active", launchError)
                                                     "picker already active"
                                                 }
                                                 else -> {
@@ -586,7 +589,7 @@ fun WebChatScreen(
                                                     pendingFileService.value = null
                                                     pendingFileRequestId.value = null
                                                     callback.onReceiveValue(null)
-                                                    throw error
+                                                    throw launchError
                                                 }
                                             }
                                             pendingFileCallback.value = null
