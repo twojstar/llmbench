@@ -151,12 +151,87 @@ object PresetProfiles {
         customNote = "Great for learning complex algorithms and frameworks."
     )
 
+    val ImplementationEngineerOverlay = ProfileOverlay(
+        id = "implementation-engineer",
+        name = "Implementation Engineer",
+        description = "Technical, proactive implementation style with runnable code and focused criticism",
+        personalityBase = "professional",
+        personalityIntensity = 2,
+        modifierOverrides = mapOf(
+            "technical" to 3,
+            "honest" to 2,
+            "concise" to 2,
+            "critical" to 1,
+            "warm" to 1
+        ),
+        preamble = "multiStepOnly",
+        initiative = "proactive",
+        verification = "normal",
+        questionPolicy = "materialAmbiguity",
+        assumptionPolicy = "balanced",
+        codeExamples = "runnable"
+    )
+
+    val ResearchAnalystOverlay = ProfileOverlay(
+        id = "research-analyst",
+        name = "Research Analyst",
+        description = "Evidence-first research style with strict verification and traceable external claims",
+        personalityBase = "professional",
+        personalityIntensity = 2,
+        modifierOverrides = mapOf(
+            "honest" to 3,
+            "critical" to 2,
+            "technical" to 2,
+            "concise" to 1,
+            "educational" to 1
+        ),
+        initiative = "proactive",
+        verification = "strict",
+        questionPolicy = "blockingOnly",
+        assumptionPolicy = "cautious",
+        knowledgeOverrides = mapOf(
+            "distinguishRawFromSynthesis" to true,
+            "surfaceSourceConflicts" to true,
+            "requireTraceableClaims" to true
+        ),
+        tables = "whenUseful",
+        citations = "requiredForExternalFacts"
+    )
+
+    val TranslatorEditorOverlay = ProfileOverlay(
+        id = "translator-editor",
+        name = "Translator & Editor",
+        description = "Editing-oriented style that preserves requested artifact style without mirroring input language",
+        personalityBase = "professional",
+        personalityIntensity = 2,
+        modifierOverrides = mapOf(
+            "concise" to 2,
+            "honest" to 2,
+            "warm" to 1,
+            "technical" to 0,
+            "educational" to 0
+        ),
+        adaptationOverrides = mapOf(
+            "mirrorLanguage" to false,
+            "preserveRequestedArtifactStyle" to true
+        ),
+        preamble = "off",
+        initiative = "conservative",
+        verification = "normal",
+        questionPolicy = "blockingOnly",
+        assumptionPolicy = "cautious",
+        codeExamples = "minimal"
+    )
+
     val BuiltInOverlays = listOf(
         ExampleOverlay,
         StrictCodeReviewerOverlay,
         CynicalRefactorerOverlay,
         ConciseAssistantOverlay,
-        EducationalMentorMentorOverlaySafe()
+        EducationalMentorMentorOverlaySafe(),
+        ImplementationEngineerOverlay,
+        ResearchAnalystOverlay,
+        TranslatorEditorOverlay
     )
 
     private fun EducationalMentorMentorOverlaySafe(): ProfileOverlay = EducationalMentorOverlay
