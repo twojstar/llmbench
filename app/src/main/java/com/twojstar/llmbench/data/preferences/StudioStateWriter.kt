@@ -18,6 +18,7 @@ internal class StudioStateWriter private constructor(
     private val latestSnapshot = AtomicReference<StudioStateSnapshot?>(null)
     private val ownerSequence = AtomicLong(0)
     private val currentOwner = AtomicLong(0)
+    private val ownerLock = Any()
 
     init {
         scope.launch {
@@ -31,12 +32,17 @@ internal class StudioStateWriter private constructor(
         }
     }
 
-    fun registerOwner(): Long = ownerSequence.incrementAndGet().also(currentOwner::set)
+    fun registerOwner(): Long = synchronized(ownerLock) {
+        ownerSequence.incrementAndGet().also(currentOwner::set)
+    }
 
     fun enqueue(snapshot: StudioStateSnapshot, ownerId: Long) {
-        if (currentOwner.get() != ownerId) return
-        latestSnapshot.set(snapshot)
-        snapshots.trySend(snapshot)
+        synchronized(ownerLock) {
+            if (currentOwner.get() == ownerId) {
+                latestSnapshot.set(snapshot)
+                snapshots.trySend(snapshot)
+            }
+        }
     }
 
     fun currentSnapshot(): StudioStateSnapshot? = latestSnapshot.get()
