@@ -145,6 +145,9 @@ fun WebChatScreen(
     var pendingExternalIntentUri by remember { mutableStateOf<Uri?>(null) }
     val pendingFileCallback = remember { mutableStateOf<ValueCallback<Array<Uri>>?>(null) }
     val pendingFileService = remember { mutableStateOf<WebAiService?>(null) }
+    val pendingFileRequestId = remember { mutableStateOf<Int?>(null) }
+    var nextFileChooserRequestId by remember { mutableIntStateOf(0) }
+    val fileChooserLatestRequestIds = remember { mutableStateMapOf<WebAiService, Int>() }
     val fileChooserRequestCounts = remember { mutableStateMapOf<WebAiService, Int>() }
     val fileChooserAcceptTypes = remember { mutableStateMapOf<WebAiService, String>() }
     val fileChooserModes = remember { mutableStateMapOf<WebAiService, String>() }
@@ -152,13 +155,40 @@ fun WebChatScreen(
     val fileChooserOutcomes = remember { mutableStateMapOf<WebAiService, String>() }
     val documentRevisions = remember { mutableStateMapOf<WebAiService, Int>() }
 
+    fun recordFileChooserRequest(
+        service: WebAiService,
+        params: WebChromeClient.FileChooserParams,
+        pageUrl: String?,
+        outcome: String
+    ): Int {
+        val requestId = nextFileChooserRequestId + 1
+        nextFileChooserRequestId = requestId
+        fileChooserLatestRequestIds[service] = requestId
+        fileChooserRequestCounts[service] = (fileChooserRequestCounts[service] ?: 0) + 1
+        fileChooserHosts[service] = providerDiagnosticsHost(pageUrl) ?: "unavailable"
+        fileChooserModes[service] = if (
+            params.mode == WebChromeClient.FileChooserParams.MODE_OPEN_MULTIPLE
+        ) "multiple" else "single"
+        fileChooserAcceptTypes[service] = sanitizeProviderAcceptTypes(params.acceptTypes)
+        fileChooserOutcomes[service] = outcome
+        return requestId
+    }
+
+    fun updateFileChooserOutcome(service: WebAiService, requestId: Int, outcome: String) {
+        if (fileChooserLatestRequestIds[service] == requestId) {
+            fileChooserOutcomes[service] = outcome
+        }
+    }
+
     val fileChooserLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
         val callback = pendingFileCallback.value ?: return@rememberLauncherForActivityResult
         val service = pendingFileService.value
+        val requestId = pendingFileRequestId.value
         pendingFileCallback.value = null
         pendingFileService.value = null
+        pendingFileRequestId.value = null
         val resultData = result.data
         val selectedUris = if (result.resultCode == Activity.RESULT_OK && resultData != null) {
             WebChromeClient.FileChooserParams.parseResult(result.resultCode, resultData)
@@ -166,10 +196,13 @@ fun WebChatScreen(
                 ?.toTypedArray()
                 ?.takeIf { it.isNotEmpty() }
         } else null
-        service?.let {
-            fileChooserOutcomes[it] = selectedUris
-                ?.let { uris -> "selected (${uris.size})" }
-                ?: "cancelled / no accepted file"
+        if (service != null && requestId != null) {
+            updateFileChooserOutcome(
+                service,
+                requestId,
+                selectedUris?.let { uris -> "selected (${uris.size})" }
+                    ?: "cancelled / no accepted file"
+            )
         }
         callback.onReceiveValue(selectedUris)
     }
@@ -305,6 +338,7 @@ fun WebChatScreen(
             pendingFileCallback.value?.onReceiveValue(null)
             pendingFileCallback.value = null
             pendingFileService.value = null
+            pendingFileRequestId.value = null
             val webViews = webViewMap.values.toList()
             webViewMap.clear()
             webViews.forEach(::releaseWebView)
@@ -339,7 +373,7 @@ fun WebChatScreen(
             val stillCurrent = diagnosticsProbeRequestId == requestId &&
                 selectedService == service &&
                 webViewMap[service] === webView &&
-                documentRevisions[service] == requestedDocumentRevision &&
+                (documentRevisions[service] ?: 0) == requestedDocumentRevision &&
                 providerDiagnosticsDocumentMatches(requestedUrl, webView.url)
             if (stillCurrent) diagnosticsProbeResult = result
         }
@@ -348,21 +382,6 @@ fun WebChatScreen(
     fun openProviderDiagnostics() {
         showProviderDiagnosticsDialog = true
         refreshProviderDiagnostics()
-    }
-
-    fun recordFileChooserRequest(
-        service: WebAiService,
-        params: WebChromeClient.FileChooserParams,
-        pageUrl: String?,
-        outcome: String
-    ) {
-        fileChooserRequestCounts[service] = (fileChooserRequestCounts[service] ?: 0) + 1
-        fileChooserHosts[service] = providerDiagnosticsHost(pageUrl) ?: "unavailable"
-        fileChooserModes[service] = if (
-            params.mode == WebChromeClient.FileChooserParams.MODE_OPEN_MULTIPLE
-        ) "multiple" else "single"
-        fileChooserAcceptTypes[service] = sanitizeProviderAcceptTypes(params.acceptTypes)
-        fileChooserOutcomes[service] = outcome
     }
 
     fun applyStudioPrompt() {
@@ -534,33 +553,46 @@ fun WebChatScreen(
                                         callback.onReceiveValue(null)
                                         true
                                     } else {
+                                        val requestId = recordFileChooserRequest(
+                                            service,
+                                            params,
+                                            pageUrl,
+                                            "picker launched"
+                                        )
                                         pendingFileCallback.value = callback
                                         pendingFileService.value = service
-                                        recordFileChooserRequest(service, params, pageUrl, "picker launched")
+                                        pendingFileRequestId.value = requestId
                                         try {
                                             fileChooserLauncher.launch(params.createIntent())
                                             true
-                                        } catch (error: ActivityNotFoundException) {
-                                            Log.w(WEBVIEW_LOG_TAG, "No file picker available", error)
+                                        } catch (error: RuntimeException) {
+                                            val outcome = when (error) {
+                                                is ActivityNotFoundException -> {
+                                                    Log.w(WEBVIEW_LOG_TAG, "No file picker available", error)
+                                                    viewModel.showSnackbar("No file picker available")
+                                                    "no picker available"
+                                                }
+                                                is SecurityException -> {
+                                                    Log.w(WEBVIEW_LOG_TAG, "File picker launch blocked", error)
+                                                    viewModel.showSnackbar("File picker was blocked")
+                                                    "picker blocked"
+                                                }
+                                                is IllegalStateException -> {
+                                                    Log.w(WEBVIEW_LOG_TAG, "File picker already active", error)
+                                                    "picker already active"
+                                                }
+                                                else -> {
+                                                    pendingFileCallback.value = null
+                                                    pendingFileService.value = null
+                                                    pendingFileRequestId.value = null
+                                                    callback.onReceiveValue(null)
+                                                    throw error
+                                                }
+                                            }
                                             pendingFileCallback.value = null
                                             pendingFileService.value = null
-                                            fileChooserOutcomes[service] = "no picker available"
-                                            callback.onReceiveValue(null)
-                                            viewModel.showSnackbar("No file picker available")
-                                            true
-                                        } catch (error: SecurityException) {
-                                            Log.w(WEBVIEW_LOG_TAG, "File picker launch blocked", error)
-                                            pendingFileCallback.value = null
-                                            pendingFileService.value = null
-                                            fileChooserOutcomes[service] = "picker blocked"
-                                            callback.onReceiveValue(null)
-                                            viewModel.showSnackbar("File picker was blocked")
-                                            true
-                                        } catch (error: IllegalStateException) {
-                                            Log.w(WEBVIEW_LOG_TAG, "File picker already active", error)
-                                            pendingFileCallback.value = null
-                                            pendingFileService.value = null
-                                            fileChooserOutcomes[service] = "picker already active"
+                                            pendingFileRequestId.value = null
+                                            updateFileChooserOutcome(service, requestId, outcome)
                                             callback.onReceiveValue(null)
                                             true
                                         }
