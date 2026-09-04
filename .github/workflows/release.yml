@@ -153,31 +153,119 @@ jobs:
           set -euo pipefail
           tag="llmbench-latest"
           stage="llmbench-stage-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          backup="llmbench-backup-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          release_id=""
+          old_id=""
+          old_ref_sha=""
+          had_old_ref=false
+          old_moved=false
+          promoted=false
+
+          cleanup_failed_promotion() {
+            status=$?
+            trap - EXIT
+            set +e
+
+            if [ "$status" -eq 0 ]; then
+              return 0
+            fi
+
+            echo "::warning::Rolling release promotion failed; cleaning staging state."
+
+            if [ -n "$release_id" ]; then
+              gh api --method PATCH "repos/$GH_REPO/releases/$release_id" \
+                -f tag_name="$stage" -F draft=true -F prerelease=false \
+                -f make_latest=false >/dev/null 2>&1 \
+                || gh api --method DELETE "repos/$GH_REPO/releases/$release_id" >/dev/null 2>&1 \
+                || true
+            else
+              staged_id="$(gh api "repos/$GH_REPO/releases/tags/$stage" --jq .id 2>/dev/null || true)"
+              if [ -n "$staged_id" ]; then
+                gh api --method DELETE "repos/$GH_REPO/releases/$staged_id" >/dev/null 2>&1 || true
+              fi
+            fi
+
+            if [ "$had_old_ref" = true ]; then
+              if gh api "repos/$GH_REPO/git/ref/tags/$tag" >/dev/null 2>&1; then
+                gh api --method PATCH "repos/$GH_REPO/git/refs/tags/$tag" \
+                  -f sha="$old_ref_sha" -F force=true >/dev/null 2>&1 || true
+              else
+                gh api --method POST "repos/$GH_REPO/git/refs" \
+                  -f ref="refs/tags/$tag" -f sha="$old_ref_sha" >/dev/null 2>&1 || true
+              fi
+            else
+              gh api --method DELETE "repos/$GH_REPO/git/refs/tags/$tag" >/dev/null 2>&1 || true
+            fi
+
+            restored=true
+            if [ "$old_moved" = true ]; then
+              if ! gh api --method PATCH "repos/$GH_REPO/releases/$old_id" \
+                -f tag_name="$tag" -F draft=false -F prerelease=false \
+                -f make_latest=true >/dev/null 2>&1; then
+                restored=false
+                echo "::error::Could not restore the previous rolling release; backup remains under $backup."
+              fi
+            fi
+
+            if [ -n "$release_id" ]; then
+              gh api --method DELETE "repos/$GH_REPO/releases/$release_id" >/dev/null 2>&1 || true
+            fi
+            gh api --method DELETE "repos/$GH_REPO/git/refs/tags/$stage" >/dev/null 2>&1 || true
+            if [ "$restored" = true ]; then
+              gh api --method DELETE "repos/$GH_REPO/git/refs/tags/$backup" >/dev/null 2>&1 || true
+            fi
+
+            exit "$status"
+          }
+          trap cleanup_failed_promotion EXIT
 
           printf 'Signed Android builds from `%s`.\n\nRolling release. Assets are replaced after each successful build of `main`.\nApp version: `%s`.\n' \
             "$GITHUB_SHA" "$RELEASE_VERSION" > release-notes.md
 
-          # Build the complete replacement privately first. The previous public
-          # rolling release remains untouched if staging or verification fails.
           gh release create "$stage" --draft --target "$GITHUB_SHA" \
             --title "LlmBench · rolling" --notes-file release-notes.md
+          release_id="$(gh api "repos/$GH_REPO/releases/tags/$stage" --jq .id)"
           gh release upload "$stage" dist/llmbench.apk dist/llmbench.aab
 
-          release_id="$(gh api "repos/$GH_REPO/releases/tags/$stage" --jq .id)"
           asset_count="$(gh api "repos/$GH_REPO/releases/$release_id/assets" --jq 'length')"
           test "$asset_count" -eq 2
 
-          # Swap only after the staged release is complete. This keeps failures
-          # before this point from corrupting the existing public release.
-          if old_id="$(gh api "repos/$GH_REPO/releases/tags/$tag" --jq .id 2>/dev/null)"; then
-            gh api --method DELETE "repos/$GH_REPO/releases/$old_id"
+          if old_ref_sha="$(gh api "repos/$GH_REPO/git/ref/tags/$tag" --jq .object.sha 2>/dev/null)"; then
+            had_old_ref=true
           fi
-          if gh api "repos/$GH_REPO/git/ref/tags/$tag" >/dev/null 2>&1; then
-            gh api --method DELETE "repos/$GH_REPO/git/refs/tags/$tag"
+          if old_id="$(gh api "repos/$GH_REPO/releases/tags/$tag" --jq .id 2>/dev/null)"; then
+            if [ "$had_old_ref" != true ]; then
+              echo "::error::Existing rolling release has no matching git tag."
+              exit 1
+            fi
+
+            gh api --method POST "repos/$GH_REPO/git/refs" \
+              -f ref="refs/tags/$backup" -f sha="$old_ref_sha" >/dev/null
+            gh api --method PATCH "repos/$GH_REPO/releases/$old_id" \
+              -f tag_name="$backup" -f make_latest=false >/dev/null
+            old_moved=true
           fi
 
           gh api --method PATCH "repos/$GH_REPO/releases/$release_id" \
             -f tag_name="$tag" -f target_commitish="$GITHUB_SHA" \
             -f name='LlmBench · rolling' -F draft=false -F prerelease=false \
             -f make_latest=true >/dev/null
-          gh api --method DELETE "repos/$GH_REPO/git/refs/tags/$stage" 2>/dev/null || true
+
+          if gh api "repos/$GH_REPO/git/ref/tags/$tag" >/dev/null 2>&1; then
+            gh api --method PATCH "repos/$GH_REPO/git/refs/tags/$tag" \
+              -f sha="$GITHUB_SHA" -F force=true >/dev/null
+          else
+            gh api --method POST "repos/$GH_REPO/git/refs" \
+              -f ref="refs/tags/$tag" -f sha="$GITHUB_SHA" >/dev/null
+          fi
+          promoted=true
+          trap - EXIT
+
+          gh api --method DELETE "repos/$GH_REPO/git/refs/tags/$stage" >/dev/null 2>&1 || true
+          if [ "$old_moved" = true ]; then
+            if gh api --method DELETE "repos/$GH_REPO/releases/$old_id" >/dev/null 2>&1; then
+              gh api --method DELETE "repos/$GH_REPO/git/refs/tags/$backup" >/dev/null 2>&1 || true
+            else
+              echo "::warning::Previous rolling release kept as $backup because cleanup failed."
+            fi
+          fi
