@@ -36,11 +36,13 @@ internal fun StudioUiState.toStudioStateSnapshot(): StudioStateSnapshot {
 }
 
 internal fun StudioStateSnapshot.resolveStudioState(): RestoredStudioState {
+    val builtInOverlayId = selectedBuiltInOverlayId
+    val customOverlayIndex = selectedCustomOverlayIndex
     val selectedOverlay = when {
-        selectedBuiltInOverlayId != null -> PresetProfiles.BuiltInOverlays.firstOrNull {
-            it.id == selectedBuiltInOverlayId
+        builtInOverlayId != null -> PresetProfiles.BuiltInOverlays.firstOrNull {
+            it.id == builtInOverlayId
         }
-        selectedCustomOverlayIndex != null -> customOverlays.getOrNull(selectedCustomOverlayIndex)
+        customOverlayIndex != null -> customOverlays.getOrNull(customOverlayIndex)
         else -> null
     }
 
