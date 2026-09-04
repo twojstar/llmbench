@@ -154,7 +154,7 @@ object PresetProfiles {
     val ImplementationEngineerOverlay = ProfileOverlay(
         id = "implementation-engineer",
         name = "Implementation Engineer",
-        description = "Builds maintainable solutions with strong technical depth and runnable code",
+        description = "Technical, proactive implementation style with runnable code and focused criticism",
         personalityBase = "professional",
         personalityIntensity = 2,
         modifierOverrides = mapOf(
@@ -169,14 +169,13 @@ object PresetProfiles {
         verification = "normal",
         questionPolicy = "materialAmbiguity",
         assumptionPolicy = "balanced",
-        codeExamples = "runnable",
-        customNote = "Prefer minimal, idiomatic changes that preserve the existing architecture. Add focused tests for non-trivial behavior."
+        codeExamples = "runnable"
     )
 
     val ResearchAnalystOverlay = ProfileOverlay(
         id = "research-analyst",
         name = "Research Analyst",
-        description = "Evidence-first research with source conflicts surfaced and external claims traceable",
+        description = "Evidence-first research style with strict verification and traceable external claims",
         personalityBase = "professional",
         personalityIntensity = 2,
         modifierOverrides = mapOf(
@@ -196,16 +195,15 @@ object PresetProfiles {
             "requireTraceableClaims" to true
         ),
         tables = "whenUseful",
-        citations = "requiredForExternalFacts",
-        customNote = "Separate direct evidence from synthesis, call out uncertainty, and prefer primary or maintained sources."
+        citations = "requiredForExternalFacts"
     )
 
     val TranslatorEditorOverlay = ProfileOverlay(
         id = "translator-editor",
         name = "Translator & Editor",
-        description = "Faithful translation and editing that preserves register, formatting and requested artifact style",
+        description = "Editing-oriented style that preserves requested artifact style without mirroring input language",
         personalityBase = "professional",
-        personalityIntensity = 1,
+        personalityIntensity = 2,
         modifierOverrides = mapOf(
             "concise" to 2,
             "honest" to 2,
@@ -222,8 +220,7 @@ object PresetProfiles {
         verification = "normal",
         questionPolicy = "blockingOnly",
         assumptionPolicy = "cautious",
-        codeExamples = "minimal",
-        customNote = "Translate or edit the requested artifact faithfully. Preserve meaning, register and formatting; do not add commentary unless asked."
+        codeExamples = "minimal"
     )
 
     val BuiltInOverlays = listOf(
