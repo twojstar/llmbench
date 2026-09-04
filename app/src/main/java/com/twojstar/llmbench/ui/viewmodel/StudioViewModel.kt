@@ -9,10 +9,12 @@ import com.twojstar.llmbench.data.engine.ProfileMerger
 import com.twojstar.llmbench.data.engine.ValidationResult
 import com.twojstar.llmbench.data.engine.YamlParser
 import com.twojstar.llmbench.data.model.*
+import com.twojstar.llmbench.data.preferences.StudioStateStore
+import com.twojstar.llmbench.data.preferences.StudioStateWriter
 import com.twojstar.llmbench.data.security.ApiKeyStore
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.util.concurrent.atomic.AtomicLong
@@ -72,26 +74,51 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
 
     private val aiChatService = AiChatService()
     private val apiKeyStore = ApiKeyStore(application.applicationContext)
+    private val studioStateStore = StudioStateStore(application.applicationContext)
+    private var studioStateWriter: StudioStateWriter? = null
 
     private val _uiState = MutableStateFlow(StudioUiState())
     private val pendingGatewayCatalogRefreshes = mutableSetOf<AiProvider>()
     private var chatGenerationJob: Job? = null
+    private var studioPersistenceJob: Job? = null
+    private var studioPersistenceOwnerId: Long? = null
     private val activeChatGenerationId = AtomicLong(0)
     val uiState: StateFlow<StudioUiState> = _uiState.asStateFlow()
 
     init {
         _uiState.update { it.copy(apiKeyConfig = apiKeyStore.load()) }
-        recompute()
+        val cachedStudioState = StudioStateWriter.currentSnapshot()
+        val primaryStudioState = cachedStudioState
+            ?.let(StudioStateDecodeResult::Success)
+            ?: studioStateStore.load()
+        val useFallbackPersistence = primaryStudioState is StudioStateDecodeResult.UnsupportedVersion
+        val persistedStudioState = if (useFallbackPersistence && cachedStudioState == null) {
+            studioStateStore.loadFallback()
+        } else {
+            primaryStudioState
+        }
+        when (persistedStudioState) {
+            is StudioStateDecodeResult.Success -> restoreStudioSnapshot(persistedStudioState.snapshot)
+            else -> recompute()
+        }
         initPlaygroundWelcome()
         initChatWelcome()
+        startStudioPersistence(useFallbackPersistence)
     }
 
     private fun initPlaygroundWelcome() {
+        val state = _uiState.value
+        val activeProfile = state.mergedProfile
+        val profileName = state.selectedOverlay?.name ?: if (activeProfile == PresetProfiles.DefaultBaseProfile) {
+            "Default Friendly"
+        } else {
+            activeProfile.personality.base.replaceFirstChar { it.uppercase() }
+        }
         val welcomeMsg = ChatMessage(
             id = "welcome",
             sender = "assistant",
             text = "Hello! I am ready to assist. Adjust personality knobs, overlays, or collaboration policies in the Studio tab, and ask me any question to test how my responses adapt to your style profile.",
-            notes = listOf("Active Profile: Default Friendly (intensity: 1)")
+            notes = listOf("Active Profile: $profileName (intensity: ${activeProfile.personality.intensity ?: 1})")
         )
         _uiState.update { it.copy(playgroundMessages = listOf(welcomeMsg)) }
     }
@@ -522,6 +549,23 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
         recompute()
     }
 
+    internal fun replacePersistedStudioState(
+        baseProfile: Profile,
+        customOverlays: List<ProfileOverlay>,
+        selectedOverlay: ProfileOverlay?,
+        language: String
+    ) {
+        _uiState.update { current ->
+            current.copy(
+                baseProfile = baseProfile,
+                availableOverlays = PresetProfiles.BuiltInOverlays + customOverlays,
+                selectedOverlay = selectedOverlay,
+                language = language
+            )
+        }
+        recompute()
+    }
+
     fun resetToDefault() {
         _uiState.update {
             it.copy(
@@ -668,6 +712,28 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
                 yamlRepresentation = yaml
             )
         }
+    }
+
+    private fun startStudioPersistence(useFallback: Boolean) {
+        val writer = StudioStateWriter.getInstance(studioStateStore, fallback = useFallback)
+            .also { studioStateWriter = it }
+        val ownerId = writer.registerOwner().also { studioPersistenceOwnerId = it }
+        writer.enqueue(uiState.value.toStudioStateSnapshot(), ownerId)
+        studioPersistenceJob = viewModelScope.launch {
+            uiState
+                .map { it.toStudioStateSnapshot() }
+                .distinctUntilChanged()
+                .collect { snapshot -> writer.enqueue(snapshot, ownerId) }
+        }
+    }
+
+    override fun onCleared() {
+        val latestSnapshot = uiState.value.toStudioStateSnapshot()
+        studioPersistenceJob?.cancel()
+        studioPersistenceOwnerId?.let { ownerId ->
+            studioStateWriter?.enqueue(latestSnapshot, ownerId)
+        }
+        super.onCleared()
     }
 
     fun showSnackbar(msg: String) {
