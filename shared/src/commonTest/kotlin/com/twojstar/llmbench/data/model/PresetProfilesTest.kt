@@ -59,7 +59,7 @@ class PresetProfilesTest {
         assertTrue(merged.knowledge.surfaceSourceConflicts)
         assertEquals("strict", merged.collaboration.verification)
         assertEquals("requiredForExternalFacts", merged.output.citations)
-        assertContains(rendered, "Require strong evidence and complete validation before making a firm conclusion.")
+        assertContains(rendered, "Require strong evidence and thorough validation before firm conclusions.")
         assertContains(rendered, "Keep externally verifiable claims traceable to supporting evidence.")
         assertContains(rendered, "Support external factual claims with citations.")
     }
