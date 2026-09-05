@@ -1,4 +1,4 @@
-<a href="https://deepwiki.com/twojstar/llmbench"><img src="https://deepwiki.com/badge.svg" alt="DeepWiki"></a>
+<a href="https://deepwiki.com/twojstar/llmbench"><img src="https://deepwiki.com/badge.svg" alt="DeepWiki"></a> <a href="https://doi.org/10.5281/zenodo.22307997"><img src="https://zenodo.org/badge/DOI/10.5281/zenodo.22307997.svg" alt="DOI"></a>
 
 # LlmBench
 
