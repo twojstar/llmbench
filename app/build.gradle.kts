@@ -17,7 +17,7 @@ if (releaseKeystorePath != null && releaseSigningValues.any { it == null }) {
 
 android {
     namespace = "com.twojstar.llmbench"
-    compileSdk = 35
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "com.twojstar.llmbench"
