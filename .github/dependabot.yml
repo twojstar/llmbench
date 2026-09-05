@@ -5,8 +5,8 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
-      day: "monday"
-      time: "06:00"
+      day: "saturday"
+      time: "10:50"
       timezone: "Europe/Warsaw"
     open-pull-requests-limit: 10
     rebase-strategy: "disabled"
@@ -26,8 +26,8 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
-      day: "monday"
-      time: "06:00"
+      day: "saturday"
+      time: "10:55"
       timezone: "Europe/Warsaw"
     open-pull-requests-limit: 5
     commit-message:
