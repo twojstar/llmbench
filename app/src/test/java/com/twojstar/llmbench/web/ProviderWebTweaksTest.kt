@@ -100,6 +100,16 @@ class ProviderWebTweaksTest {
     }
 
     @Test
+    fun zaiTopLevelNavigationUsesVerifiedBoundaryAndAuthHosts() {
+        assertTrue(shouldLoadHttpsInProviderWebView(WebAiService.ZAI, "https://chat.z.ai/"))
+        assertTrue(shouldLoadHttpsInProviderWebView(WebAiService.ZAI, "https://accounts.google.com/o/oauth2/v2/auth"))
+        assertTrue(shouldLoadHttpsInProviderWebView(WebAiService.ZAI, "https://github.com/login/oauth/authorize"))
+        assertFalse(shouldLoadHttpsInProviderWebView(WebAiService.ZAI, "https://example.com/"))
+        assertFalse(shouldLoadHttpsInProviderWebView(WebAiService.ZAI, "https://github.com.evil.example/"))
+        assertFalse(shouldLoadHttpsInProviderWebView(WebAiService.ZAI, "http://accounts.google.com/"))
+    }
+
+    @Test
     fun acceptsVerifiedMetaLoginAliasWithoutAcceptingSuffixSpoofs() {
         assertTrue(providerHostMatches(WebAiService.META_AI, "alpha.meta.ai"))
         assertTrue(providerHostMatches(WebAiService.META_AI, "www.alpha.meta.ai"))
