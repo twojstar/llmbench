@@ -167,8 +167,8 @@ class MainActivity : ComponentActivity() {
         handleIncomingShareIntent(intent)
     }
 
-    private fun handleIncomingShareIntent(intent: Intent?) {
-        intent?.let(::extractIncomingSharePayload)?.let(viewModel::receiveIncomingShare)
+    private fun handleIncomingShareIntent(intent: Intent) {
+        extractIncomingSharePayload(intent)?.let(viewModel::receiveIncomingShare)
     }
 }
 
