@@ -615,7 +615,9 @@ class AiChatService {
     }
 
     internal fun extractStreamError(event: JsonObject): String? =
-        extractGeminiStreamError(event) ?: extractTypedStreamError(event)
+        extractGeminiStreamError(event)
+            ?: extractTypedStreamError(event)
+            ?: event.takeIf { it.containsKey(STREAM_ERROR_KEY) }?.let(::extractGenericStreamError)
 
     private fun extractGeminiStreamError(event: JsonObject): String? {
         val candidate = event[JSON_CANDIDATES_KEY]?.jsonArray?.firstOrNull() as? JsonObject
@@ -659,6 +661,11 @@ class AiChatService {
 
     internal fun isOpenAiStreamComplete(event: JsonObject): Boolean =
         event[STREAM_TYPE_KEY]?.jsonPrimitive?.contentOrNull == OPENAI_RESPONSE_COMPLETED
+
+    internal fun isOpenAiCompatibleStreamComplete(event: JsonObject): Boolean =
+        event["choices"]?.jsonArray.orEmpty().any { choice ->
+            choice.jsonObject["finish_reason"]?.jsonPrimitive?.contentOrNull != null
+        }
 
     internal fun isClaudeStreamComplete(event: JsonObject): Boolean =
         event[STREAM_TYPE_KEY]?.jsonPrimitive?.contentOrNull == CLAUDE_MESSAGE_STOP
@@ -840,7 +847,7 @@ class AiChatService {
         ).build()
 
         return executeSse(
-            request, ::extractOpenAiCompatibleStreamText, { false }, onTextDelta,
+            request, ::extractOpenAiCompatibleStreamText, ::isOpenAiCompatibleStreamComplete, onTextDelta,
             completeOnDoneSentinel = true
         ).ifEmpty { "Received empty message content." }
     }

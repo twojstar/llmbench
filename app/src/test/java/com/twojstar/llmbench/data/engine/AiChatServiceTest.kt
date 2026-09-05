@@ -29,6 +29,8 @@ private const val GEMINI_ANSWER = "gemini answer"
 private const val SIMULATED_ANSWER = "simulated answer"
 private const val SYSTEM_PROMPT = "system"
 private const val STREAM_HELLO = "hello"
+private const val TEST_STREAM_URL = "https://example.test/stream"
+private const val TEST_EVENT_STREAM_TYPE = "text/event-stream"
 
 class AiChatServiceTest {
     @Test
@@ -324,7 +326,7 @@ class AiChatServiceTest {
         val service = AiChatService()
         val deltas = mutableListOf<String>()
         val response = Response.Builder()
-            .request(Request.Builder().url("https://example.test/stream").build())
+            .request(Request.Builder().url(TEST_STREAM_URL).build())
             .protocol(Protocol.HTTP_1_1)
             .code(200)
             .message("OK")
@@ -333,7 +335,7 @@ class AiChatServiceTest {
                     "data: {\"choices\":[{\"delta\":{\"content\":\"hel\"}}]}\n\n" +
                     "data: {\"choices\":[{\"delta\":{\"content\":\"lo\"}}]}\n\n" +
                     "data: [DONE]\n\n")
-                    .toResponseBody("text/event-stream".toMediaType())
+                    .toResponseBody(TEST_EVENT_STREAM_TYPE.toMediaType())
             )
             .build()
 
@@ -353,13 +355,13 @@ class AiChatServiceTest {
     fun rejectsTruncatedOpenAiCompatibleStream() {
         val service = AiChatService()
         val response = Response.Builder()
-            .request(Request.Builder().url("https://example.test/stream").build())
+            .request(Request.Builder().url(TEST_STREAM_URL).build())
             .protocol(Protocol.HTTP_1_1)
             .code(200)
             .message("OK")
             .body(
                 "data: {\"choices\":[{\"delta\":{\"content\":\"hello\"}}]}\n\n"
-                    .toResponseBody("text/event-stream".toMediaType())
+                    .toResponseBody(TEST_EVENT_STREAM_TYPE.toMediaType())
             )
             .build()
 
@@ -378,16 +380,60 @@ class AiChatServiceTest {
     }
 
     @Test
+    fun propagatesUntypedGatewayStreamError() {
+        val service = AiChatService()
+        val response = Response.Builder()
+            .request(Request.Builder().url(TEST_STREAM_URL).build())
+            .protocol(Protocol.HTTP_1_1).code(200).message("OK")
+            .body((
+                "data: {\"choices\":[{\"delta\":{\"content\":\"partial\"}}]}\n\n" +
+                    "data: {\"error\":{\"message\":\"gateway failed\"}}\n\n" +
+                    "data: [DONE]\n\n"
+                ).toResponseBody(TEST_EVENT_STREAM_TYPE.toMediaType()))
+            .build()
+
+        val result = runCatching {
+            service.readSseResponse(
+                response, service::extractOpenAiCompatibleStreamText,
+                service::isOpenAiCompatibleStreamComplete, {}, completeOnDoneSentinel = true
+            )
+        }
+
+        assertTrue(result.isFailure)
+        assertEquals("gateway failed", result.exceptionOrNull()?.message)
+    }
+
+    @Test
+    fun acceptsGatewayFinishReasonWithoutDoneSentinel() {
+        val service = AiChatService()
+        val response = Response.Builder()
+            .request(Request.Builder().url(TEST_STREAM_URL).build())
+            .protocol(Protocol.HTTP_1_1).code(200).message("OK")
+            .body((
+                "data: {\"choices\":[{\"delta\":{\"content\":\"hello\"}}]}\n\n" +
+                    "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n"
+                ).toResponseBody(TEST_EVENT_STREAM_TYPE.toMediaType()))
+            .build()
+
+        val text = service.readSseResponse(
+            response, service::extractOpenAiCompatibleStreamText,
+            service::isOpenAiCompatibleStreamComplete, {}, completeOnDoneSentinel = true
+        )
+
+        assertEquals(STREAM_HELLO, text)
+    }
+
+    @Test
     fun streamingDeltaCallbackFailurePropagates() {
         val service = AiChatService()
         val response = Response.Builder()
-            .request(Request.Builder().url("https://example.test/stream").build())
+            .request(Request.Builder().url(TEST_STREAM_URL).build())
             .protocol(Protocol.HTTP_1_1)
             .code(200)
             .message("OK")
             .body(
                 "data: {\"type\":\"response.output_text.delta\",\"delta\":\"hello\"}\n\n"
-                    .toResponseBody("text/event-stream".toMediaType())
+                    .toResponseBody(TEST_EVENT_STREAM_TYPE.toMediaType())
             )
             .build()
 
@@ -408,13 +454,13 @@ class AiChatServiceTest {
     fun streamingDeltaCallbackCancellationIsPreserved() {
         val service = AiChatService()
         val response = Response.Builder()
-            .request(Request.Builder().url("https://example.test/stream").build())
+            .request(Request.Builder().url(TEST_STREAM_URL).build())
             .protocol(Protocol.HTTP_1_1)
             .code(200)
             .message("OK")
             .body(
                 "data: {\"type\":\"response.output_text.delta\",\"delta\":\"hello\"}\n\n"
-                    .toResponseBody("text/event-stream".toMediaType())
+                    .toResponseBody(TEST_EVENT_STREAM_TYPE.toMediaType())
             )
             .build()
 
