@@ -135,13 +135,10 @@ class AiChatService {
         }
         config.extraHeaders.forEach { (name, value) -> requestBuilder.header(name, value) }
 
-        val responseBody = httpClient.newCall(requestBuilder.build()).execute().use { response ->
-            val body = response.body?.string().orEmpty()
-            if (!response.isSuccessful) {
-                error("${provider.shortName} model catalog HTTP ${response.code}: ${parseErrorMessage(body) ?: body.take(160)}")
-            }
-            body
-        }
+        val responseBody = executeCancellableJson(
+            request = requestBuilder.build(),
+            httpErrorContext = "${provider.shortName} model catalog"
+        )
         freeGatewayModelOptions(provider, parseGatewayModelCatalog(provider, responseBody))
     }
 
@@ -821,7 +818,8 @@ class AiChatService {
 
     private suspend fun executeCancellableJson(
         request: Request,
-        emptyResponseMessage: String = "Empty response from server"
+        emptyResponseMessage: String = "Empty response from server",
+        httpErrorContext: String? = null
     ): String = suspendCancellableCoroutine { continuation ->
         val call = httpClient.newCall(request)
         continuation.invokeOnCancellation { call.cancel() }
@@ -835,9 +833,10 @@ class AiChatService {
                     response.use {
                         val responseBody = response.body?.string() ?: throw IOException(emptyResponseMessage)
                         if (!response.isSuccessful) {
-                            throw IOException(
-                                parseErrorMessage(responseBody) ?: "HTTP ${response.code}: ${response.message}"
-                            )
+                            val fallbackError = httpErrorContext?.let { context ->
+                                "$context HTTP ${response.code}: ${responseBody.take(160)}"
+                            } ?: "HTTP ${response.code}: ${response.message}"
+                            throw IOException(parseErrorMessage(responseBody) ?: fallbackError)
                         }
                         if (continuation.isActive) continuation.resume(responseBody)
                     }

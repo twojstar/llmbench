@@ -16,7 +16,7 @@ Portable provider/model/profile data lives in `shared`. Android currently owns H
 | OpenRouter | OpenAI-compatible chat completions | `system` message | SSE | bounded visible text replay |
 | AIHubMix | OpenAI-compatible chat completions | `system` message | SSE | bounded visible text replay |
 
-Generation requests are coroutine-cancellable: cancelling generation cancels the underlying OkHttp call. Gateway model-catalog refresh still uses a blocking request and is tracked below for cancellation cleanup. SSE parsing is shared, accepts multi-line `data:` events, propagates provider error events, and stops at provider completion or `[DONE]` where applicable.
+Generation and gateway model-catalog requests are coroutine-cancellable: cancelling their coroutine cancels the underlying OkHttp call. SSE parsing is shared, accepts multi-line `data:` events, propagates provider error events, and stops at provider completion or `[DONE]` where applicable.
 
 ## History invariants
 
@@ -71,7 +71,7 @@ OpenRouter and other gateways may expose metadata that identifies the model actu
 
 ## API/runtime TODO
 
-- [ ] Make gateway model-catalog refresh cancellable through the same OkHttp coroutine bridge used by generation.
+- [x] Make gateway model-catalog refresh cancellable through the same OkHttp coroutine bridge used by generation.
 - [ ] Add a provider capability model for reasoning controls, response metadata and state strategy.
 - [ ] Preserve Gemini thought signatures or migrate that path to a stateful API with explicit storage semantics.
 - [ ] Preserve OpenAI stateless reasoning items while keeping `store=false`, or document a deliberate move to stateful Responses.
