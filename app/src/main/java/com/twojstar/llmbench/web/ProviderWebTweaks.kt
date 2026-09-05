@@ -34,6 +34,7 @@ internal object ProviderWebTweakRegistry {
     // Canonical hosts come from WebAiService.url. Add only verified provider-owned aliases here.
     private val ownedHostAliases = mapOf(
         WebAiService.KIMI to setOf("kimi.com"),
+        WebAiService.QWEN to setOf("qwen.ai"),
         WebAiService.COPILOT to setOf("copilot.com", "copilot.ai", "copilot.cloud.microsoft"),
         WebAiService.META_AI to setOf("alpha.meta.ai")
     )

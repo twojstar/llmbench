@@ -15,7 +15,7 @@ class ChatModelsTest {
     @Test
     fun additionalWebProvidersUseCanonicalEndpoints() {
         val endpoints = mapOf(
-            WebAiService.QWEN to "https://qwen.ai",
+            WebAiService.QWEN to "https://chat.qwen.ai",
             WebAiService.COPILOT to "https://copilot.microsoft.com",
             WebAiService.ZAI to "https://chat.z.ai",
             WebAiService.GROK to "https://grok.com",

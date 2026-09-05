@@ -65,7 +65,7 @@ enum class WebAiService(
         id = "qwen",
         displayName = "Qwen",
         shortName = "Qwen",
-        url = "https://qwen.ai",
+        url = "https://chat.qwen.ai",
         description = "Alibaba Qwen account chat with multimodal, search, and agent capabilities",
         brandHexColor = 0xFF6366F1 // Indigo
     ),

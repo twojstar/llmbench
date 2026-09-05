@@ -30,6 +30,15 @@ class ProviderWebTweaksTest {
     }
 
     @Test
+    fun acceptsVerifiedQwenAliasWithoutAcceptingSuffixSpoofs() {
+        assertTrue(providerHostMatches(WebAiService.QWEN, "qwen.ai"))
+        assertTrue(providerHostMatches(WebAiService.QWEN, "www.qwen.ai"))
+        assertTrue(providerHostMatches(WebAiService.QWEN, "chat.qwen.ai"))
+        assertFalse(providerHostMatches(WebAiService.QWEN, "notqwen.ai"))
+        assertFalse(providerHostMatches(WebAiService.QWEN, "qwen.ai.evil.example"))
+    }
+
+    @Test
     fun acceptsVerifiedCopilotAliasesWithoutAcceptingSuffixSpoofs() {
         listOf("copilot.com", "copilot.ai", "copilot.cloud.microsoft").forEach { host ->
             assertTrue(providerHostMatches(WebAiService.COPILOT, host))
