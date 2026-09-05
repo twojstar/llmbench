@@ -97,6 +97,12 @@ private data class PendingSharedUploadConfirmation(
     val requestId: Int
 )
 
+private data class PendingSharedTextInsertion(
+    val service: WebAiService,
+    val shareId: Long,
+    val webView: WebView
+)
+
 internal fun fileChooserAcceptsMimeType(
     acceptTypes: Array<String>,
     actualMimeType: String?,
@@ -234,6 +240,9 @@ fun WebChatScreen(
     var pendingSharedUploadConfirmation by remember {
         mutableStateOf<PendingSharedUploadConfirmation?>(null)
     }
+    val pendingSharedTextInsertion = remember {
+        mutableStateOf<PendingSharedTextInsertion?>(null)
+    }
     var nextFileChooserRequestId by remember { mutableIntStateOf(0) }
     val fileChooserLatestRequestIds = remember { mutableStateMapOf<WebAiService, Int>() }
     val fileChooserRequestCounts = remember { mutableStateMapOf<WebAiService, Int>() }
@@ -320,6 +329,14 @@ fun WebChatScreen(
     val pendingDesktopModes = remember { mutableStateMapOf<WebAiService, Boolean>() }
     val providerFavicons = remember { mutableStateMapOf<WebAiService, Bitmap>() }
     val currentSelectedService by rememberUpdatedState(selectedService)
+
+    fun releaseSharedTextClaimFor(webView: WebView) {
+        val insertion = pendingSharedTextInsertion.value
+            ?.takeIf { it.webView === webView }
+            ?: return
+        pendingSharedTextInsertion.value = null
+        viewModel.releasePendingWebShareTextClaim(insertion.service, insertion.shareId)
+    }
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val drawerScope = rememberCoroutineScope()
 
@@ -446,6 +463,10 @@ fun WebChatScreen(
             pendingFileRequestId.value = null
             pendingSharedUploadConfirmation?.callback?.onReceiveValue(null)
             pendingSharedUploadConfirmation = null
+            pendingSharedTextInsertion.value?.let { insertion ->
+                viewModel.releasePendingWebShareTextClaim(insertion.service, insertion.shareId)
+                pendingSharedTextInsertion.value = null
+            }
             val webViews = webViewMap.values.toList()
             webViewMap.clear()
             webViews.forEach(::releaseWebView)
@@ -518,14 +539,21 @@ fun WebChatScreen(
     fun applySharedText() {
         val service = selectedService
         val pending = currentPendingWebShare?.takeIf { it.service == service } ?: return
-        val text = pending.payload.text ?: return
-
-        if (!viewModel.consumePendingWebShareText(service, pending.id)) return
+        val text = viewModel.claimPendingWebShareText(service, pending.id) ?: return
 
         fun copyFallback(message: String) {
-            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-            clipboard.setPrimaryClip(ClipData.newPlainText("Shared text", text))
-            viewModel.showSnackbar(message)
+            val copied = runCatching {
+                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                clipboard.setPrimaryClip(ClipData.newPlainText("Shared text", text))
+            }.isSuccess
+            if (copied) {
+                if (viewModel.completePendingWebShareText(service, pending.id)) {
+                    viewModel.showSnackbar(message)
+                }
+            } else {
+                viewModel.releasePendingWebShareTextClaim(service, pending.id)
+                viewModel.showSnackbar("Could not insert or copy shared text.")
+            }
         }
 
         val webView = webViewMap[service]
@@ -533,12 +561,30 @@ fun WebChatScreen(
             copyFallback("Provider is not ready yet; shared text copied instead.")
             return
         }
-        applyStudioPromptToFocusedEditor(webView, service, text) { result ->
-            if (result == StudioPromptApplyResult.INSERTED) {
-                viewModel.showSnackbar("Shared text inserted into ${service.shortName}.")
-            } else {
-                copyFallback("Could not insert shared text; copied it instead.")
+
+        val insertion = PendingSharedTextInsertion(service, pending.id, webView)
+        pendingSharedTextInsertion.value = insertion
+        val insertionError = runCatching {
+            applyStudioPromptToFocusedEditor(webView, service, text) { result ->
+                if (pendingSharedTextInsertion.value != insertion) return@applyStudioPromptToFocusedEditor
+                pendingSharedTextInsertion.value = null
+                if (result == StudioPromptApplyResult.INSERTED) {
+                    if (viewModel.completePendingWebShareText(service, pending.id)) {
+                        viewModel.showSnackbar("Shared text inserted into ${service.shortName}.")
+                    }
+                } else {
+                    val stillClaimed = currentPendingWebShare?.let { current ->
+                        current.service == service && current.id == pending.id && current.isTextClaimed
+                    } == true
+                    if (stillClaimed) {
+                        copyFallback("Could not insert shared text; copied it instead.")
+                    }
+                }
             }
+        }.exceptionOrNull()
+        if (insertionError != null && pendingSharedTextInsertion.value == insertion) {
+            pendingSharedTextInsertion.value = null
+            copyFallback("Could not insert shared text; copied it instead.")
         }
     }
 
@@ -784,6 +830,7 @@ fun WebChatScreen(
                             }
                         },
                         onRelease = { wv ->
+                            releaseSharedTextClaimFor(wv)
                             if (webViewMap.remove(service) === wv) {
                                 releaseWebView(wv)
                             }
@@ -799,6 +846,7 @@ fun WebChatScreen(
                         SharedContentBanner(
                             service = pending.service,
                             payload = pending.payload,
+                            isTextClaimed = pending.isTextClaimed,
                             onInsertText = ::applySharedText,
                             onDismiss = {
                                 viewModel.dismissPendingWebShare(pending.service, pending.id)
@@ -970,6 +1018,7 @@ fun WebChatScreen(
 private fun SharedContentBanner(
     service: WebAiService,
     payload: IncomingSharePayload,
+    isTextClaimed: Boolean,
     onInsertText: () -> Unit,
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier
@@ -995,7 +1044,11 @@ private fun SharedContentBanner(
                     fontWeight = FontWeight.SemiBold
                 )
                 Spacer(Modifier.weight(1f))
-                IconButton(onClick = onDismiss, modifier = Modifier.size(32.dp)) {
+                IconButton(
+                    onClick = onDismiss,
+                    enabled = !isTextClaimed,
+                    modifier = Modifier.size(32.dp)
+                ) {
                     Icon(Icons.Default.Close, contentDescription = "Dismiss shared content")
                 }
             }
@@ -1007,14 +1060,18 @@ private fun SharedContentBanner(
                     overflow = TextOverflow.Ellipsis
                 )
                 Text(
-                    "Tap the provider composer, then Insert within 15 seconds.",
+                    if (isTextClaimed) {
+                        "Shared text insertion is in progress."
+                    } else {
+                        "Tap the provider composer, then Insert within 15 seconds."
+                    },
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                TextButton(onClick = onInsertText) {
+                TextButton(onClick = onInsertText, enabled = !isTextClaimed) {
                     Icon(Icons.Default.ContentPaste, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(Modifier.width(4.dp))
-                    Text("Insert shared text")
+                    Text(if (isTextClaimed) "Inserting…" else "Insert shared text")
                 }
             }
             if (payload.attachmentCount > 0) {

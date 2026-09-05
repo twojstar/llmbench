@@ -14,6 +14,9 @@ import com.twojstar.llmbench.data.preferences.StudioStateWriter
 import com.twojstar.llmbench.data.security.ApiKeyStore
 import com.twojstar.llmbench.share.IncomingSharePayload
 import com.twojstar.llmbench.share.PendingWebShare
+import com.twojstar.llmbench.share.claimText
+import com.twojstar.llmbench.share.completeTextClaim
+import com.twojstar.llmbench.share.releaseTextClaim
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -196,15 +199,32 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    fun consumePendingWebShareText(service: WebAiService, shareId: Long): Boolean =
+    fun claimPendingWebShareText(service: WebAiService, shareId: Long): String? {
+        while (true) {
+            val state = _uiState.value
+            val pending = state.pendingWebShare
+                ?.takeIf { it.service == service && it.id == shareId }
+                ?: return null
+            val text = pending.payload.text ?: return null
+            val claimed = pending.claimText() ?: return null
+            val next = state.copy(pendingWebShare = claimed)
+            if (_uiState.compareAndSet(state, next)) return text
+        }
+    }
+
+    fun completePendingWebShareText(service: WebAiService, shareId: Long): Boolean =
         updatePendingWebShare(
             service = service,
             shareId = shareId,
-            predicate = { it.payload.text != null }
-        ) { pending ->
-            val payload = pending.payload.copy(text = null)
-            if (payload.isEmpty) null else pending.copy(payload = payload)
-        }
+            predicate = { it.isTextClaimed && it.payload.text != null }
+        ) { it.completeTextClaim() }
+
+    fun releasePendingWebShareTextClaim(service: WebAiService, shareId: Long): Boolean =
+        updatePendingWebShare(
+            service = service,
+            shareId = shareId,
+            predicate = { it.isTextClaimed }
+        ) { it.releaseTextClaim() }
 
     fun consumePendingWebShareUris(
         service: WebAiService,

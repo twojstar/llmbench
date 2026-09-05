@@ -17,8 +17,24 @@ data class IncomingSharePayload(
 data class PendingWebShare(
     val id: Long,
     val service: WebAiService,
-    val payload: IncomingSharePayload
+    val payload: IncomingSharePayload,
+    val isTextClaimed: Boolean = false
 )
+
+internal fun PendingWebShare.claimText(): PendingWebShare? =
+    takeIf { payload.text != null && !isTextClaimed }
+        ?.copy(isTextClaimed = true)
+
+internal fun PendingWebShare.completeTextClaim(): PendingWebShare? {
+    if (!isTextClaimed || payload.text == null) return this
+    val remainingPayload = payload.copy(text = null)
+    return if (remainingPayload.isEmpty) null else {
+        copy(payload = remainingPayload, isTextClaimed = false)
+    }
+}
+
+internal fun PendingWebShare.releaseTextClaim(): PendingWebShare =
+    if (isTextClaimed) copy(isTextClaimed = false) else this
 
 internal fun normalizeIncomingSharePayload(
     text: String?,
