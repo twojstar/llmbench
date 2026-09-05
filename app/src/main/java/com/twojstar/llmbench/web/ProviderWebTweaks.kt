@@ -182,12 +182,19 @@ internal object ProviderWebTweakRegistry {
     private val ownedHostAliases = mapOf(
         WebAiService.KIMI to setOf("kimi.com"),
         WebAiService.QWEN to setOf("qwen.ai"),
-        WebAiService.COPILOT to setOf("copilot.com", "copilot.ai", "copilot.cloud.microsoft"),
+        WebAiService.COPILOT to setOf(
+            "copilot.com",
+            "copilot.ai",
+            "copilot.cloud.microsoft",
+            "m365.cloud.microsoft",
+            "m365copilot.com"
+        ),
         WebAiService.META_AI to setOf("alpha.meta.ai")
     )
 
     private val topLevelNavigationAuthHosts = mapOf(
-        WebAiService.QWEN to setOf("accounts.google.com", "github.com")
+        WebAiService.QWEN to setOf("accounts.google.com", "github.com"),
+        WebAiService.COPILOT to setOf("login.live.com", "login.microsoftonline.com")
     )
 
     private val providerTweaks = WebAiService.entries.associateWith { service ->

@@ -74,12 +74,29 @@ class ProviderWebTweaksTest {
 
     @Test
     fun acceptsVerifiedCopilotAliasesWithoutAcceptingSuffixSpoofs() {
-        listOf("copilot.com", "copilot.ai", "copilot.cloud.microsoft").forEach { host ->
+        listOf(
+            "copilot.com",
+            "copilot.ai",
+            "copilot.cloud.microsoft",
+            "m365.cloud.microsoft",
+            "m365copilot.com"
+        ).forEach { host ->
             assertTrue(providerHostMatches(WebAiService.COPILOT, host))
             assertTrue(providerHostMatches(WebAiService.COPILOT, "www.$host"))
             assertFalse(providerHostMatches(WebAiService.COPILOT, "not-$host"))
             assertFalse(providerHostMatches(WebAiService.COPILOT, "$host.evil.example"))
         }
+    }
+
+    @Test
+    fun copilotTopLevelNavigationUsesVerifiedBoundaryAndAuthHosts() {
+        assertTrue(shouldLoadHttpsInProviderWebView(WebAiService.COPILOT, "https://copilot.microsoft.com/"))
+        assertTrue(shouldLoadHttpsInProviderWebView(WebAiService.COPILOT, "https://m365.cloud.microsoft/chat"))
+        assertTrue(shouldLoadHttpsInProviderWebView(WebAiService.COPILOT, "https://login.live.com/"))
+        assertTrue(shouldLoadHttpsInProviderWebView(WebAiService.COPILOT, "https://login.microsoftonline.com/common/oauth2/v2.0/authorize"))
+        assertFalse(shouldLoadHttpsInProviderWebView(WebAiService.COPILOT, "https://example.com/"))
+        assertFalse(shouldLoadHttpsInProviderWebView(WebAiService.COPILOT, "https://login.live.com.evil.example/"))
+        assertFalse(shouldLoadHttpsInProviderWebView(WebAiService.COPILOT, "http://login.live.com/"))
     }
 
     @Test
