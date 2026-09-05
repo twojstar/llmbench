@@ -536,29 +536,66 @@ fun WebChatScreen(
         }
     }
 
+    fun copyClaimedSharedText(
+        service: WebAiService,
+        shareId: Long,
+        text: String,
+        successMessage: String
+    ) {
+        val copied = runCatching {
+            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+            clipboard.setPrimaryClip(ClipData.newPlainText("Shared text", text))
+        }.isSuccess
+        if (!copied) {
+            viewModel.releasePendingWebShareTextClaim(service, shareId)
+            viewModel.showSnackbar("Could not insert or copy shared text.")
+            return
+        }
+        if (viewModel.completePendingWebShareText(service, shareId)) {
+            viewModel.showSnackbar(successMessage)
+        }
+    }
+
+    fun hasSharedTextClaim(service: WebAiService, shareId: Long): Boolean =
+        currentPendingWebShare?.let { pending ->
+            pending.service == service && pending.id == shareId && pending.isTextClaimed
+        } == true
+
+    fun finishSharedTextInsertion(
+        insertion: PendingSharedTextInsertion,
+        text: String,
+        result: StudioPromptApplyResult
+    ) {
+        if (pendingSharedTextInsertion.value != insertion) return
+        pendingSharedTextInsertion.value = null
+        if (result == StudioPromptApplyResult.INSERTED) {
+            if (viewModel.completePendingWebShareText(insertion.service, insertion.shareId)) {
+                viewModel.showSnackbar("Shared text inserted into ${insertion.service.shortName}.")
+            }
+            return
+        }
+        if (hasSharedTextClaim(insertion.service, insertion.shareId)) {
+            copyClaimedSharedText(
+                insertion.service,
+                insertion.shareId,
+                text,
+                "Could not insert shared text; copied it instead."
+            )
+        }
+    }
+
     fun applySharedText() {
         val service = selectedService
         val pending = currentPendingWebShare?.takeIf { it.service == service } ?: return
         val text = viewModel.claimPendingWebShareText(service, pending.id) ?: return
-
-        fun copyFallback(message: String) {
-            val copied = runCatching {
-                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                clipboard.setPrimaryClip(ClipData.newPlainText("Shared text", text))
-            }.isSuccess
-            if (copied) {
-                if (viewModel.completePendingWebShareText(service, pending.id)) {
-                    viewModel.showSnackbar(message)
-                }
-            } else {
-                viewModel.releasePendingWebShareTextClaim(service, pending.id)
-                viewModel.showSnackbar("Could not insert or copy shared text.")
-            }
-        }
-
         val webView = webViewMap[service]
         if (webView == null) {
-            copyFallback("Provider is not ready yet; shared text copied instead.")
+            copyClaimedSharedText(
+                service,
+                pending.id,
+                text,
+                "Provider is not ready yet; shared text copied instead."
+            )
             return
         }
 
@@ -566,26 +603,17 @@ fun WebChatScreen(
         pendingSharedTextInsertion.value = insertion
         val insertionError = runCatching {
             applyStudioPromptToFocusedEditor(webView, service, text) { result ->
-                if (pendingSharedTextInsertion.value != insertion) return@applyStudioPromptToFocusedEditor
-                pendingSharedTextInsertion.value = null
-                if (result == StudioPromptApplyResult.INSERTED) {
-                    if (viewModel.completePendingWebShareText(service, pending.id)) {
-                        viewModel.showSnackbar("Shared text inserted into ${service.shortName}.")
-                    }
-                } else {
-                    val stillClaimed = currentPendingWebShare?.let { current ->
-                        current.service == service && current.id == pending.id && current.isTextClaimed
-                    } == true
-                    if (stillClaimed) {
-                        copyFallback("Could not insert shared text; copied it instead.")
-                    }
-                }
+                finishSharedTextInsertion(insertion, text, result)
             }
         }.exceptionOrNull()
-        if (insertionError != null && pendingSharedTextInsertion.value == insertion) {
-            pendingSharedTextInsertion.value = null
-            copyFallback("Could not insert shared text; copied it instead.")
-        }
+        if (insertionError == null || pendingSharedTextInsertion.value != insertion) return
+        pendingSharedTextInsertion.value = null
+        copyClaimedSharedText(
+            service,
+            pending.id,
+            text,
+            "Could not insert shared text; copied it instead."
+        )
     }
 
     BackHandler(enabled = canGoBack && drawerState.currentValue == DrawerValue.Closed) {
