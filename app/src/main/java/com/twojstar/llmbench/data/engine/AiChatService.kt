@@ -239,15 +239,17 @@ class AiChatService {
                     }
                     AiProvider.DEEPSEEK, AiProvider.KIMI, AiProvider.OPENROUTER, AiProvider.AIHUBMIX -> {
                         val config = checkNotNull(openAiCompatibleProviders[provider])
-                        callOpenAiCompatibleApi(
-                            config = config,
-                            prompt = prompt,
-                            model = effectiveModel,
-                            apiKey = key,
-                            systemInstruction = systemInstruction,
-                            conversationHistory = conversationHistory,
-                            provider = provider
-                        )
+                        if (onTextDelta != null) {
+                            callOpenAiCompatibleStreamApi(
+                                config, prompt, effectiveModel, key, systemInstruction,
+                                conversationHistory, provider, onTextDelta
+                            )
+                        } else {
+                            callOpenAiCompatibleApi(
+                                config, prompt, effectiveModel, key, systemInstruction,
+                                conversationHistory, provider
+                            )
+                        }
                     }
                     AiProvider.ALL -> null
                 }
@@ -528,6 +530,12 @@ class AiChatService {
             null
         }
 
+    internal fun extractOpenAiCompatibleStreamText(event: JsonObject): String? =
+        event["choices"]?.jsonArray
+            ?.firstOrNull()?.jsonObject
+            ?.get("delta")?.jsonObject
+            ?.get(JSON_CONTENT_KEY)?.jsonPrimitive?.contentOrNull
+
     private suspend fun callGeminiStreamApi(
         prompt: String,
         model: String,
@@ -659,7 +667,8 @@ class AiChatService {
         request: Request,
         extractText: (JsonObject) -> String?,
         isComplete: (JsonObject) -> Boolean,
-        onTextDelta: (String) -> Unit
+        onTextDelta: (String) -> Unit,
+        completeOnDoneSentinel: Boolean = false
     ): String = suspendCancellableCoroutine { continuation ->
         val call = streamingHttpClient.newCall(request)
         continuation.invokeOnCancellation { call.cancel() }
@@ -669,7 +678,7 @@ class AiChatService {
             }
 
             override fun onResponse(call: Call, response: Response) {
-                completeSseContinuation(continuation, response, extractText, isComplete, onTextDelta)
+                completeSseContinuation(continuation, response, extractText, isComplete, onTextDelta, completeOnDoneSentinel)
             }
         })
     }
@@ -679,9 +688,12 @@ class AiChatService {
         response: Response,
         extractText: (JsonObject) -> String?,
         isComplete: (JsonObject) -> Boolean,
-        onTextDelta: (String) -> Unit
+        onTextDelta: (String) -> Unit,
+        completeOnDoneSentinel: Boolean
     ) {
-        val result = runCatching { readSseResponse(response, extractText, isComplete, onTextDelta) }
+        val result = runCatching {
+            readSseResponse(response, extractText, isComplete, onTextDelta, completeOnDoneSentinel)
+        }
         if (!continuation.isActive) return
 
         val failure = result.exceptionOrNull()
@@ -697,12 +709,13 @@ class AiChatService {
         response: Response,
         extractText: (JsonObject) -> String?,
         isComplete: (JsonObject) -> Boolean,
-        onTextDelta: (String) -> Unit
+        onTextDelta: (String) -> Unit,
+        completeOnDoneSentinel: Boolean = false
     ): String {
         response.use {
             ensureSuccessfulStreamingResponse(response)
             val source = response.body?.source() ?: throw IOException("Empty streaming response body")
-            return consumeSseSource(source, extractText, isComplete, onTextDelta)
+            return consumeSseSource(source, extractText, isComplete, onTextDelta, completeOnDoneSentinel)
         }
     }
 
@@ -716,24 +729,26 @@ class AiChatService {
         source: BufferedSource,
         extractText: (JsonObject) -> String?,
         isComplete: (JsonObject) -> Boolean,
-        onTextDelta: (String) -> Unit
+        onTextDelta: (String) -> Unit,
+        completeOnDoneSentinel: Boolean
     ): String {
         val collected = StringBuilder()
         var completed = false
         while (!source.exhausted()) {
-            val event = readSseEvent(source) ?: continue
+            val line = source.readUtf8Line() ?: break
+            if (!line.startsWith(SSE_DATA_PREFIX)) continue
+            val payload = line.removePrefix(SSE_DATA_PREFIX).trim()
+            if (payload == SSE_DONE) {
+                if (completeOnDoneSentinel) completed = true
+                break
+            }
+            val event = parseSseEvent(payload) ?: continue
             val (delta, eventComplete) = decodeSseEvent(event, extractText, isComplete)
             appendStreamingDelta(collected, delta, onTextDelta)
             if (eventComplete) completed = true
         }
         if (!completed) throw IOException("Streaming response ended before completion")
         return collected.toString()
-    }
-
-    private fun readSseEvent(source: BufferedSource): JsonObject? {
-        val line = source.readUtf8Line() ?: return null
-        if (!line.startsWith(SSE_DATA_PREFIX)) return null
-        return parseSseEvent(line.removePrefix(SSE_DATA_PREFIX).trim())
     }
 
     private fun decodeSseEvent(
@@ -804,6 +819,32 @@ class AiChatService {
         }
 
     // --- OpenAI-compatible provider/gateway boundary ---
+    private suspend fun callOpenAiCompatibleStreamApi(
+        config: OpenAiCompatibleProviderConfig, prompt: String, model: String, apiKey: String,
+        systemInstruction: String?, conversationHistory: List<ModelChatMessage>,
+        provider: AiProvider, onTextDelta: (String) -> Unit
+    ): String {
+        val requestPayload = buildJsonObject {
+            put(JSON_MODEL_KEY, model)
+            put(JSON_MESSAGES_KEY, buildOpenAiCompatibleMessages(
+                prompt, systemInstruction, conversationHistory, provider
+            ))
+            put("stream", true)
+        }
+        val requestBuilder = Request.Builder().url(config.endpointUrl)
+            .addHeader(HEADER_AUTHORIZATION, bearerToken(apiKey))
+            .addHeader(HEADER_CONTENT_TYPE, JSON_MEDIA_TYPE)
+        config.extraHeaders.forEach { (name, value) -> requestBuilder.addHeader(name, value) }
+        val request = requestBuilder.post(
+            requestPayload.toString().toRequestBody(JSON_MEDIA_TYPE.toMediaType())
+        ).build()
+
+        return executeSse(
+            request, ::extractOpenAiCompatibleStreamText, { false }, onTextDelta,
+            completeOnDoneSentinel = true
+        ).ifEmpty { "Received empty message content." }
+    }
+
     private suspend fun callOpenAiCompatibleApi(
         config: OpenAiCompatibleProviderConfig,
         prompt: String,

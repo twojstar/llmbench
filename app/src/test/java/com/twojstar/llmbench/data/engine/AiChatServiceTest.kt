@@ -320,6 +320,64 @@ class AiChatServiceTest {
     }
 
     @Test
+    fun readsDoneTerminatedOpenAiCompatibleStream() {
+        val service = AiChatService()
+        val deltas = mutableListOf<String>()
+        val response = Response.Builder()
+            .request(Request.Builder().url("https://example.test/stream").build())
+            .protocol(Protocol.HTTP_1_1)
+            .code(200)
+            .message("OK")
+            .body(
+                (": keep-alive\n\n" +
+                    "data: {\"choices\":[{\"delta\":{\"content\":\"hel\"}}]}\n\n" +
+                    "data: {\"choices\":[{\"delta\":{\"content\":\"lo\"}}]}\n\n" +
+                    "data: [DONE]\n\n")
+                    .toResponseBody("text/event-stream".toMediaType())
+            )
+            .build()
+
+        val text = service.readSseResponse(
+            response = response,
+            extractText = service::extractOpenAiCompatibleStreamText,
+            isComplete = { false },
+            onTextDelta = { deltas.add(it) },
+            completeOnDoneSentinel = true
+        )
+
+        assertEquals(STREAM_HELLO, text)
+        assertEquals(listOf("hel", "lo"), deltas)
+    }
+
+    @Test
+    fun rejectsTruncatedOpenAiCompatibleStream() {
+        val service = AiChatService()
+        val response = Response.Builder()
+            .request(Request.Builder().url("https://example.test/stream").build())
+            .protocol(Protocol.HTTP_1_1)
+            .code(200)
+            .message("OK")
+            .body(
+                "data: {\"choices\":[{\"delta\":{\"content\":\"hello\"}}]}\n\n"
+                    .toResponseBody("text/event-stream".toMediaType())
+            )
+            .build()
+
+        val result = runCatching {
+            service.readSseResponse(
+                response = response,
+                extractText = service::extractOpenAiCompatibleStreamText,
+                isComplete = { false },
+                onTextDelta = {},
+                completeOnDoneSentinel = true
+            )
+        }
+
+        assertTrue(result.isFailure)
+        assertEquals("Streaming response ended before completion", result.exceptionOrNull()?.message)
+    }
+
+    @Test
     fun streamingDeltaCallbackFailurePropagates() {
         val service = AiChatService()
         val response = Response.Builder()
