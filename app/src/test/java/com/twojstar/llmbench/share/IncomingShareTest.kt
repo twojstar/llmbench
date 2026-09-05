@@ -1,5 +1,6 @@
 package com.twojstar.llmbench.share
 
+import android.content.Intent
 import com.twojstar.llmbench.data.model.WebAiService
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -40,12 +41,49 @@ class IncomingShareTest {
     fun blankPrimaryTextFallsBackToClipText() {
         assertEquals(
             CLIP_TEXT,
-            selectIncomingShareText("   ", listOf(CLIP_TEXT))
+            selectIncomingShareText(
+                action = Intent.ACTION_SEND,
+                singleText = "   ",
+                multipleTexts = emptyList(),
+                clipTexts = listOf(CLIP_TEXT)
+            )
         )
         assertEquals(
             "primary",
-            selectIncomingShareText("primary", listOf(CLIP_TEXT))
+            selectIncomingShareText(
+                action = Intent.ACTION_SEND,
+                singleText = "primary",
+                multipleTexts = emptyList(),
+                clipTexts = listOf(CLIP_TEXT)
+            )
         )
+    }
+
+    @Test
+    fun sendMultipleKeepsAllSharedText() {
+        val text = selectIncomingShareText(
+            action = Intent.ACTION_SEND_MULTIPLE,
+            singleText = null,
+            multipleTexts = listOf("first", "second"),
+            clipTexts = emptyList()
+        )
+
+        assertEquals("first\nsecond", text)
+    }
+
+    @Test
+    fun sendMultipleKeepsTextAlongsideAttachments() {
+        val text = selectIncomingShareText(
+            action = Intent.ACTION_SEND_MULTIPLE,
+            singleText = null,
+            multipleTexts = listOf("first", "second"),
+            clipTexts = emptyList()
+        )
+        val payload = normalizeIncomingSharePayload(text, listOf(CONTENT_URI))
+
+        requireNotNull(payload)
+        assertEquals("first\nsecond", payload.text)
+        assertEquals(listOf(CONTENT_URI), payload.uriStrings)
     }
 
     @Test

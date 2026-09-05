@@ -56,10 +56,22 @@ private fun isContentUriString(value: String): Boolean = runCatching {
 }.getOrDefault(false)
 
 internal fun selectIncomingShareText(
-    primaryText: String?,
+    action: String?,
+    singleText: String?,
+    multipleTexts: List<String>,
     clipTexts: List<String>
-): String? = primaryText?.takeIf(String::isNotBlank)
-    ?: clipTexts.joinToString("\n").takeIf(String::isNotBlank)
+): String? {
+    val primaryTexts = when (action) {
+        Intent.ACTION_SEND -> listOfNotNull(singleText)
+        Intent.ACTION_SEND_MULTIPLE -> multipleTexts
+        else -> emptyList()
+    }
+    return primaryTexts
+        .filter(String::isNotBlank)
+        .joinToString("\n")
+        .takeIf(String::isNotBlank)
+        ?: clipTexts.filter(String::isNotBlank).joinToString("\n").takeIf(String::isNotBlank)
+}
 
 internal fun extractIncomingSharePayload(intent: Intent): IncomingSharePayload? {
     if (intent.action != Intent.ACTION_SEND && intent.action != Intent.ACTION_SEND_MULTIPLE) {
@@ -70,8 +82,18 @@ internal fun extractIncomingSharePayload(intent: Intent): IncomingSharePayload? 
         (0 until clip.itemCount)
             .mapNotNull { index -> clip.getItemAt(index).text?.toString() }
     }.orEmpty()
+    val singleText = if (intent.action == Intent.ACTION_SEND) {
+        intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString()
+    } else null
+    val multipleTexts = if (intent.action == Intent.ACTION_SEND_MULTIPLE) {
+        intent.getCharSequenceArrayListExtra(Intent.EXTRA_TEXT)
+            .orEmpty()
+            .map(CharSequence::toString)
+    } else emptyList()
     val text = selectIncomingShareText(
-        primaryText = intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString(),
+        action = intent.action,
+        singleText = singleText,
+        multipleTexts = multipleTexts,
         clipTexts = clipTexts
     )
     val uriStrings = buildList {
