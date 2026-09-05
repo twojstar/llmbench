@@ -1,11 +1,14 @@
 package com.twojstar.llmbench
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -16,6 +19,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.twojstar.llmbench.data.model.WebAiService
+import com.twojstar.llmbench.share.IncomingSharePayload
+import com.twojstar.llmbench.share.PendingWebShare
+import com.twojstar.llmbench.share.extractIncomingSharePayload
+import com.twojstar.llmbench.share.normalizeIncomingSharePayload
 import com.twojstar.llmbench.ui.screens.*
 import com.twojstar.llmbench.ui.theme.LlmBenchTheme
 import com.twojstar.llmbench.ui.viewmodel.NavigationTab
@@ -28,15 +36,27 @@ internal fun showPrimaryBottomNavigation(tab: NavigationTab): Boolean = tab != N
 class MainActivity : ComponentActivity() {
 
     private val viewModel: StudioViewModel by viewModels()
+    private var retainedShareIntentHandled = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        retainedShareIntentHandled = savedInstanceState?.getBoolean(KEY_SHARE_INTENT_HANDLED) == true
+        restoreShareState(savedInstanceState)
+        if (!retainedShareIntentHandled) handleIncomingShareIntent(intent)
 
         setContent {
             LlmBenchTheme {
                 val uiState by viewModel.uiState.collectAsStateWithLifecycle()
                 val snackbarHostState = remember { SnackbarHostState() }
+
+                uiState.incomingShare?.let { payload ->
+                    IncomingShareProviderDialog(
+                        payload = payload,
+                        onSelect = viewModel::routeIncomingShareToWeb,
+                        onDismiss = viewModel::dismissIncomingShare
+                    )
+                }
 
                 LaunchedEffect(uiState.snackbarMessage) {
                     uiState.snackbarMessage?.let { msg ->
@@ -145,4 +165,124 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        retainedShareIntentHandled = false
+        setIntent(intent)
+        handleIncomingShareIntent(intent)
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putBoolean(KEY_SHARE_INTENT_HANDLED, retainedShareIntentHandled)
+        saveShareState(outState)
+    }
+
+    private fun handleIncomingShareIntent(intent: Intent) {
+        val isShareIntent = intent.action == Intent.ACTION_SEND ||
+            intent.action == Intent.ACTION_SEND_MULTIPLE
+        if (!isShareIntent) return
+        retainedShareIntentHandled = true
+        extractIncomingSharePayload(intent)?.let(viewModel::receiveIncomingShare)
+    }
+
+    private fun saveShareState(outState: Bundle) {
+        val state = viewModel.uiState.value
+        val pending = state.pendingWebShare
+        val incoming = state.incomingShare
+        when {
+            pending != null -> {
+                outState.putString(KEY_SHARE_STAGE, SHARE_STAGE_PENDING)
+                outState.putLong(KEY_SHARE_ID, pending.id)
+                outState.putString(KEY_SHARE_SERVICE_ID, pending.service.id)
+                writeSharePayload(outState, pending.payload)
+            }
+            incoming != null -> {
+                outState.putString(KEY_SHARE_STAGE, SHARE_STAGE_INCOMING)
+                writeSharePayload(outState, incoming)
+            }
+        }
+    }
+
+    private fun restoreShareState(savedState: Bundle?) {
+        val stage = savedState?.getString(KEY_SHARE_STAGE) ?: return
+        val payload = normalizeIncomingSharePayload(
+            text = savedState.getString(KEY_SHARE_TEXT),
+            uriStrings = savedState.getStringArrayList(KEY_SHARE_URIS).orEmpty()
+        ) ?: return
+        val pending = if (stage == SHARE_STAGE_PENDING) {
+            val serviceId = savedState.getString(KEY_SHARE_SERVICE_ID)
+            val service = WebAiService.entries.firstOrNull { it.id == serviceId }
+            val shareId = savedState.getLong(KEY_SHARE_ID, 0L)
+            if (service != null && shareId > 0L) PendingWebShare(shareId, service, payload) else null
+        } else null
+        viewModel.restoreShareState(
+            incomingShare = payload.takeIf { stage == SHARE_STAGE_INCOMING },
+            pendingShare = pending
+        )
+    }
+
+    private fun writeSharePayload(outState: Bundle, payload: IncomingSharePayload) {
+        outState.putString(KEY_SHARE_TEXT, payload.text)
+        outState.putStringArrayList(KEY_SHARE_URIS, ArrayList(payload.uriStrings))
+    }
+
+    private companion object {
+        const val KEY_SHARE_INTENT_HANDLED = "llmbench.share.intent_handled"
+        const val KEY_SHARE_STAGE = "llmbench.share.stage"
+        const val KEY_SHARE_ID = "llmbench.share.id"
+        const val KEY_SHARE_SERVICE_ID = "llmbench.share.service_id"
+        const val KEY_SHARE_TEXT = "llmbench.share.text"
+        const val KEY_SHARE_URIS = "llmbench.share.uris"
+        const val SHARE_STAGE_INCOMING = "incoming"
+        const val SHARE_STAGE_PENDING = "pending"
+    }
+}
+
+@Composable
+private fun IncomingShareProviderDialog(
+    payload: IncomingSharePayload,
+    onSelect: (WebAiService) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val summary = buildList {
+        if (payload.text != null) add("text")
+        if (payload.attachmentCount > 0) {
+            val suffix = if (payload.attachmentCount == 1) "" else "s"
+            add("${payload.attachmentCount} attachment$suffix")
+        }
+    }.joinToString(" + ")
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Share to LlmBench") },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 520.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Text(
+                    "Choose a web provider for $summary.",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                Spacer(Modifier.height(4.dp))
+                WebAiService.entries.forEach { service ->
+                    TextButton(
+                        onClick = { onSelect(service) },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(service.displayName, modifier = Modifier.fillMaxWidth())
+                    }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        }
+    )
 }

@@ -13,6 +13,7 @@ import android.content.Intent
 import android.graphics.Bitmap
 import android.net.Uri
 import android.net.http.SslError
+import android.provider.OpenableColumns
 import android.util.Log
 import android.view.MotionEvent
 import android.view.ViewGroup
@@ -59,6 +60,7 @@ import com.twojstar.llmbench.data.model.WebChatGenerationObservation
 import com.twojstar.llmbench.data.model.markWebChatActivityRead
 import com.twojstar.llmbench.data.model.nextWebChatActivityStatus
 import com.twojstar.llmbench.data.model.webChatActivityStatusAfterEviction
+import com.twojstar.llmbench.share.IncomingSharePayload
 import com.twojstar.llmbench.ui.theme.*
 import com.twojstar.llmbench.ui.viewmodel.StudioUiState
 import com.twojstar.llmbench.ui.viewmodel.StudioViewModel
@@ -86,6 +88,93 @@ import kotlinx.coroutines.launch
 private const val WEBVIEW_LOG_TAG = "LlmBenchWeb"
 private const val MAX_LIVE_WEBVIEWS = 2
 private const val DIAGNOSTIC_NONE_YET = "None yet"
+
+private data class PendingSharedUploadConfirmation(
+    val service: WebAiService,
+    val shareId: Long,
+    val uris: List<Uri>,
+    val callback: ValueCallback<Array<Uri>>,
+    val requestId: Int
+)
+
+private data class PendingSharedTextInsertion(
+    val service: WebAiService,
+    val shareId: Long,
+    val webView: WebView
+)
+
+internal fun fileChooserAcceptsMimeType(
+    acceptTypes: Array<String>,
+    actualMimeType: String?,
+    displayName: String? = null
+): Boolean {
+    val accepted = acceptTypes
+        .flatMap { it.split(',') }
+        .map { it.trim().lowercase() }
+        .filter { it.isNotEmpty() }
+        .distinct()
+    if (accepted.isEmpty() || "*/*" in accepted) return true
+
+    val normalizedName = displayName?.trim()?.lowercase()
+    val actual = actualMimeType
+        ?.substringBefore(';')
+        ?.trim()
+        ?.lowercase()
+        ?.takeIf { '/' in it }
+    val actualType = actual?.substringBefore('/')
+    val actualSubtype = actual?.substringAfter('/', missingDelimiterValue = "")
+        ?.takeIf(String::isNotEmpty)
+    return accepted.any { candidate ->
+        if (candidate.startsWith('.')) {
+            return@any normalizedName?.endsWith(candidate) == true
+        }
+        val parts = candidate.split('/', limit = 2)
+        parts.size == 2 && actualType != null && actualSubtype != null &&
+            (parts[0] == "*" || parts[0] == actualType) &&
+            (parts[1] == "*" || parts[1] == actualSubtype)
+    }
+}
+
+internal fun fileChooserModeAllowsStagedUpload(mode: Int): Boolean =
+    mode == WebChromeClient.FileChooserParams.MODE_OPEN ||
+        mode == WebChromeClient.FileChooserParams.MODE_OPEN_MULTIPLE
+
+private fun sharedUriDisplayName(context: Context, uri: Uri): String? = runCatching {
+    context.contentResolver.query(
+        uri,
+        arrayOf(OpenableColumns.DISPLAY_NAME),
+        null,
+        null,
+        null
+    )?.use { cursor ->
+        if (cursor.moveToFirst()) cursor.getString(0) else null
+    }
+}.getOrNull()
+
+private fun sharedUrisForFileChooser(
+    context: Context,
+    params: WebChromeClient.FileChooserParams,
+    uriStrings: List<String>
+): List<Uri> {
+    if (params.isCaptureEnabled || !fileChooserModeAllowsStagedUpload(params.mode)) return emptyList()
+    val matching = uriStrings.asSequence()
+        .map(Uri::parse)
+        .filter { isAllowedUploadUri(context, it) }
+        .filter { uri ->
+            val mimeType = runCatching { context.contentResolver.getType(uri) }.getOrNull()
+            fileChooserAcceptsMimeType(
+                acceptTypes = params.acceptTypes,
+                actualMimeType = mimeType,
+                displayName = sharedUriDisplayName(context, uri)
+            )
+        }
+        .toList()
+    return if (params.mode == WebChromeClient.FileChooserParams.MODE_OPEN_MULTIPLE) {
+        matching
+    } else {
+        matching.take(1)
+    }
+}
 
 internal fun shouldApplyWebChatObservation(
     observation: WebChatGenerationObservation,
@@ -134,6 +223,7 @@ fun WebChatScreen(
 ) {
     val context = LocalContext.current
     val selectedService by rememberUpdatedState(uiState.selectedWebService)
+    val currentPendingWebShare by rememberUpdatedState(uiState.pendingWebShare)
     var currentUrl by remember { mutableStateOf(selectedService.url) }
     var loadingProgress by remember { mutableIntStateOf(0) }
     var isLoading by remember { mutableStateOf(false) }
@@ -147,6 +237,12 @@ fun WebChatScreen(
     val pendingFileCallback = remember { mutableStateOf<ValueCallback<Array<Uri>>?>(null) }
     val pendingFileService = remember { mutableStateOf<WebAiService?>(null) }
     val pendingFileRequestId = remember { mutableStateOf<Int?>(null) }
+    var pendingSharedUploadConfirmation by remember {
+        mutableStateOf<PendingSharedUploadConfirmation?>(null)
+    }
+    val pendingSharedTextInsertion = remember {
+        mutableStateOf<PendingSharedTextInsertion?>(null)
+    }
     var nextFileChooserRequestId by remember { mutableIntStateOf(0) }
     val fileChooserLatestRequestIds = remember { mutableStateMapOf<WebAiService, Int>() }
     val fileChooserRequestCounts = remember { mutableStateMapOf<WebAiService, Int>() }
@@ -167,9 +263,12 @@ fun WebChatScreen(
         fileChooserLatestRequestIds[service] = requestId
         fileChooserRequestCounts[service] = (fileChooserRequestCounts[service] ?: 0) + 1
         fileChooserHosts[service] = providerDiagnosticsPageHost(service, pageUrl)
-        fileChooserModes[service] = if (
-            params.mode == WebChromeClient.FileChooserParams.MODE_OPEN_MULTIPLE
-        ) "multiple" else "single"
+        fileChooserModes[service] = when (params.mode) {
+            WebChromeClient.FileChooserParams.MODE_OPEN -> "single"
+            WebChromeClient.FileChooserParams.MODE_OPEN_MULTIPLE -> "multiple"
+            WebChromeClient.FileChooserParams.MODE_SAVE -> "save"
+            else -> "other (${params.mode})"
+        }
         fileChooserAcceptTypes[service] = sanitizeProviderAcceptTypes(params.acceptTypes)
         fileChooserOutcomes[service] = outcome
         return requestId
@@ -178,6 +277,20 @@ fun WebChatScreen(
     fun updateFileChooserOutcome(service: WebAiService, requestId: Int, outcome: String) {
         if (fileChooserLatestRequestIds[service] == requestId) {
             fileChooserOutcomes[service] = outcome
+        }
+    }
+
+    LaunchedEffect(uiState.pendingWebShare?.id, uiState.pendingWebShare?.service) {
+        val confirmation = pendingSharedUploadConfirmation ?: return@LaunchedEffect
+        val pending = uiState.pendingWebShare
+        if (pending == null || pending.id != confirmation.shareId || pending.service != confirmation.service) {
+            pendingSharedUploadConfirmation = null
+            updateFileChooserOutcome(
+                confirmation.service,
+                confirmation.requestId,
+                "shared upload stale / cancelled"
+            )
+            confirmation.callback.onReceiveValue(null)
         }
     }
 
@@ -216,6 +329,14 @@ fun WebChatScreen(
     val pendingDesktopModes = remember { mutableStateMapOf<WebAiService, Boolean>() }
     val providerFavicons = remember { mutableStateMapOf<WebAiService, Bitmap>() }
     val currentSelectedService by rememberUpdatedState(selectedService)
+
+    fun releaseSharedTextClaimFor(webView: WebView) {
+        val insertion = pendingSharedTextInsertion.value
+            ?.takeIf { it.webView === webView }
+            ?: return
+        pendingSharedTextInsertion.value = null
+        viewModel.releasePendingWebShareTextClaim(insertion.service, insertion.shareId)
+    }
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val drawerScope = rememberCoroutineScope()
 
@@ -340,6 +461,12 @@ fun WebChatScreen(
             pendingFileCallback.value = null
             pendingFileService.value = null
             pendingFileRequestId.value = null
+            pendingSharedUploadConfirmation?.callback?.onReceiveValue(null)
+            pendingSharedUploadConfirmation = null
+            pendingSharedTextInsertion.value?.let { insertion ->
+                viewModel.releasePendingWebShareTextClaim(insertion.service, insertion.shareId)
+                pendingSharedTextInsertion.value = null
+            }
             val webViews = webViewMap.values.toList()
             webViewMap.clear()
             webViews.forEach(::releaseWebView)
@@ -407,6 +534,86 @@ fun WebChatScreen(
                     copyStudioPrompt("Could not insert Studio instructions; copied them instead.")
             }
         }
+    }
+
+    fun copyClaimedSharedText(
+        service: WebAiService,
+        shareId: Long,
+        text: String,
+        successMessage: String
+    ) {
+        val copied = runCatching {
+            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+            clipboard.setPrimaryClip(ClipData.newPlainText("Shared text", text))
+        }.isSuccess
+        if (!copied) {
+            viewModel.releasePendingWebShareTextClaim(service, shareId)
+            viewModel.showSnackbar("Could not insert or copy shared text.")
+            return
+        }
+        if (viewModel.completePendingWebShareText(service, shareId)) {
+            viewModel.showSnackbar(successMessage)
+        }
+    }
+
+    fun hasSharedTextClaim(service: WebAiService, shareId: Long): Boolean =
+        currentPendingWebShare?.let { pending ->
+            pending.service == service && pending.id == shareId && pending.isTextClaimed
+        } == true
+
+    fun finishSharedTextInsertion(
+        insertion: PendingSharedTextInsertion,
+        text: String,
+        result: StudioPromptApplyResult
+    ) {
+        if (pendingSharedTextInsertion.value != insertion) return
+        pendingSharedTextInsertion.value = null
+        if (result == StudioPromptApplyResult.INSERTED) {
+            if (viewModel.completePendingWebShareText(insertion.service, insertion.shareId)) {
+                viewModel.showSnackbar("Shared text inserted into ${insertion.service.shortName}.")
+            }
+            return
+        }
+        if (hasSharedTextClaim(insertion.service, insertion.shareId)) {
+            copyClaimedSharedText(
+                insertion.service,
+                insertion.shareId,
+                text,
+                "Could not insert shared text; copied it instead."
+            )
+        }
+    }
+
+    fun applySharedText() {
+        val service = selectedService
+        val pending = currentPendingWebShare?.takeIf { it.service == service } ?: return
+        val text = viewModel.claimPendingWebShareText(service, pending.id) ?: return
+        val webView = webViewMap[service]
+        if (webView == null) {
+            copyClaimedSharedText(
+                service,
+                pending.id,
+                text,
+                "Provider is not ready yet; shared text copied instead."
+            )
+            return
+        }
+
+        val insertion = PendingSharedTextInsertion(service, pending.id, webView)
+        pendingSharedTextInsertion.value = insertion
+        val insertionError = runCatching {
+            applyStudioPromptToFocusedEditor(webView, service, text) { result ->
+                finishSharedTextInsertion(insertion, text, result)
+            }
+        }.exceptionOrNull()
+        if (insertionError == null || pendingSharedTextInsertion.value != insertion) return
+        pendingSharedTextInsertion.value = null
+        copyClaimedSharedText(
+            service,
+            pending.id,
+            text,
+            "Could not insert shared text; copied it instead."
+        )
     }
 
     BackHandler(enabled = canGoBack && drawerState.currentValue == DrawerValue.Closed) {
@@ -543,60 +750,86 @@ fun WebChatScreen(
                                     viewModel.showSnackbar("Could not open external link")
                                 },
                                 onFileChooserRequested = { callback, params, pageUrl ->
-                                    if (pendingFileCallback.value != null) {
+                                    if (pendingFileCallback.value != null ||
+                                        pendingSharedUploadConfirmation != null
+                                    ) {
                                         recordFileChooserRequest(
                                             service,
                                             params,
                                             pageUrl,
-                                            "rejected: picker already active"
+                                            "rejected: chooser already active"
                                         )
                                         callback.onReceiveValue(null)
                                         true
                                     } else {
-                                        val requestId = recordFileChooserRequest(
-                                            service,
-                                            params,
-                                            pageUrl,
-                                            "picker launched"
+                                        val stagedShare = currentPendingWebShare
+                                            ?.takeIf { it.service == service }
+                                        val sharedUris = sharedUrisForFileChooser(
+                                            context = context,
+                                            params = params,
+                                            uriStrings = stagedShare?.payload?.uriStrings.orEmpty()
                                         )
-                                        pendingFileCallback.value = callback
-                                        pendingFileService.value = service
-                                        pendingFileRequestId.value = requestId
-                                        val launchError = runCatching {
-                                            fileChooserLauncher.launch(params.createIntent())
-                                        }.exceptionOrNull()
-                                        if (launchError == null) {
+                                        if (stagedShare != null && sharedUris.isNotEmpty()) {
+                                            val requestId = recordFileChooserRequest(
+                                                service,
+                                                params,
+                                                pageUrl,
+                                                "awaiting shared upload confirmation"
+                                            )
+                                            pendingSharedUploadConfirmation = PendingSharedUploadConfirmation(
+                                                service = service,
+                                                shareId = stagedShare.id,
+                                                uris = sharedUris,
+                                                callback = callback,
+                                                requestId = requestId
+                                            )
                                             true
                                         } else {
-                                            val outcome = when (launchError) {
-                                                is ActivityNotFoundException -> {
-                                                    Log.w(WEBVIEW_LOG_TAG, "No file picker available", launchError)
-                                                    viewModel.showSnackbar("No file picker available")
-                                                    "no picker available"
+                                            val requestId = recordFileChooserRequest(
+                                                service,
+                                                params,
+                                                pageUrl,
+                                                "picker launched"
+                                            )
+                                            pendingFileCallback.value = callback
+                                            pendingFileService.value = service
+                                            pendingFileRequestId.value = requestId
+                                            val launchError = runCatching {
+                                                fileChooserLauncher.launch(params.createIntent())
+                                            }.exceptionOrNull()
+                                            if (launchError == null) {
+                                                true
+                                            } else {
+                                                val outcome = when (launchError) {
+                                                    is ActivityNotFoundException -> {
+                                                        Log.w(WEBVIEW_LOG_TAG, "No file picker available", launchError)
+                                                        viewModel.showSnackbar("No file picker available")
+                                                        "no picker available"
+                                                    }
+                                                    is SecurityException -> {
+                                                        Log.w(WEBVIEW_LOG_TAG, "File picker launch blocked", launchError)
+                                                        viewModel.showSnackbar("File picker was blocked")
+                                                        "picker blocked"
+                                                    }
+                                                    is IllegalStateException -> {
+                                                        Log.w(WEBVIEW_LOG_TAG, "File picker already active", launchError)
+                                                        "picker already active"
+                                                    }
+                                                    else -> {
+                                                        pendingFileCallback.value = null
+                                                        pendingFileService.value = null
+                                                        pendingFileRequestId.value = null
+                                                        callback.onReceiveValue(null)
+                                                        throw launchError
+                                                    }
                                                 }
-                                                is SecurityException -> {
-                                                    Log.w(WEBVIEW_LOG_TAG, "File picker launch blocked", launchError)
-                                                    viewModel.showSnackbar("File picker was blocked")
-                                                    "picker blocked"
-                                                }
-                                                is IllegalStateException -> {
-                                                    Log.w(WEBVIEW_LOG_TAG, "File picker already active", launchError)
-                                                    "picker already active"
-                                                }
-                                                else -> {
-                                                    pendingFileCallback.value = null
-                                                    pendingFileService.value = null
-                                                    pendingFileRequestId.value = null
-                                                    callback.onReceiveValue(null)
-                                                    throw launchError
-                                                }
+                                                pendingFileCallback.value = null
+                                                pendingFileService.value = null
+                                                pendingFileRequestId.value = null
+                                                updateFileChooserOutcome(service, requestId, outcome)
+                                                callback.onReceiveValue(null)
+                                                true
                                             }
-                                            pendingFileCallback.value = null
-                                            pendingFileService.value = null
-                                            pendingFileRequestId.value = null
-                                            updateFileChooserOutcome(service, requestId, outcome)
-                                            callback.onReceiveValue(null)
-                                            true
                                         }
                                     }
                                 }
@@ -625,6 +858,7 @@ fun WebChatScreen(
                             }
                         },
                         onRelease = { wv ->
+                            releaseSharedTextClaimFor(wv)
                             if (webViewMap.remove(service) === wv) {
                                 releaseWebView(wv)
                             }
@@ -633,6 +867,21 @@ fun WebChatScreen(
                     )
                     }
                 }
+
+                currentPendingWebShare
+                    ?.takeIf { it.service == selectedService }
+                    ?.let { pending ->
+                        SharedContentBanner(
+                            service = pending.service,
+                            payload = pending.payload,
+                            isTextClaimed = pending.isTextClaimed,
+                            onInsertText = ::applySharedText,
+                            onDismiss = {
+                                viewModel.dismissPendingWebShare(pending.service, pending.id)
+                            },
+                            modifier = Modifier.align(Alignment.TopCenter)
+                        )
+                    }
             }
         }
         }
@@ -647,6 +896,50 @@ fun WebChatScreen(
             openExternalIntentUri(context, pendingUri)
         }
     )
+
+    pendingSharedUploadConfirmation?.let { confirmation ->
+        SharedUploadConfirmationDialog(
+            service = confirmation.service,
+            attachmentCount = confirmation.uris.size,
+            onDismiss = {
+                if (pendingSharedUploadConfirmation == confirmation) {
+                    pendingSharedUploadConfirmation = null
+                    updateFileChooserOutcome(
+                        confirmation.service,
+                        confirmation.requestId,
+                        "shared upload cancelled"
+                    )
+                    confirmation.callback.onReceiveValue(null)
+                }
+            },
+            onConfirm = {
+                if (pendingSharedUploadConfirmation == confirmation) {
+                    pendingSharedUploadConfirmation = null
+                    val consumed = viewModel.consumePendingWebShareUris(
+                        service = confirmation.service,
+                        shareId = confirmation.shareId,
+                        uriStrings = confirmation.uris.map(Uri::toString)
+                    )
+                    if (consumed) {
+                        updateFileChooserOutcome(
+                            confirmation.service,
+                            confirmation.requestId,
+                            "shared upload confirmed (${confirmation.uris.size})"
+                        )
+                        confirmation.callback.onReceiveValue(confirmation.uris.toTypedArray())
+                    } else {
+                        updateFileChooserOutcome(
+                            confirmation.service,
+                            confirmation.requestId,
+                            "shared upload stale / cancelled"
+                        )
+                        confirmation.callback.onReceiveValue(null)
+                        viewModel.showSnackbar("Shared content changed; upload cancelled.")
+                    }
+                }
+            }
+        )
+    }
 
     if (showProviderDiagnosticsDialog) {
         val webViewPackage = WebView.getCurrentWebViewPackage()?.let { packageInfo ->
@@ -747,6 +1040,104 @@ fun WebChatScreen(
             }
         )
     }
+}
+
+@Composable
+private fun SharedContentBanner(
+    service: WebAiService,
+    payload: IncomingSharePayload,
+    isTextClaimed: Boolean,
+    onInsertText: () -> Unit,
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    ElevatedCard(
+        modifier = modifier
+            .padding(12.dp)
+            .widthIn(max = 440.dp)
+            .fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Icon(Icons.Default.Share, contentDescription = null, tint = AccentCyan)
+                Text(
+                    "Shared content → ${service.shortName}",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Spacer(Modifier.weight(1f))
+                IconButton(
+                    onClick = onDismiss,
+                    enabled = !isTextClaimed,
+                    modifier = Modifier.size(32.dp)
+                ) {
+                    Icon(Icons.Default.Close, contentDescription = "Dismiss shared content")
+                }
+            }
+            payload.text?.let { text ->
+                Text(
+                    text,
+                    style = MaterialTheme.typography.bodySmall,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    if (isTextClaimed) {
+                        "Shared text insertion is in progress."
+                    } else {
+                        "Tap the provider composer, then Insert within 15 seconds."
+                    },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                TextButton(onClick = onInsertText, enabled = !isTextClaimed) {
+                    Icon(Icons.Default.ContentPaste, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text(if (isTextClaimed) "Inserting…" else "Insert shared text")
+                }
+            }
+            if (payload.attachmentCount > 0) {
+                Text(
+                    "${payload.attachmentCount} shared attachment${if (payload.attachmentCount == 1) "" else "s"} ready. Tap Attach in ${service.shortName}; LlmBench will ask before supplying matching shared files.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SharedUploadConfirmationDialog(
+    service: WebAiService,
+    attachmentCount: Int,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    val noun = if (attachmentCount == 1) "attachment" else "attachments"
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Share with ${service.shortName}?") },
+        text = {
+            Text(
+                "The embedded page requested $attachmentCount shared $noun. " +
+                    "Android WebView does not reveal which frame triggered this file request, " +
+                    "so continue only if you just tapped Attach in ${service.shortName}."
+            )
+        },
+        confirmButton = {
+            Button(onClick = onConfirm) { Text("Share") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        }
+    )
 }
 
 @Composable
@@ -1465,7 +1856,7 @@ private fun createConfiguredWebView(
 
 /** Accepts only externally granted content URIs for provider uploads. */
 private fun isAllowedUploadUri(context: Context, uri: Uri): Boolean {
-    if (!uri.scheme.equals(ContentResolver.SCHEME_CONTENT, ignoreCase = true)) return false
+    if (uri.scheme != ContentResolver.SCHEME_CONTENT) return false
     val authority = uri.authority ?: return false
     val appAuthorityPrefix = context.packageName.lowercase()
     val normalizedAuthority = authority.lowercase()

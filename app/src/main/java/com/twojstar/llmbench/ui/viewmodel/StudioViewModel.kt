@@ -12,6 +12,11 @@ import com.twojstar.llmbench.data.model.*
 import com.twojstar.llmbench.data.preferences.StudioStateStore
 import com.twojstar.llmbench.data.preferences.StudioStateWriter
 import com.twojstar.llmbench.data.security.ApiKeyStore
+import com.twojstar.llmbench.share.IncomingSharePayload
+import com.twojstar.llmbench.share.PendingWebShare
+import com.twojstar.llmbench.share.claimText
+import com.twojstar.llmbench.share.completeTextClaim
+import com.twojstar.llmbench.share.releaseTextClaim
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -41,6 +46,8 @@ data class StudioUiState(
     val currentTab: NavigationTab = NavigationTab.WEB_CHATS,
     val selectedWebService: WebAiService = WebAiService.CLAUDE,
     val snackbarMessage: String? = null,
+    val incomingShare: IncomingSharePayload? = null,
+    val pendingWebShare: PendingWebShare? = null,
 
     // Integrated Multi-Provider AI Chat
     val chatMessages: List<ModelChatMessage> = emptyList(),
@@ -83,6 +90,7 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
     private var studioPersistenceJob: Job? = null
     private var studioPersistenceOwnerId: Long? = null
     private val activeChatGenerationId = AtomicLong(0)
+    private val pendingWebShareId = AtomicLong(0)
     val uiState: StateFlow<StudioUiState> = _uiState.asStateFlow()
 
     init {
@@ -146,6 +154,115 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
 
     fun selectWebService(service: WebAiService) {
         _uiState.update { it.copy(selectedWebService = service) }
+    }
+
+    fun receiveIncomingShare(payload: IncomingSharePayload) {
+        _uiState.update { it.copy(incomingShare = payload, pendingWebShare = null) }
+    }
+
+    fun restoreShareState(
+        incomingShare: IncomingSharePayload?,
+        pendingShare: PendingWebShare?
+    ) {
+        pendingShare?.let { restored ->
+            pendingWebShareId.updateAndGet { current -> maxOf(current, restored.id) }
+        }
+        _uiState.update { state ->
+            if (state.incomingShare != null || state.pendingWebShare != null) return@update state
+            when {
+                pendingShare != null -> state.copy(
+                    currentTab = NavigationTab.WEB_CHATS,
+                    selectedWebService = pendingShare.service,
+                    incomingShare = null,
+                    pendingWebShare = pendingShare
+                )
+                incomingShare != null -> state.copy(incomingShare = incomingShare)
+                else -> state
+            }
+        }
+    }
+
+    fun dismissIncomingShare() {
+        _uiState.update { it.copy(incomingShare = null) }
+    }
+
+    fun routeIncomingShareToWeb(service: WebAiService) {
+        val shareId = pendingWebShareId.incrementAndGet()
+        _uiState.update { state ->
+            val payload = state.incomingShare ?: return@update state
+            state.copy(
+                currentTab = NavigationTab.WEB_CHATS,
+                selectedWebService = service,
+                incomingShare = null,
+                pendingWebShare = PendingWebShare(shareId, service, payload)
+            )
+        }
+    }
+
+    fun claimPendingWebShareText(service: WebAiService, shareId: Long): String? {
+        while (true) {
+            val state = _uiState.value
+            val pending = state.pendingWebShare
+                ?.takeIf { it.service == service && it.id == shareId }
+                ?: return null
+            val text = pending.payload.text ?: return null
+            val claimed = pending.claimText() ?: return null
+            val next = state.copy(pendingWebShare = claimed)
+            if (_uiState.compareAndSet(state, next)) return text
+        }
+    }
+
+    fun completePendingWebShareText(service: WebAiService, shareId: Long): Boolean =
+        updatePendingWebShare(
+            service = service,
+            shareId = shareId,
+            predicate = { it.isTextClaimed && it.payload.text != null }
+        ) { it.completeTextClaim() }
+
+    fun releasePendingWebShareTextClaim(service: WebAiService, shareId: Long): Boolean =
+        updatePendingWebShare(
+            service = service,
+            shareId = shareId,
+            predicate = { it.isTextClaimed }
+        ) { it.releaseTextClaim() }
+
+    fun consumePendingWebShareUris(
+        service: WebAiService,
+        shareId: Long,
+        uriStrings: Collection<String>
+    ): Boolean {
+        val consumed = uriStrings.toSet()
+        if (consumed.isEmpty()) return false
+        return updatePendingWebShare(
+            service = service,
+            shareId = shareId,
+            predicate = { pending -> pending.payload.uriStrings.containsAll(consumed) }
+        ) { pending ->
+            val payload = pending.payload.copy(
+                uriStrings = pending.payload.uriStrings.filterNot(consumed::contains)
+            )
+            if (payload.isEmpty) null else pending.copy(payload = payload)
+        }
+    }
+
+    fun dismissPendingWebShare(service: WebAiService, shareId: Long): Boolean =
+        updatePendingWebShare(service, shareId) { null }
+
+    private fun updatePendingWebShare(
+        service: WebAiService,
+        shareId: Long,
+        predicate: (PendingWebShare) -> Boolean = { true },
+        transform: (PendingWebShare) -> PendingWebShare?
+    ): Boolean {
+        while (true) {
+            val state = _uiState.value
+            val pending = state.pendingWebShare
+                ?.takeIf { it.service == service && it.id == shareId }
+                ?: return false
+            if (!predicate(pending)) return false
+            val next = state.copy(pendingWebShare = transform(pending))
+            if (_uiState.compareAndSet(state, next)) return true
+        }
     }
 
     // --- Chat Screen Actions ---
