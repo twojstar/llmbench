@@ -12,6 +12,8 @@ import com.twojstar.llmbench.data.model.*
 import com.twojstar.llmbench.data.preferences.StudioStateStore
 import com.twojstar.llmbench.data.preferences.StudioStateWriter
 import com.twojstar.llmbench.data.security.ApiKeyStore
+import com.twojstar.llmbench.share.IncomingSharePayload
+import com.twojstar.llmbench.share.PendingWebShare
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -41,6 +43,8 @@ data class StudioUiState(
     val currentTab: NavigationTab = NavigationTab.WEB_CHATS,
     val selectedWebService: WebAiService = WebAiService.CLAUDE,
     val snackbarMessage: String? = null,
+    val incomingShare: IncomingSharePayload? = null,
+    val pendingWebShare: PendingWebShare? = null,
 
     // Integrated Multi-Provider AI Chat
     val chatMessages: List<ModelChatMessage> = emptyList(),
@@ -146,6 +150,51 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
 
     fun selectWebService(service: WebAiService) {
         _uiState.update { it.copy(selectedWebService = service) }
+    }
+
+    fun receiveIncomingShare(payload: IncomingSharePayload) {
+        _uiState.update { it.copy(incomingShare = payload, pendingWebShare = null) }
+    }
+
+    fun dismissIncomingShare() {
+        _uiState.update { it.copy(incomingShare = null) }
+    }
+
+    fun routeIncomingShareToWeb(service: WebAiService) {
+        _uiState.update { state ->
+            val payload = state.incomingShare ?: return@update state
+            state.copy(
+                currentTab = NavigationTab.WEB_CHATS,
+                selectedWebService = service,
+                incomingShare = null,
+                pendingWebShare = PendingWebShare(service, payload)
+            )
+        }
+    }
+
+    fun consumePendingWebShareText(service: WebAiService) {
+        _uiState.update { state ->
+            val pending = state.pendingWebShare?.takeIf { it.service == service } ?: return@update state
+            val payload = pending.payload.copy(text = null)
+            state.copy(pendingWebShare = if (payload.isEmpty) null else pending.copy(payload = payload))
+        }
+    }
+
+    fun consumePendingWebShareUris(service: WebAiService, uriStrings: Collection<String>) {
+        val consumed = uriStrings.toSet()
+        _uiState.update { state ->
+            val pending = state.pendingWebShare?.takeIf { it.service == service } ?: return@update state
+            val payload = pending.payload.copy(
+                uriStrings = pending.payload.uriStrings.filterNot(consumed::contains)
+            )
+            state.copy(pendingWebShare = if (payload.isEmpty) null else pending.copy(payload = payload))
+        }
+    }
+
+    fun dismissPendingWebShare(service: WebAiService) {
+        _uiState.update { state ->
+            if (state.pendingWebShare?.service == service) state.copy(pendingWebShare = null) else state
+        }
     }
 
     // --- Chat Screen Actions ---

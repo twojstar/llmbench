@@ -59,6 +59,7 @@ import com.twojstar.llmbench.data.model.WebChatGenerationObservation
 import com.twojstar.llmbench.data.model.markWebChatActivityRead
 import com.twojstar.llmbench.data.model.nextWebChatActivityStatus
 import com.twojstar.llmbench.data.model.webChatActivityStatusAfterEviction
+import com.twojstar.llmbench.share.IncomingSharePayload
 import com.twojstar.llmbench.ui.theme.*
 import com.twojstar.llmbench.ui.viewmodel.StudioUiState
 import com.twojstar.llmbench.ui.viewmodel.StudioViewModel
@@ -86,6 +87,54 @@ import kotlinx.coroutines.launch
 private const val WEBVIEW_LOG_TAG = "LlmBenchWeb"
 private const val MAX_LIVE_WEBVIEWS = 2
 private const val DIAGNOSTIC_NONE_YET = "None yet"
+
+internal fun fileChooserAcceptsMimeType(
+    acceptTypes: Array<String>,
+    actualMimeType: String?
+): Boolean {
+    val accepted = acceptTypes
+        .flatMap { it.split(',') }
+        .map { it.trim().lowercase() }
+        .filter { it.isNotEmpty() }
+        .distinct()
+    if (accepted.isEmpty() || "*/*" in accepted) return true
+
+    val actual = actualMimeType
+        ?.substringBefore(';')
+        ?.trim()
+        ?.lowercase()
+        ?.takeIf { '/' in it }
+        ?: return false
+    val (actualType, actualSubtype) = actual.split('/', limit = 2)
+    return accepted.any { candidate ->
+        if (candidate.startsWith('.')) return@any false
+        val parts = candidate.split('/', limit = 2)
+        parts.size == 2 &&
+            (parts[0] == "*" || parts[0] == actualType) &&
+            (parts[1] == "*" || parts[1] == actualSubtype)
+    }
+}
+
+private fun sharedUrisForFileChooser(
+    context: Context,
+    params: WebChromeClient.FileChooserParams,
+    uriStrings: List<String>
+): List<Uri> {
+    if (params.isCaptureEnabled) return emptyList()
+    val matching = uriStrings.asSequence()
+        .map(Uri::parse)
+        .filter { isAllowedUploadUri(context, it) }
+        .filter { uri ->
+            val mimeType = runCatching { context.contentResolver.getType(uri) }.getOrNull()
+            fileChooserAcceptsMimeType(params.acceptTypes, mimeType)
+        }
+        .toList()
+    return if (params.mode == WebChromeClient.FileChooserParams.MODE_OPEN_MULTIPLE) {
+        matching
+    } else {
+        matching.take(1)
+    }
+}
 
 internal fun shouldApplyWebChatObservation(
     observation: WebChatGenerationObservation,
@@ -134,6 +183,7 @@ fun WebChatScreen(
 ) {
     val context = LocalContext.current
     val selectedService by rememberUpdatedState(uiState.selectedWebService)
+    val currentPendingWebShare by rememberUpdatedState(uiState.pendingWebShare)
     var currentUrl by remember { mutableStateOf(selectedService.url) }
     var loadingProgress by remember { mutableIntStateOf(0) }
     var isLoading by remember { mutableStateOf(false) }
@@ -409,6 +459,32 @@ fun WebChatScreen(
         }
     }
 
+    fun applySharedText() {
+        val pending = currentPendingWebShare?.takeIf { it.service == selectedService } ?: return
+        val text = pending.payload.text ?: return
+        val webView = activeWebView
+
+        fun copyFallback(message: String) {
+            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+            clipboard.setPrimaryClip(ClipData.newPlainText("Shared text", text))
+            viewModel.consumePendingWebShareText(selectedService)
+            viewModel.showSnackbar(message)
+        }
+
+        if (webView == null) {
+            copyFallback("Provider is not ready yet; shared text copied instead.")
+            return
+        }
+        applyStudioPromptToFocusedEditor(webView, selectedService, text) { result ->
+            if (result == StudioPromptApplyResult.INSERTED) {
+                viewModel.consumePendingWebShareText(selectedService)
+                viewModel.showSnackbar("Shared text inserted into ${selectedService.shortName}.")
+            } else {
+                copyFallback("Could not insert shared text; copied it instead.")
+            }
+        }
+    }
+
     BackHandler(enabled = canGoBack && drawerState.currentValue == DrawerValue.Closed) {
         activeWebView?.let {
             if (it.canGoBack()) {
@@ -543,7 +619,30 @@ fun WebChatScreen(
                                     viewModel.showSnackbar("Could not open external link")
                                 },
                                 onFileChooserRequested = { callback, params, pageUrl ->
-                                    if (pendingFileCallback.value != null) {
+                                    val stagedUriStrings = currentPendingWebShare
+                                        ?.takeIf { it.service == service }
+                                        ?.payload
+                                        ?.uriStrings
+                                        .orEmpty()
+                                    val sharedUris = sharedUrisForFileChooser(
+                                        context = context,
+                                        params = params,
+                                        uriStrings = stagedUriStrings
+                                    )
+                                    if (sharedUris.isNotEmpty()) {
+                                        recordFileChooserRequest(
+                                            service,
+                                            params,
+                                            pageUrl,
+                                            "shared content (${sharedUris.size})"
+                                        )
+                                        callback.onReceiveValue(sharedUris.toTypedArray())
+                                        viewModel.consumePendingWebShareUris(
+                                            service,
+                                            sharedUris.map(Uri::toString)
+                                        )
+                                        true
+                                    } else if (pendingFileCallback.value != null) {
                                         recordFileChooserRequest(
                                             service,
                                             params,
@@ -633,6 +732,18 @@ fun WebChatScreen(
                     )
                     }
                 }
+
+                currentPendingWebShare
+                    ?.takeIf { it.service == selectedService }
+                    ?.let { pending ->
+                        SharedContentBanner(
+                            service = selectedService,
+                            payload = pending.payload,
+                            onInsertText = ::applySharedText,
+                            onDismiss = { viewModel.dismissPendingWebShare(selectedService) },
+                            modifier = Modifier.align(Alignment.TopCenter)
+                        )
+                    }
             }
         }
         }
@@ -746,6 +857,68 @@ fun WebChatScreen(
                 }
             }
         )
+    }
+}
+
+@Composable
+private fun SharedContentBanner(
+    service: WebAiService,
+    payload: IncomingSharePayload,
+    onInsertText: () -> Unit,
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    ElevatedCard(
+        modifier = modifier
+            .padding(12.dp)
+            .widthIn(max = 440.dp)
+            .fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Icon(Icons.Default.Share, contentDescription = null, tint = AccentCyan)
+                Text(
+                    "Shared content → ${service.shortName}",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Spacer(Modifier.weight(1f))
+                IconButton(onClick = onDismiss, modifier = Modifier.size(32.dp)) {
+                    Icon(Icons.Default.Close, contentDescription = "Dismiss shared content")
+                }
+            }
+            payload.text?.let { text ->
+                Text(
+                    text,
+                    style = MaterialTheme.typography.bodySmall,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    "Tap the provider composer, then Insert within 15 seconds.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                TextButton(onClick = onInsertText) {
+                    Icon(Icons.Default.ContentPaste, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("Insert shared text")
+                }
+            }
+            if (payload.attachmentCount > 0) {
+                Text(
+                    "${payload.attachmentCount} shared attachment${if (payload.attachmentCount == 1) "" else "s"} ready. Tap Attach in ${service.shortName}; matching files are supplied before the system picker.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
     }
 }
 

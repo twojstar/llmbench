@@ -16,6 +16,8 @@ LlmBench is intended to combine three layers:
 
 The first prototype already contains Compose UI, persistent per-provider WebViews, a native comparison chat, profile/instruction rendering, YAML editing and a small skills/docs browser.
 
+On Android, LlmBench also appears in the system share sheet for text, images and application files. Shared content is routed to a chosen web provider; text uses the existing focused-empty-composer bridge, while granted content URIs are staged for the provider's next compatible file chooser.
+
 ## Initial provider targets
 
 ### Account-backed WebViews
