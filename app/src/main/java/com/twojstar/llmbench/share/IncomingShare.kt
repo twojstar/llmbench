@@ -15,6 +15,7 @@ data class IncomingSharePayload(
 }
 
 data class PendingWebShare(
+    val id: Long,
     val service: WebAiService,
     val payload: IncomingSharePayload
 )
@@ -35,21 +36,28 @@ internal fun normalizeIncomingSharePayload(
 }
 
 private fun isContentUriString(value: String): Boolean = runCatching {
-    URI(value).scheme.equals("content", ignoreCase = true)
+    URI(value).scheme == "content"
 }.getOrDefault(false)
+
+internal fun selectIncomingShareText(
+    primaryText: String?,
+    clipTexts: List<String>
+): String? = primaryText?.takeIf(String::isNotBlank)
+    ?: clipTexts.joinToString("\n").takeIf(String::isNotBlank)
 
 internal fun extractIncomingSharePayload(intent: Intent): IncomingSharePayload? {
     if (intent.action != Intent.ACTION_SEND && intent.action != Intent.ACTION_SEND_MULTIPLE) {
         return null
     }
 
-    val text = intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString()
-        ?: intent.clipData?.let { clip ->
-            (0 until clip.itemCount)
-                .mapNotNull { index -> clip.getItemAt(index).text?.toString() }
-                .joinToString("\n")
-                .takeIf(String::isNotBlank)
-        }
+    val clipTexts = intent.clipData?.let { clip ->
+        (0 until clip.itemCount)
+            .mapNotNull { index -> clip.getItemAt(index).text?.toString() }
+    }.orEmpty()
+    val text = selectIncomingShareText(
+        primaryText = intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString(),
+        clipTexts = clipTexts
+    )
     val uriStrings = buildList {
         addAll(intentStreamUris(intent).map(Uri::toString))
         intent.clipData?.let { clip ->

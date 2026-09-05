@@ -87,6 +87,7 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
     private var studioPersistenceJob: Job? = null
     private var studioPersistenceOwnerId: Long? = null
     private val activeChatGenerationId = AtomicLong(0)
+    private val pendingWebShareId = AtomicLong(0)
     val uiState: StateFlow<StudioUiState> = _uiState.asStateFlow()
 
     init {
@@ -156,44 +157,91 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
         _uiState.update { it.copy(incomingShare = payload, pendingWebShare = null) }
     }
 
+    fun restoreShareState(
+        incomingShare: IncomingSharePayload?,
+        pendingShare: PendingWebShare?
+    ) {
+        pendingShare?.let { restored ->
+            pendingWebShareId.updateAndGet { current -> maxOf(current, restored.id) }
+        }
+        _uiState.update { state ->
+            if (state.incomingShare != null || state.pendingWebShare != null) return@update state
+            when {
+                pendingShare != null -> state.copy(
+                    currentTab = NavigationTab.WEB_CHATS,
+                    selectedWebService = pendingShare.service,
+                    incomingShare = null,
+                    pendingWebShare = pendingShare
+                )
+                incomingShare != null -> state.copy(incomingShare = incomingShare)
+                else -> state
+            }
+        }
+    }
+
     fun dismissIncomingShare() {
         _uiState.update { it.copy(incomingShare = null) }
     }
 
     fun routeIncomingShareToWeb(service: WebAiService) {
+        val shareId = pendingWebShareId.incrementAndGet()
         _uiState.update { state ->
             val payload = state.incomingShare ?: return@update state
             state.copy(
                 currentTab = NavigationTab.WEB_CHATS,
                 selectedWebService = service,
                 incomingShare = null,
-                pendingWebShare = PendingWebShare(service, payload)
+                pendingWebShare = PendingWebShare(shareId, service, payload)
             )
         }
     }
 
-    fun consumePendingWebShareText(service: WebAiService) {
-        _uiState.update { state ->
-            val pending = state.pendingWebShare?.takeIf { it.service == service } ?: return@update state
+    fun consumePendingWebShareText(service: WebAiService, shareId: Long): Boolean =
+        updatePendingWebShare(
+            service = service,
+            shareId = shareId,
+            predicate = { it.payload.text != null }
+        ) { pending ->
             val payload = pending.payload.copy(text = null)
-            state.copy(pendingWebShare = if (payload.isEmpty) null else pending.copy(payload = payload))
+            if (payload.isEmpty) null else pending.copy(payload = payload)
         }
-    }
 
-    fun consumePendingWebShareUris(service: WebAiService, uriStrings: Collection<String>) {
+    fun consumePendingWebShareUris(
+        service: WebAiService,
+        shareId: Long,
+        uriStrings: Collection<String>
+    ): Boolean {
         val consumed = uriStrings.toSet()
-        _uiState.update { state ->
-            val pending = state.pendingWebShare?.takeIf { it.service == service } ?: return@update state
+        if (consumed.isEmpty()) return false
+        return updatePendingWebShare(
+            service = service,
+            shareId = shareId,
+            predicate = { pending -> pending.payload.uriStrings.containsAll(consumed) }
+        ) { pending ->
             val payload = pending.payload.copy(
                 uriStrings = pending.payload.uriStrings.filterNot(consumed::contains)
             )
-            state.copy(pendingWebShare = if (payload.isEmpty) null else pending.copy(payload = payload))
+            if (payload.isEmpty) null else pending.copy(payload = payload)
         }
     }
 
-    fun dismissPendingWebShare(service: WebAiService) {
-        _uiState.update { state ->
-            if (state.pendingWebShare?.service == service) state.copy(pendingWebShare = null) else state
+    fun dismissPendingWebShare(service: WebAiService, shareId: Long): Boolean =
+        updatePendingWebShare(service, shareId) { null }
+
+    private fun updatePendingWebShare(
+        service: WebAiService,
+        shareId: Long,
+        predicate: (PendingWebShare) -> Boolean = { true },
+        transform: (PendingWebShare) -> PendingWebShare?
+    ): Boolean {
+        while (true) {
+            val state = _uiState.value
+            val pending = state.pendingWebShare
+                ?.takeIf { it.service == service && it.id == shareId }
+                ?: return false
+            if (!predicate(pending)) return false
+            val next = state.copy(pendingWebShare = transform(pending))
+            if (_uiState.compareAndSet(state, next)) return true
         }
     }
 

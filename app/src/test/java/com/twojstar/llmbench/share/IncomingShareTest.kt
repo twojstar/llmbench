@@ -21,15 +21,28 @@ class IncomingShareTest {
         requireNotNull(payload)
         assertEquals("shared text", payload.text)
         assertEquals(
-            listOf("content://example/document/1", "CONTENT://example/document/2"),
+            listOf("content://example/document/1"),
             payload.uriStrings
         )
-        assertEquals(2, payload.attachmentCount)
+        assertEquals(1, payload.attachmentCount)
+    }
+
+    @Test
+    fun blankPrimaryTextFallsBackToClipText() {
+        assertEquals(
+            "clip text",
+            selectIncomingShareText("   ", listOf("clip text"))
+        )
+        assertEquals(
+            "primary",
+            selectIncomingShareText("primary", listOf("clip text"))
+        )
     }
 
     @Test
     fun rejectsEmptyOrUnsupportedSharePayload() {
         assertNull(normalizeIncomingSharePayload("   ", emptyList()))
         assertNull(normalizeIncomingSharePayload(null, listOf("file:///tmp/nope")))
+        assertNull(normalizeIncomingSharePayload(null, listOf("CONTENT://example/document/2")))
     }
 }

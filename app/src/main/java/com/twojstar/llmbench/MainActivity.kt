@@ -21,7 +21,9 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.twojstar.llmbench.data.model.WebAiService
 import com.twojstar.llmbench.share.IncomingSharePayload
+import com.twojstar.llmbench.share.PendingWebShare
 import com.twojstar.llmbench.share.extractIncomingSharePayload
+import com.twojstar.llmbench.share.normalizeIncomingSharePayload
 import com.twojstar.llmbench.ui.screens.*
 import com.twojstar.llmbench.ui.theme.LlmBenchTheme
 import com.twojstar.llmbench.ui.viewmodel.NavigationTab
@@ -34,11 +36,14 @@ internal fun showPrimaryBottomNavigation(tab: NavigationTab): Boolean = tab != N
 class MainActivity : ComponentActivity() {
 
     private val viewModel: StudioViewModel by viewModels()
+    private var retainedShareIntentHandled = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        handleIncomingShareIntent(intent)
+        retainedShareIntentHandled = savedInstanceState?.getBoolean(KEY_SHARE_INTENT_HANDLED) == true
+        restoreShareState(savedInstanceState)
+        if (!retainedShareIntentHandled) handleIncomingShareIntent(intent)
 
         setContent {
             LlmBenchTheme {
@@ -163,12 +168,75 @@ class MainActivity : ComponentActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        retainedShareIntentHandled = false
         setIntent(intent)
         handleIncomingShareIntent(intent)
     }
 
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putBoolean(KEY_SHARE_INTENT_HANDLED, retainedShareIntentHandled)
+        saveShareState(outState)
+    }
+
     private fun handleIncomingShareIntent(intent: Intent) {
+        val isShareIntent = intent.action == Intent.ACTION_SEND ||
+            intent.action == Intent.ACTION_SEND_MULTIPLE
+        if (!isShareIntent) return
+        retainedShareIntentHandled = true
         extractIncomingSharePayload(intent)?.let(viewModel::receiveIncomingShare)
+    }
+
+    private fun saveShareState(outState: Bundle) {
+        val state = viewModel.uiState.value
+        val pending = state.pendingWebShare
+        val incoming = state.incomingShare
+        when {
+            pending != null -> {
+                outState.putString(KEY_SHARE_STAGE, SHARE_STAGE_PENDING)
+                outState.putLong(KEY_SHARE_ID, pending.id)
+                outState.putString(KEY_SHARE_SERVICE_ID, pending.service.id)
+                writeSharePayload(outState, pending.payload)
+            }
+            incoming != null -> {
+                outState.putString(KEY_SHARE_STAGE, SHARE_STAGE_INCOMING)
+                writeSharePayload(outState, incoming)
+            }
+        }
+    }
+
+    private fun restoreShareState(savedState: Bundle?) {
+        val stage = savedState?.getString(KEY_SHARE_STAGE) ?: return
+        val payload = normalizeIncomingSharePayload(
+            text = savedState.getString(KEY_SHARE_TEXT),
+            uriStrings = savedState.getStringArrayList(KEY_SHARE_URIS).orEmpty()
+        ) ?: return
+        val pending = if (stage == SHARE_STAGE_PENDING) {
+            val serviceId = savedState.getString(KEY_SHARE_SERVICE_ID)
+            val service = WebAiService.entries.firstOrNull { it.id == serviceId }
+            val shareId = savedState.getLong(KEY_SHARE_ID, 0L)
+            if (service != null && shareId > 0L) PendingWebShare(shareId, service, payload) else null
+        } else null
+        viewModel.restoreShareState(
+            incomingShare = payload.takeIf { stage == SHARE_STAGE_INCOMING },
+            pendingShare = pending
+        )
+    }
+
+    private fun writeSharePayload(outState: Bundle, payload: IncomingSharePayload) {
+        outState.putString(KEY_SHARE_TEXT, payload.text)
+        outState.putStringArrayList(KEY_SHARE_URIS, ArrayList(payload.uriStrings))
+    }
+
+    private companion object {
+        const val KEY_SHARE_INTENT_HANDLED = "llmbench.share.intent_handled"
+        const val KEY_SHARE_STAGE = "llmbench.share.stage"
+        const val KEY_SHARE_ID = "llmbench.share.id"
+        const val KEY_SHARE_SERVICE_ID = "llmbench.share.service_id"
+        const val KEY_SHARE_TEXT = "llmbench.share.text"
+        const val KEY_SHARE_URIS = "llmbench.share.uris"
+        const val SHARE_STAGE_INCOMING = "incoming"
+        const val SHARE_STAGE_PENDING = "pending"
     }
 }
 
