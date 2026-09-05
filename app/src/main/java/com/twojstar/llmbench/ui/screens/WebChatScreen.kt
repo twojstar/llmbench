@@ -519,26 +519,25 @@ fun WebChatScreen(
         val service = selectedService
         val pending = currentPendingWebShare?.takeIf { it.service == service } ?: return
         val text = pending.payload.text ?: return
-        val webView = webViewMap[service]
 
-        fun consumeAndCopy(message: String) {
-            if (!viewModel.consumePendingWebShareText(service, pending.id)) return
+        if (!viewModel.consumePendingWebShareText(service, pending.id)) return
+
+        fun copyFallback(message: String) {
             val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
             clipboard.setPrimaryClip(ClipData.newPlainText("Shared text", text))
             viewModel.showSnackbar(message)
         }
 
+        val webView = webViewMap[service]
         if (webView == null) {
-            consumeAndCopy("Provider is not ready yet; shared text copied instead.")
+            copyFallback("Provider is not ready yet; shared text copied instead.")
             return
         }
         applyStudioPromptToFocusedEditor(webView, service, text) { result ->
             if (result == StudioPromptApplyResult.INSERTED) {
-                if (viewModel.consumePendingWebShareText(service, pending.id)) {
-                    viewModel.showSnackbar("Shared text inserted into ${service.shortName}.")
-                }
+                viewModel.showSnackbar("Shared text inserted into ${service.shortName}.")
             } else {
-                consumeAndCopy("Could not insert shared text; copied it instead.")
+                copyFallback("Could not insert shared text; copied it instead.")
             }
         }
     }
