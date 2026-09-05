@@ -6,7 +6,8 @@ import java.net.URI
 
 internal data class ProviderWebTweak(
     val id: String,
-    val css: String
+    val css: String,
+    val script: String = ""
 )
 
 internal object ProviderWebTweakRegistry {
@@ -14,6 +15,9 @@ internal object ProviderWebTweakRegistry {
     private const val VIBE_STOP_ICON_SELECTOR = "button[type=\"submit\"] svg rect"
     private const val VIBE_SEND_ICON_SELECTOR =
         "button[type=\"submit\"] svg path[d^=\"M12 18v4h4v-4h-4ZM16 14v4h4v-4h-4\"]"
+    private const val CLAUDE_OVERLAY_SELECTOR =
+        "[role=\"dialog\"],[role=\"menu\"],[role=\"tooltip\"],[role=\"listbox\"]," +
+            "[data-radix-popper-content-wrapper]"
 
     private val mobileBaseline = ProviderWebTweak(
         id = "mobile-baseline",
@@ -31,6 +35,118 @@ internal object ProviderWebTweakRegistry {
         """.trimIndent()
     )
 
+    // Mobile WebView subset of the proven Claude-Smooth userscript. Keep it static and
+    // provider-scoped: no remote script loading, credential access, or page-text collection.
+    private val claudeSmooth = ProviderWebTweak(
+        id = "claude-smooth",
+        css = """
+            *, *::before, *::after {
+                animation-duration: 0.001s !important;
+                transition-duration: 0.001s !important;
+                scroll-behavior: auto !important;
+            }
+            [class*="animate-spin"], [class*="animate-pulse"] {
+                animation-duration: 1s !important;
+            }
+            [class*="blur"], [class*="backdrop"] {
+                backdrop-filter: none !important;
+                -webkit-backdrop-filter: none !important;
+            }
+            [class*="shadow"] {
+                box-shadow: none !important;
+            }
+            $CLAUDE_OVERLAY_SELECTOR {
+                box-shadow: 0 4px 16px rgba(0, 0, 0, 0.28) !important;
+            }
+            *:not($CLAUDE_OVERLAY_SELECTOR) {
+                will-change: auto !important;
+            }
+            .llmbench-cv-turn {
+                content-visibility: auto;
+                contain-intrinsic-size: auto 600px;
+            }
+            .llmbench-cv-code {
+                content-visibility: auto;
+                contain-intrinsic-size: auto 300px;
+            }
+            .llmbench-cv-side {
+                content-visibility: auto;
+                contain-intrinsic-size: auto 44px;
+            }
+        """.trimIndent(),
+        script = """
+            (() => {
+                const STATE_KEY = '__llmbenchClaudeSmoothV1';
+                const existing = window[STATE_KEY];
+                if (existing) {
+                    existing.tag();
+                    return;
+                }
+
+                const OVERLAY_SELECTOR = '$CLAUDE_OVERLAY_SELECTOR';
+                const TURN_SELECTOR = '[data-testid^="conversation-turn"],[data-test-render-count],' +
+                    'div.font-claude-message,div.font-claude-response,[data-testid="user-message"]';
+                const SIDE_SELECTOR = 'nav a[href^="/chat/"],nav li,aside a[href^="/chat/"]';
+                const TAIL = 2;
+                const desktop = window.matchMedia('(pointer: fine)').matches && window.innerWidth >= 900;
+
+                const tag = () => {
+                    const turns = Array.from(document.querySelectorAll(TURN_SELECTOR));
+                    turns.forEach((turn, index) => {
+                        turn.classList.toggle('llmbench-cv-turn', index < turns.length - TAIL);
+                    });
+
+                    document.querySelectorAll('pre').forEach((code) => {
+                        if (!code.closest(OVERLAY_SELECTOR)) code.classList.add('llmbench-cv-code');
+                    });
+
+                    if (!desktop) {
+                        document.querySelectorAll(SIDE_SELECTOR).forEach((item) => {
+                            item.classList.add('llmbench-cv-side');
+                        });
+                    }
+
+                    document.querySelectorAll('img:not([data-llmbench-lazy])').forEach((image) => {
+                        image.loading = 'lazy';
+                        image.decoding = 'async';
+                        image.dataset.llmbenchLazy = '1';
+                    });
+                };
+
+                const idle = window.requestIdleCallback
+                    ? (callback) => window.requestIdleCallback(callback, { timeout: 500 })
+                    : (callback) => window.requestAnimationFrame(callback);
+                let queued = false;
+                const schedule = () => {
+                    if (queued) return;
+                    queued = true;
+                    idle(() => {
+                        queued = false;
+                        tag();
+                    });
+                };
+
+                const observer = new MutationObserver(schedule);
+                const start = () => {
+                    tag();
+                    observer.observe(document.body, { childList: true, subtree: true });
+                };
+                window[STATE_KEY] = { tag, observer };
+
+                if (document.body) {
+                    start();
+                } else {
+                    const boot = new MutationObserver(() => {
+                        if (!document.body) return;
+                        boot.disconnect();
+                        start();
+                    });
+                    boot.observe(document.documentElement, { childList: true });
+                }
+            })();
+        """.trimIndent()
+    )
+
     // Canonical hosts come from WebAiService.url. Add only verified provider-owned aliases here.
     private val ownedHostAliases = mapOf(
         WebAiService.KIMI to setOf("kimi.com"),
@@ -43,7 +159,12 @@ internal object ProviderWebTweakRegistry {
         WebAiService.QWEN to setOf("accounts.google.com", "github.com")
     )
 
-    private val providerTweaks = WebAiService.entries.associateWith { listOf(mobileBaseline) }
+    private val providerTweaks = WebAiService.entries.associateWith { service ->
+        when (service) {
+            WebAiService.CLAUDE -> listOf(mobileBaseline, claudeSmooth)
+            else -> listOf(mobileBaseline)
+        }
+    }
 
     // Keep activity probes conservative: provider-scoped controls only, preferring locale-independent state.
     private val generationSelectors = mapOf(
@@ -151,6 +272,7 @@ internal fun applyProviderWebTweaks(
                     (document.head || root).appendChild(style);
                 }
                 style.textContent = $css;
+                ${tweak.script}
             })();
         """.trimIndent()
         webView.evaluateJavascript(script, null)
