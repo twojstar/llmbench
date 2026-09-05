@@ -548,6 +548,9 @@ fun WebChatScreen(
                                 onExternalIntentRequested = { uri ->
                                     pendingExternalIntentUri = uri
                                 },
+                                onExternalNavigationFailed = {
+                                    viewModel.showSnackbar("Could not open external link")
+                                },
                                 onFileChooserRequested = { callback, params, pageUrl ->
                                     if (pendingFileCallback.value != null) {
                                         recordFileChooserRequest(
@@ -1349,6 +1352,7 @@ private fun createConfiguredWebView(
     onProgressChanged: (Int) -> Unit,
     onNavStateChanged: (canGoBack: Boolean, canGoForward: Boolean) -> Unit,
     onExternalIntentRequested: (Uri) -> Unit,
+    onExternalNavigationFailed: () -> Unit,
     onFileChooserRequested: (
         ValueCallback<Array<Uri>>,
         WebChromeClient.FileChooserParams,
@@ -1464,7 +1468,13 @@ private fun createConfiguredWebView(
 
             override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
                 val navigation = request ?: return true
-                return handleMainFrameNavigation(context, service, navigation, onExternalIntentRequested)
+                return handleMainFrameNavigation(
+                    context,
+                    service,
+                    navigation,
+                    onExternalIntentRequested,
+                    onExternalNavigationFailed
+                )
             }
 
             override fun onReceivedSslError(
@@ -1497,7 +1507,8 @@ private fun handleMainFrameNavigation(
     context: Context,
     service: WebAiService,
     navigation: WebResourceRequest,
-    onExternalIntentRequested: (Uri) -> Unit
+    onExternalIntentRequested: (Uri) -> Unit,
+    onExternalNavigationFailed: () -> Unit
 ): Boolean {
     if (!navigation.isForMainFrame) return false
 
@@ -1506,7 +1517,10 @@ private fun handleMainFrameNavigation(
         "https" -> {
             if (shouldLoadHttpsInProviderWebView(service, uri.toString())) return false
             if (navigation.hasGesture()) {
-                openExternalUri(context, uri)
+                reportExternalNavigationLaunch(
+                    launched = openExternalUri(context, uri),
+                    onFailure = onExternalNavigationFailed
+                )
             }
             true
         }
@@ -1524,6 +1538,13 @@ private fun handleMainFrameNavigation(
         }
         else -> true
     }
+}
+
+internal fun reportExternalNavigationLaunch(
+    launched: Boolean,
+    onFailure: () -> Unit
+) {
+    if (!launched) onFailure()
 }
 
 /** Switches between the installed WebView mobile UA and a desktop-shaped variant. */

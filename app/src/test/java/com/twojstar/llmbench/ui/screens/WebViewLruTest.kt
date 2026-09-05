@@ -7,6 +7,17 @@ import org.junit.Test
 
 class WebViewLruTest {
     @Test
+    fun failedExternalNavigationLaunchReportsFailure() {
+        var failures = 0
+
+        reportExternalNavigationLaunch(launched = true) { failures++ }
+        assertEquals(0, failures)
+
+        reportExternalNavigationLaunch(launched = false) { failures++ }
+        assertEquals(1, failures)
+    }
+
+    @Test
     fun keepsSelectedProviderFirstAndCapsPoolAtTwo() {
         val firstSwitch = nextWebViewLru(
             current = listOf(WebAiService.CLAUDE),
