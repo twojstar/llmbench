@@ -33,10 +33,6 @@ The first prototype already contains Compose UI, persistent per-provider WebView
 - Character.AI
 - Venice
 - Meta AI
-- Gemini AI Studio via a browser-backed platform flow rather than embedded OAuth
-
-AI Studio intentionally opens in the system browser because Google OAuth policy disallows authorization inside embedded user-agents such as Android WebView.
-
 ### Native / free-provider layer
 
 The native/free-provider layer supports OpenRouter Free and AIHubMix through the shared OpenAI-compatible gateway adapter. Direct Gemini, OpenAI and Claude chats preserve bounded provider-scoped history with native message roles and stream text incrementally with cancellable requests; interrupted partial replies are never replayed. Their model pickers refresh from each gateway's live catalog and keep only zero-cost text models, with bundled models as an offline fallback. Both gateways stay outside the default All Models comparison to avoid duplicate aggregator routing. All Models dispatches only to direct providers with configured API keys and reports API failures without substituting simulated answers. Provider-specific details belong behind adapters rather than being spread through UI code.
@@ -60,7 +56,6 @@ Full means the LlmBench-side integration is implemented; provider-side login or 
 | Character.AI Web | Partial | Provider page in WebView | Provider-documented image attachments; embedded not verified | Not yet | Character.AI documents image attachments in chats; embedded sign-in/upload flow and activity probe still need verification |
 | Venice Web | Partial | Provider page in WebView | Provider-documented; embedded not verified | Not yet | Venice documents file uploads in the chat input; embedded sign-in/upload flow and provider-specific activity tracking still need verification |
 | Meta AI Web | Partial | Meta login surface is provider-owned | Not verified | Not yet | `alpha.meta.ai` is a verified provider-owned login alias; embedded sign-in, chat uploads and activity tracking still need verification |
-| Gemini AI Studio | Browser-only | System browser | Browser-owned | Browser-owned | Kept out of WebView because Google OAuth forbids authorization in embedded user-agents |
 | OpenRouter Free | Native gateway | API key | N/A | Native request state | Uses openrouter/free; excluded from default All Models compare |
 | AIHubMix Free | Native gateway | API key | N/A | Native request state | Uses explicit -free models; excluded from default All Models compare |
 
@@ -119,7 +114,6 @@ Backends are optional, not the default. If a feature truly needs one, prefer a t
 - [x] add mobile WebView LRU/memory-pressure handling for long chats
 - [x] implement reliable provider file uploads through the platform file picker
 - [x] apply rendered Studio instructions to an empty focused web composer with clipboard fallback
-- [x] add Gemini AI Studio through a browser-backed platform flow
 - [x] add AIHubMix and OpenRouter-compatible free-provider gateways
 - [x] create a provider-tweak/userscript interface instead of hard-coded WebView hacks
 - [x] add privacy-safe provider diagnostics for embedded capability verification

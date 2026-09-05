@@ -53,7 +53,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
-import com.twojstar.llmbench.data.model.BrowserAiPlatform
 import com.twojstar.llmbench.data.model.WebAiService
 import com.twojstar.llmbench.data.model.WebChatActivityStatus
 import com.twojstar.llmbench.data.model.WebChatGenerationObservation
@@ -442,14 +441,6 @@ fun WebChatScreen(
                         onOpenStudio()
                     }
                 },
-                onOpenBrowserPlatform = { platform ->
-                    drawerScope.launch {
-                        drawerState.close()
-                        if (!openExternalUri(context, Uri.parse(platform.url))) {
-                            viewModel.showSnackbar("Could not launch ${platform.shortName}")
-                        }
-                    }
-                }
             )
         },
         modifier = modifier.fillMaxSize()
@@ -1109,8 +1100,7 @@ private fun WebProviderDrawer(
     providerFavicons: Map<WebAiService, Bitmap>,
     onSelectService: (WebAiService) -> Unit,
     onOpenNativeCompare: () -> Unit,
-    onOpenStudio: () -> Unit,
-    onOpenBrowserPlatform: (BrowserAiPlatform) -> Unit
+    onOpenStudio: () -> Unit
 ) {
     ModalDrawerSheet(modifier = Modifier.width(292.dp)) {
         Column(
@@ -1132,25 +1122,6 @@ private fun WebProviderDrawer(
                     activityStatus = activityStatuses[service] ?: WebChatActivityStatus.IDLE,
                     favicon = providerFavicons[service],
                     onSelect = { onSelectService(service) }
-                )
-            }
-
-            Text(
-                text = "Platforms",
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 14.dp, bottom = 6.dp)
-            )
-            BrowserAiPlatform.entries.forEach { platform ->
-                NavigationDrawerItem(
-                    label = { Text(platform.shortName) },
-                    selected = false,
-                    onClick = { onOpenBrowserPlatform(platform) },
-                    icon = { Icon(Icons.Default.Language, contentDescription = null) },
-                    badge = { Text("Browser") },
-                    modifier = Modifier
-                        .padding(horizontal = 12.dp)
-                        .testTag("btn_open_${platform.id}")
                 )
             }
 
