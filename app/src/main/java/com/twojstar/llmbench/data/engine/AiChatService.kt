@@ -40,6 +40,9 @@ private const val JSON_PRICING_KEY = "pricing"
 private const val JSON_INPUT_KEY = "input"
 private const val JSON_OUTPUT_KEY = "output"
 private const val JSON_CANDIDATES_KEY = "candidates"
+private const val JSON_CHOICES_KEY = "choices"
+private const val JSON_DELTA_KEY = "delta"
+private const val JSON_FINISH_REASON_KEY = "finish_reason"
 private const val JSON_SYSTEM_KEY = "system"
 private const val JSON_MESSAGES_KEY = "messages"
 private const val JSON_MAX_TOKENS_KEY = "max_tokens"
@@ -239,15 +242,17 @@ class AiChatService {
                     }
                     AiProvider.DEEPSEEK, AiProvider.KIMI, AiProvider.OPENROUTER, AiProvider.AIHUBMIX -> {
                         val config = checkNotNull(openAiCompatibleProviders[provider])
-                        callOpenAiCompatibleApi(
-                            config = config,
-                            prompt = prompt,
-                            model = effectiveModel,
-                            apiKey = key,
-                            systemInstruction = systemInstruction,
-                            conversationHistory = conversationHistory,
-                            provider = provider
-                        )
+                        if (onTextDelta != null) {
+                            callOpenAiCompatibleStreamApi(
+                                config, prompt, effectiveModel, key, systemInstruction,
+                                conversationHistory, provider, onTextDelta
+                            )
+                        } else {
+                            callOpenAiCompatibleApi(
+                                config, prompt, effectiveModel, key, systemInstruction,
+                                conversationHistory, provider
+                            )
+                        }
                     }
                     AiProvider.ALL -> null
                 }
@@ -514,19 +519,25 @@ class AiChatService {
 
     internal fun extractOpenAiStreamText(event: JsonObject): String? =
         if (event[STREAM_TYPE_KEY]?.jsonPrimitive?.contentOrNull == OPENAI_OUTPUT_TEXT_DELTA) {
-            event["delta"]?.jsonPrimitive?.contentOrNull
+            event[JSON_DELTA_KEY]?.jsonPrimitive?.contentOrNull
         } else {
             null
         }
 
     internal fun extractClaudeStreamText(event: JsonObject): String? =
         if (event[STREAM_TYPE_KEY]?.jsonPrimitive?.contentOrNull == CLAUDE_CONTENT_BLOCK_DELTA) {
-            event["delta"]?.jsonObject
+            event[JSON_DELTA_KEY]?.jsonObject
                 ?.takeIf { it[STREAM_TYPE_KEY]?.jsonPrimitive?.contentOrNull == CLAUDE_TEXT_DELTA }
                 ?.get(JSON_TEXT_KEY)?.jsonPrimitive?.contentOrNull
         } else {
             null
         }
+
+    internal fun extractOpenAiCompatibleStreamText(event: JsonObject): String? =
+        event[JSON_CHOICES_KEY]?.jsonArray
+            ?.firstOrNull()?.jsonObject
+            ?.get(JSON_DELTA_KEY)?.jsonObject
+            ?.get(JSON_CONTENT_KEY)?.jsonPrimitive?.contentOrNull
 
     private suspend fun callGeminiStreamApi(
         prompt: String,
@@ -607,7 +618,9 @@ class AiChatService {
     }
 
     internal fun extractStreamError(event: JsonObject): String? =
-        extractGeminiStreamError(event) ?: extractTypedStreamError(event)
+        extractGeminiStreamError(event)
+            ?: extractTypedStreamError(event)
+            ?: event.takeIf { it.containsKey(STREAM_ERROR_KEY) }?.let(::extractGenericStreamError)
 
     private fun extractGeminiStreamError(event: JsonObject): String? {
         val candidate = event[JSON_CANDIDATES_KEY]?.jsonArray?.firstOrNull() as? JsonObject
@@ -652,6 +665,11 @@ class AiChatService {
     internal fun isOpenAiStreamComplete(event: JsonObject): Boolean =
         event[STREAM_TYPE_KEY]?.jsonPrimitive?.contentOrNull == OPENAI_RESPONSE_COMPLETED
 
+    internal fun isOpenAiCompatibleStreamComplete(event: JsonObject): Boolean =
+        event[JSON_CHOICES_KEY]?.jsonArray.orEmpty().any { choice ->
+            choice.jsonObject[JSON_FINISH_REASON_KEY]?.jsonPrimitive?.contentOrNull != null
+        }
+
     internal fun isClaudeStreamComplete(event: JsonObject): Boolean =
         event[STREAM_TYPE_KEY]?.jsonPrimitive?.contentOrNull == CLAUDE_MESSAGE_STOP
 
@@ -659,7 +677,8 @@ class AiChatService {
         request: Request,
         extractText: (JsonObject) -> String?,
         isComplete: (JsonObject) -> Boolean,
-        onTextDelta: (String) -> Unit
+        onTextDelta: (String) -> Unit,
+        completeOnDoneSentinel: Boolean = false
     ): String = suspendCancellableCoroutine { continuation ->
         val call = streamingHttpClient.newCall(request)
         continuation.invokeOnCancellation { call.cancel() }
@@ -669,7 +688,7 @@ class AiChatService {
             }
 
             override fun onResponse(call: Call, response: Response) {
-                completeSseContinuation(continuation, response, extractText, isComplete, onTextDelta)
+                completeSseContinuation(continuation, response, extractText, isComplete, onTextDelta, completeOnDoneSentinel)
             }
         })
     }
@@ -679,9 +698,12 @@ class AiChatService {
         response: Response,
         extractText: (JsonObject) -> String?,
         isComplete: (JsonObject) -> Boolean,
-        onTextDelta: (String) -> Unit
+        onTextDelta: (String) -> Unit,
+        completeOnDoneSentinel: Boolean
     ) {
-        val result = runCatching { readSseResponse(response, extractText, isComplete, onTextDelta) }
+        val result = runCatching {
+            readSseResponse(response, extractText, isComplete, onTextDelta, completeOnDoneSentinel)
+        }
         if (!continuation.isActive) return
 
         val failure = result.exceptionOrNull()
@@ -697,12 +719,13 @@ class AiChatService {
         response: Response,
         extractText: (JsonObject) -> String?,
         isComplete: (JsonObject) -> Boolean,
-        onTextDelta: (String) -> Unit
+        onTextDelta: (String) -> Unit,
+        completeOnDoneSentinel: Boolean = false
     ): String {
         response.use {
             ensureSuccessfulStreamingResponse(response)
             val source = response.body?.source() ?: throw IOException("Empty streaming response body")
-            return consumeSseSource(source, extractText, isComplete, onTextDelta)
+            return consumeSseSource(source, extractText, isComplete, onTextDelta, completeOnDoneSentinel)
         }
     }
 
@@ -716,24 +739,46 @@ class AiChatService {
         source: BufferedSource,
         extractText: (JsonObject) -> String?,
         isComplete: (JsonObject) -> Boolean,
-        onTextDelta: (String) -> Unit
+        onTextDelta: (String) -> Unit,
+        completeOnDoneSentinel: Boolean
     ): String {
         val collected = StringBuilder()
+        val dataLines = mutableListOf<String>()
         var completed = false
-        while (!source.exhausted()) {
-            val event = readSseEvent(source) ?: continue
+        var stopped = false
+
+        fun dispatchEvent() {
+            if (dataLines.isEmpty()) return
+            val payload = dataLines.joinToString("\n")
+            dataLines.clear()
+            if (payload == SSE_DONE) {
+                if (completeOnDoneSentinel) completed = true
+                stopped = true
+                return
+            }
+            val event = parseSseEvent(payload) ?: return
             val (delta, eventComplete) = decodeSseEvent(event, extractText, isComplete)
             appendStreamingDelta(collected, delta, onTextDelta)
-            if (eventComplete) completed = true
+            if (eventComplete) {
+                completed = true
+                stopped = true
+            }
         }
+
+        while (!source.exhausted() && !stopped) {
+            val line = source.readUtf8Line() ?: break
+            when {
+                line.isEmpty() -> dispatchEvent()
+                line == "data" -> dataLines += ""
+                line.startsWith(SSE_DATA_PREFIX) -> {
+                    val value = line.removePrefix(SSE_DATA_PREFIX).removePrefix(" ")
+                    dataLines += value
+                }
+            }
+        }
+        if (!stopped && dataLines.isNotEmpty()) dispatchEvent()
         if (!completed) throw IOException("Streaming response ended before completion")
         return collected.toString()
-    }
-
-    private fun readSseEvent(source: BufferedSource): JsonObject? {
-        val line = source.readUtf8Line() ?: return null
-        if (!line.startsWith(SSE_DATA_PREFIX)) return null
-        return parseSseEvent(line.removePrefix(SSE_DATA_PREFIX).trim())
     }
 
     private fun decodeSseEvent(
@@ -804,6 +849,32 @@ class AiChatService {
         }
 
     // --- OpenAI-compatible provider/gateway boundary ---
+    private suspend fun callOpenAiCompatibleStreamApi(
+        config: OpenAiCompatibleProviderConfig, prompt: String, model: String, apiKey: String,
+        systemInstruction: String?, conversationHistory: List<ModelChatMessage>,
+        provider: AiProvider, onTextDelta: (String) -> Unit
+    ): String {
+        val requestPayload = buildJsonObject {
+            put(JSON_MODEL_KEY, model)
+            put(JSON_MESSAGES_KEY, buildOpenAiCompatibleMessages(
+                prompt, systemInstruction, conversationHistory, provider
+            ))
+            put("stream", true)
+        }
+        val requestBuilder = Request.Builder().url(config.endpointUrl)
+            .addHeader(HEADER_AUTHORIZATION, bearerToken(apiKey))
+            .addHeader(HEADER_CONTENT_TYPE, JSON_MEDIA_TYPE)
+        config.extraHeaders.forEach { (name, value) -> requestBuilder.addHeader(name, value) }
+        val request = requestBuilder.post(
+            requestPayload.toString().toRequestBody(JSON_MEDIA_TYPE.toMediaType())
+        ).build()
+
+        return executeSse(
+            request, ::extractOpenAiCompatibleStreamText, ::isOpenAiCompatibleStreamComplete, onTextDelta,
+            completeOnDoneSentinel = true
+        ).ifEmpty { "Received empty message content." }
+    }
+
     private suspend fun callOpenAiCompatibleApi(
         config: OpenAiCompatibleProviderConfig,
         prompt: String,
