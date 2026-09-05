@@ -378,7 +378,7 @@ class AiChatService {
     }
 
     // --- Google Gemini REST API ---
-    private fun callGeminiApi(
+    private suspend fun callGeminiApi(
         prompt: String,
         model: String,
         apiKey: String,
@@ -405,29 +405,22 @@ class AiChatService {
             .post(body)
             .build()
 
-        httpClient.newCall(request).execute().use { response ->
-            val responseBody = response.body?.string() ?: throw Exception("Empty response from Gemini server")
-            if (!response.isSuccessful) {
-                val errorMsg = parseErrorMessage(responseBody) ?: "HTTP ${response.code}: ${response.message}"
-                throw Exception(errorMsg)
-            }
+        val responseBody = executeCancellableJson(request, "Empty response from Gemini server")
+        val parsed = json.parseToJsonElement(responseBody).jsonObject
+        val text = parsed[JSON_CANDIDATES_KEY]?.jsonArray
+            ?.firstOrNull()?.jsonObject
+            ?.get(JSON_CONTENT_KEY)?.jsonObject
+            ?.get(JSON_PARTS_KEY)?.jsonArray
+            .orEmpty()
+            .mapNotNull { it.jsonObject[JSON_TEXT_KEY]?.jsonPrimitive?.contentOrNull }
+            .joinToString(separator = "")
+            .takeIf { it.isNotEmpty() }
 
-            val parsed = json.parseToJsonElement(responseBody).jsonObject
-            val text = parsed[JSON_CANDIDATES_KEY]?.jsonArray
-                ?.firstOrNull()?.jsonObject
-                ?.get(JSON_CONTENT_KEY)?.jsonObject
-                ?.get(JSON_PARTS_KEY)?.jsonArray
-                .orEmpty()
-                .mapNotNull { it.jsonObject[JSON_TEXT_KEY]?.jsonPrimitive?.contentOrNull }
-                .joinToString(separator = "")
-                .takeIf { it.isNotEmpty() }
-
-            return text ?: "Received empty content response from Gemini."
-        }
+        return text ?: "Received empty content response from Gemini."
     }
 
     // --- OpenAI Responses API ---
-    private fun callOpenAiApi(
+    private suspend fun callOpenAiApi(
         prompt: String,
         model: String,
         apiKey: String,
@@ -453,30 +446,23 @@ class AiChatService {
             .post(body)
             .build()
 
-        httpClient.newCall(request).execute().use { response ->
-            val responseBody = response.body?.string() ?: throw Exception("Empty response from OpenAI server")
-            if (!response.isSuccessful) {
-                val errorMsg = parseErrorMessage(responseBody) ?: "HTTP ${response.code}: ${response.message}"
-                throw Exception(errorMsg)
-            }
+        val responseBody = executeCancellableJson(request, "Empty response from OpenAI server")
+        val parsed = json.parseToJsonElement(responseBody).jsonObject
+        val text = parsed[JSON_OUTPUT_KEY]?.jsonArray.orEmpty().asSequence()
+            .mapNotNull { it as? JsonObject }
+            .filter { it[STREAM_TYPE_KEY]?.jsonPrimitive?.contentOrNull == STREAM_MESSAGE_KEY }
+            .flatMap { message -> message[JSON_CONTENT_KEY]?.jsonArray.orEmpty().asSequence() }
+            .mapNotNull { it as? JsonObject }
+            .filter { it[STREAM_TYPE_KEY]?.jsonPrimitive?.contentOrNull == OPENAI_OUTPUT_TEXT }
+            .mapNotNull { it[JSON_TEXT_KEY]?.jsonPrimitive?.contentOrNull }
+            .joinToString(separator = "")
+            .takeIf { it.isNotEmpty() }
 
-            val parsed = json.parseToJsonElement(responseBody).jsonObject
-            val text = parsed[JSON_OUTPUT_KEY]?.jsonArray.orEmpty().asSequence()
-                .mapNotNull { it as? JsonObject }
-                .filter { it[STREAM_TYPE_KEY]?.jsonPrimitive?.contentOrNull == STREAM_MESSAGE_KEY }
-                .flatMap { message -> message[JSON_CONTENT_KEY]?.jsonArray.orEmpty().asSequence() }
-                .mapNotNull { it as? JsonObject }
-                .filter { it[STREAM_TYPE_KEY]?.jsonPrimitive?.contentOrNull == OPENAI_OUTPUT_TEXT }
-                .mapNotNull { it[JSON_TEXT_KEY]?.jsonPrimitive?.contentOrNull }
-                .joinToString(separator = "")
-                .takeIf { it.isNotEmpty() }
-
-            return text ?: "Received empty message content from OpenAI."
-        }
+        return text ?: "Received empty message content from OpenAI."
     }
 
     // --- Anthropic Claude REST API ---
-    private fun callClaudeApi(
+    private suspend fun callClaudeApi(
         prompt: String,
         model: String,
         apiKey: String,
@@ -504,23 +490,16 @@ class AiChatService {
             .post(body)
             .build()
 
-        httpClient.newCall(request).execute().use { response ->
-            val responseBody = response.body?.string() ?: throw Exception("Empty response from Anthropic server")
-            if (!response.isSuccessful) {
-                val errorMsg = parseErrorMessage(responseBody) ?: "HTTP ${response.code}: ${response.message}"
-                throw Exception(errorMsg)
-            }
+        val responseBody = executeCancellableJson(request, "Empty response from Anthropic server")
+        val parsed = json.parseToJsonElement(responseBody).jsonObject
+        val text = parsed[JSON_CONTENT_KEY]?.jsonArray.orEmpty()
+            .mapNotNull { it as? JsonObject }
+            .filter { it[STREAM_TYPE_KEY]?.jsonPrimitive?.contentOrNull == JSON_TEXT_KEY }
+            .mapNotNull { it[JSON_TEXT_KEY]?.jsonPrimitive?.contentOrNull }
+            .joinToString(separator = "")
+            .takeIf { it.isNotEmpty() }
 
-            val parsed = json.parseToJsonElement(responseBody).jsonObject
-            val text = parsed[JSON_CONTENT_KEY]?.jsonArray.orEmpty()
-                .mapNotNull { it as? JsonObject }
-                .filter { it[STREAM_TYPE_KEY]?.jsonPrimitive?.contentOrNull == JSON_TEXT_KEY }
-                .mapNotNull { it[JSON_TEXT_KEY]?.jsonPrimitive?.contentOrNull }
-                .joinToString(separator = "")
-                .takeIf { it.isNotEmpty() }
-
-            return text ?: "Received empty content block from Claude."
-        }
+        return text ?: "Received empty content block from Claude."
     }
 
     internal fun extractGeminiStreamText(event: JsonObject): String? =
@@ -795,31 +774,33 @@ class AiChatService {
         return element as? JsonObject ?: throw IOException(MALFORMED_STREAM_EVENT)
     }
 
-    private suspend fun executeCancellableJson(request: Request): String =
-        suspendCancellableCoroutine { continuation ->
-            val call = httpClient.newCall(request)
-            continuation.invokeOnCancellation { call.cancel() }
-            call.enqueue(object : Callback {
-                override fun onFailure(call: Call, e: IOException) {
+    private suspend fun executeCancellableJson(
+        request: Request,
+        emptyResponseMessage: String = "Empty response from server"
+    ): String = suspendCancellableCoroutine { continuation ->
+        val call = httpClient.newCall(request)
+        continuation.invokeOnCancellation { call.cancel() }
+        call.enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) {
+                if (continuation.isActive) continuation.resumeWithException(e)
+            }
+
+            override fun onResponse(call: Call, response: Response) {
+                try {
+                    response.use {
+                        val responseBody = response.body?.string() ?: throw IOException(emptyResponseMessage)
+                        if (!response.isSuccessful) {
+                            throw IOException(
+                                parseErrorMessage(responseBody) ?: "HTTP ${response.code}: ${response.message}"
+                            )
+                        }
+                        if (continuation.isActive) continuation.resume(responseBody)
+                    }
+                } catch (e: IOException) {
                     if (continuation.isActive) continuation.resumeWithException(e)
                 }
-
-                override fun onResponse(call: Call, response: Response) {
-                    try {
-                        response.use {
-                            val responseBody = response.body?.string() ?: throw IOException("Empty response from server")
-                            if (!response.isSuccessful) {
-                                throw IOException(
-                                    parseErrorMessage(responseBody) ?: "HTTP ${response.code}: ${response.message}"
-                                )
-                            }
-                            if (continuation.isActive) continuation.resume(responseBody)
-                        }
-                    } catch (e: IOException) {
-                        if (continuation.isActive) continuation.resumeWithException(e)
-                    }
-                }
-            })
+            }
+        })
         }
 
     // --- OpenAI-compatible provider/gateway boundary ---
