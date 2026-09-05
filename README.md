@@ -107,6 +107,8 @@ platform clients
 └── iOS app (planned)
 ```
 
+Technical details for native provider transport, conversation state, Prompt Studio boundaries and API-level TODOs live in [docs/provider-runtime.md](docs/provider-runtime.md).
+
 Backends are optional, not the default. If a feature truly needs one, prefer a tiny stateless service and evaluate Cloudflare, Google Cloud, AWS or Oracle free tiers based on the actual requirement rather than choosing infrastructure first.
 
 ## Near-term roadmap
