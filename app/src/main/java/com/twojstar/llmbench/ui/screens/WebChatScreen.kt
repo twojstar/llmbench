@@ -1497,7 +1497,10 @@ private fun handleMainFrameNavigation(
         }
         "http", "mailto", "tel", "sms" -> {
             if (navigation.hasGesture()) {
-                openExternalUri(context, uri)
+                reportExternalNavigationLaunch(
+                    launched = openExternalUri(context, uri),
+                    onFailure = onExternalNavigationFailed
+                )
             }
             true
         }
