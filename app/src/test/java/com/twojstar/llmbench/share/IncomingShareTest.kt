@@ -10,9 +10,15 @@ import org.junit.Test
 
 class IncomingShareTest {
     private companion object {
+        const val BLANK_TEXT = "   "
         const val CLIP_TEXT = "clip text"
         const val SHARED_TEXT = "shared text"
+        const val PRIMARY_TEXT = "primary"
+        const val FIRST_TEXT = "first"
+        const val SECOND_TEXT = "second"
+        const val MULTIPLE_TEXT = "$FIRST_TEXT\n$SECOND_TEXT"
         const val CONTENT_URI = "content://example/document/1"
+        const val UPPERCASE_CONTENT_URI = "CONTENT://example/document/2"
     }
 
     @Test
@@ -22,7 +28,7 @@ class IncomingShareTest {
             uriStrings = listOf(
                 CONTENT_URI,
                 " $CONTENT_URI ",
-                "CONTENT://example/document/2",
+                UPPERCASE_CONTENT_URI,
                 "file:///sdcard/private.txt",
                 "https://example.com/file.pdf"
             )
@@ -43,16 +49,16 @@ class IncomingShareTest {
             CLIP_TEXT,
             selectIncomingShareText(
                 action = Intent.ACTION_SEND,
-                singleText = "   ",
+                singleText = BLANK_TEXT,
                 multipleTexts = emptyList(),
                 clipTexts = listOf(CLIP_TEXT)
             )
         )
         assertEquals(
-            "primary",
+            PRIMARY_TEXT,
             selectIncomingShareText(
                 action = Intent.ACTION_SEND,
-                singleText = "primary",
+                singleText = PRIMARY_TEXT,
                 multipleTexts = emptyList(),
                 clipTexts = listOf(CLIP_TEXT)
             )
@@ -64,11 +70,11 @@ class IncomingShareTest {
         val text = selectIncomingShareText(
             action = Intent.ACTION_SEND_MULTIPLE,
             singleText = null,
-            multipleTexts = listOf("first", "second"),
+            multipleTexts = listOf(FIRST_TEXT, SECOND_TEXT),
             clipTexts = emptyList()
         )
 
-        assertEquals("first\nsecond", text)
+        assertEquals(MULTIPLE_TEXT, text)
     }
 
     @Test
@@ -76,13 +82,13 @@ class IncomingShareTest {
         val text = selectIncomingShareText(
             action = Intent.ACTION_SEND_MULTIPLE,
             singleText = null,
-            multipleTexts = listOf("first", "second"),
+            multipleTexts = listOf(FIRST_TEXT, SECOND_TEXT),
             clipTexts = emptyList()
         )
         val payload = normalizeIncomingSharePayload(text, listOf(CONTENT_URI))
 
         requireNotNull(payload)
-        assertEquals("first\nsecond", payload.text)
+        assertEquals(MULTIPLE_TEXT, payload.text)
         assertEquals(listOf(CONTENT_URI), payload.uriStrings)
     }
 
@@ -125,8 +131,8 @@ class IncomingShareTest {
 
     @Test
     fun rejectsEmptyOrUnsupportedSharePayload() {
-        assertNull(normalizeIncomingSharePayload("   ", emptyList()))
+        assertNull(normalizeIncomingSharePayload(BLANK_TEXT, emptyList()))
         assertNull(normalizeIncomingSharePayload(null, listOf("file:///tmp/nope")))
-        assertNull(normalizeIncomingSharePayload(null, listOf("CONTENT://example/document/2")))
+        assertNull(normalizeIncomingSharePayload(null, listOf(UPPERCASE_CONTENT_URI)))
     }
 }
