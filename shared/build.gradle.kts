@@ -9,7 +9,7 @@ plugins {
 kotlin {
     android {
         namespace = "com.twojstar.llmbench.shared"
-        compileSdk = 35
+        compileSdk = 37
         minSdk = 26
         compilerOptions {
             jvmTarget.set(JvmTarget.JVM_21)
