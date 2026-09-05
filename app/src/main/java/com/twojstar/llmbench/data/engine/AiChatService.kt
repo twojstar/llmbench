@@ -740,20 +740,37 @@ class AiChatService {
         completeOnDoneSentinel: Boolean
     ): String {
         val collected = StringBuilder()
+        val dataLines = mutableListOf<String>()
         var completed = false
-        while (!source.exhausted()) {
-            val line = source.readUtf8Line() ?: break
-            if (!line.startsWith(SSE_DATA_PREFIX)) continue
-            val payload = line.removePrefix(SSE_DATA_PREFIX).trim()
+        var stopped = false
+
+        fun dispatchEvent() {
+            if (dataLines.isEmpty()) return
+            val payload = dataLines.joinToString("\n")
+            dataLines.clear()
             if (payload == SSE_DONE) {
                 if (completeOnDoneSentinel) completed = true
-                break
+                stopped = true
+                return
             }
-            val event = parseSseEvent(payload) ?: continue
+            val event = parseSseEvent(payload) ?: return
             val (delta, eventComplete) = decodeSseEvent(event, extractText, isComplete)
             appendStreamingDelta(collected, delta, onTextDelta)
             if (eventComplete) completed = true
         }
+
+        while (!source.exhausted() && !stopped) {
+            val line = source.readUtf8Line() ?: break
+            when {
+                line.isEmpty() -> dispatchEvent()
+                line == "data" -> dataLines += ""
+                line.startsWith(SSE_DATA_PREFIX) -> {
+                    val value = line.removePrefix(SSE_DATA_PREFIX).removePrefix(" ")
+                    dataLines += value
+                }
+            }
+        }
+        if (!stopped && dataLines.isNotEmpty()) dispatchEvent()
         if (!completed) throw IOException("Streaming response ended before completion")
         return collected.toString()
     }
