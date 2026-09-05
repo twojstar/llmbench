@@ -194,7 +194,8 @@ internal object ProviderWebTweakRegistry {
 
     private val topLevelNavigationAuthHosts = mapOf(
         WebAiService.QWEN to setOf("accounts.google.com", "github.com"),
-        WebAiService.COPILOT to setOf("login.live.com", "login.microsoftonline.com")
+        WebAiService.COPILOT to setOf("login.live.com", "login.microsoftonline.com"),
+        WebAiService.ZAI to setOf("accounts.google.com", "github.com")
     )
 
     private val providerTweaks = WebAiService.entries.associateWith { service ->
