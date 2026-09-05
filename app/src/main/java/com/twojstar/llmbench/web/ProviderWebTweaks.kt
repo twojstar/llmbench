@@ -42,11 +42,13 @@ internal object ProviderWebTweakRegistry {
         css = """
             *, *::before, *::after {
                 animation-duration: 0.001s !important;
+                animation-iteration-count: 1 !important;
                 transition-duration: 0.001s !important;
                 scroll-behavior: auto !important;
             }
             [class*="animate-spin"], [class*="animate-pulse"] {
                 animation-duration: 1s !important;
+                animation-iteration-count: infinite !important;
             }
             [class*="blur"], [class*="backdrop"] {
                 backdrop-filter: none !important;
@@ -88,7 +90,7 @@ internal object ProviderWebTweakRegistry {
                     'div.font-claude-message,div.font-claude-response,[data-testid="user-message"]';
                 const SIDE_SELECTOR = 'nav a[href^="/chat/"],nav li,aside a[href^="/chat/"]';
                 const TAIL = 2;
-                const desktop = window.matchMedia('(pointer: fine)').matches && window.innerWidth >= 900;
+                const isDesktop = () => window.matchMedia('(pointer: fine)').matches && window.innerWidth >= 900;
 
                 const tag = () => {
                     const turns = Array.from(document.querySelectorAll(TURN_SELECTOR));
@@ -100,11 +102,9 @@ internal object ProviderWebTweakRegistry {
                         if (!code.closest(OVERLAY_SELECTOR)) code.classList.add('llmbench-cv-code');
                     });
 
-                    if (!desktop) {
-                        document.querySelectorAll(SIDE_SELECTOR).forEach((item) => {
-                            item.classList.add('llmbench-cv-side');
-                        });
-                    }
+                    document.querySelectorAll(SIDE_SELECTOR).forEach((item) => {
+                        item.classList.toggle('llmbench-cv-side', !isDesktop());
+                    });
 
                     document.querySelectorAll('img:not([data-llmbench-lazy])').forEach((image) => {
                         image.loading = 'lazy';
@@ -115,7 +115,7 @@ internal object ProviderWebTweakRegistry {
 
                 const idle = window.requestIdleCallback
                     ? (callback) => window.requestIdleCallback(callback, { timeout: 500 })
-                    : (callback) => window.requestAnimationFrame(callback);
+                    : (callback) => window.setTimeout(callback, 100);
                 let queued = false;
                 const schedule = () => {
                     if (queued) return;
@@ -126,10 +126,41 @@ internal object ProviderWebTweakRegistry {
                     });
                 };
 
-                const observer = new MutationObserver(schedule);
+                const processNode = (node) => {
+                    if (!(node instanceof Element)) return;
+                    const candidates = [node, ...node.querySelectorAll('pre, img, nav a[href^="/chat/"], nav li, aside a[href^="/chat/"]')];
+                    candidates.forEach((candidate) => {
+                        if (candidate.matches?.('pre') && !candidate.closest(OVERLAY_SELECTOR)) candidate.classList.add('llmbench-cv-code');
+                        if (candidate.matches?.('img')) {
+                            candidate.loading = 'lazy';
+                            candidate.decoding = 'async';
+                            candidate.dataset.llmbenchLazy = '1';
+                        }
+                        if (candidate.matches?.(SIDE_SELECTOR)) candidate.classList.toggle('llmbench-cv-side', !isDesktop());
+                    });
+                };
+
+                const observer = new MutationObserver((mutations) => {
+                    let turnBoundaryMayHaveChanged = false;
+                    mutations.forEach((mutation) => {
+                        mutation.addedNodes.forEach((node) => {
+                            processNode(node);
+                            if (node instanceof Element && (node.matches?.(TURN_SELECTOR) || node.querySelector?.(TURN_SELECTOR))) {
+                                turnBoundaryMayHaveChanged = true;
+                            }
+                        });
+                        mutation.removedNodes.forEach((node) => {
+                            if (node instanceof Element && (node.matches?.(TURN_SELECTOR) || node.querySelector?.(TURN_SELECTOR))) {
+                                turnBoundaryMayHaveChanged = true;
+                            }
+                        });
+                    });
+                    if (turnBoundaryMayHaveChanged) schedule();
+                });
                 const start = () => {
                     tag();
                     observer.observe(document.body, { childList: true, subtree: true });
+                    window.addEventListener('resize', schedule, { passive: true });
                 };
                 window[STATE_KEY] = { tag, observer };
 

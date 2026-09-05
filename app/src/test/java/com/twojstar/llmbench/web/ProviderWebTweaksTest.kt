@@ -32,6 +32,9 @@ class ProviderWebTweaksTest {
         assertTrue(smooth.script.contains("const TAIL = 2"))
         assertTrue(smooth.script.contains("MutationObserver"))
         assertTrue(smooth.script.contains("image.loading = 'lazy'"))
+        assertTrue(smooth.script.contains("window.setTimeout(callback, 100)"))
+        assertTrue(smooth.script.contains("window.addEventListener('resize', schedule"))
+        assertTrue(smooth.css.contains("animation-iteration-count: 1"))
         assertFalse(
             ProviderWebTweakRegistry.forProvider(WebAiService.CHATGPT)
                 .any { it.id == "claude-smooth" }
