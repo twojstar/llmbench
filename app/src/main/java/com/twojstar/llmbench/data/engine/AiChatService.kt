@@ -200,6 +200,7 @@ class AiChatService {
     ): ModelChatMessage = withContext(Dispatchers.IO) {
         val startTime = System.currentTimeMillis()
         val effectiveModel = if (modelName == "all" || modelName.isBlank()) provider.defaultModel else modelName
+        var resolvedModel = effectiveModel
 
         val (key, isKeyProvided) = when (provider) {
             AiProvider.GEMINI -> Pair(apiKeys.geminiKey.trim(), apiKeys.geminiKey.isNotBlank())
@@ -242,12 +243,14 @@ class AiChatService {
                         if (onTextDelta != null) {
                             callOpenAiCompatibleStreamApi(
                                 config, prompt, effectiveModel, key, systemInstruction,
-                                conversationHistory, provider, onTextDelta
+                                conversationHistory, provider, onTextDelta,
+                                onResolvedModel = { resolvedModel = it }
                             )
                         } else {
                             callOpenAiCompatibleApi(
                                 config, prompt, effectiveModel, key, systemInstruction,
-                                conversationHistory, provider
+                                conversationHistory, provider,
+                                onResolvedModel = { resolvedModel = it }
                             )
                         }
                     }
@@ -261,7 +264,7 @@ class AiChatService {
                         id = "msg_${System.currentTimeMillis()}_${provider.id}",
                         sender = "assistant",
                         provider = provider,
-                        modelName = effectiveModel,
+                        modelName = resolvedModel,
                         text = realResult,
                         isError = false,
                         isSimulated = false,
@@ -535,6 +538,13 @@ class AiChatService {
             ?.firstOrNull()?.jsonObject
             ?.get(JSON_DELTA_KEY)?.jsonObject
             ?.get(JSON_CONTENT_KEY)?.jsonPrimitive?.contentOrNull
+
+    internal fun extractOpenAiCompatibleModel(event: JsonObject): String? =
+        (event[JSON_MODEL_KEY] as? JsonPrimitive)
+            ?.takeIf { it.isString }
+            ?.contentOrNull
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() }
 
     private suspend fun callGeminiStreamApi(
         prompt: String,
@@ -851,7 +861,8 @@ class AiChatService {
     private suspend fun callOpenAiCompatibleStreamApi(
         config: OpenAiCompatibleProviderConfig, prompt: String, model: String, apiKey: String,
         systemInstruction: String?, conversationHistory: List<ModelChatMessage>,
-        provider: AiProvider, onTextDelta: (String) -> Unit
+        provider: AiProvider, onTextDelta: (String) -> Unit,
+        onResolvedModel: (String) -> Unit = {}
     ): String {
         val requestPayload = buildJsonObject {
             put(JSON_MODEL_KEY, model)
@@ -869,7 +880,13 @@ class AiChatService {
         ).build()
 
         return executeSse(
-            request, ::extractOpenAiCompatibleStreamText, ::isOpenAiCompatibleStreamComplete, onTextDelta,
+            request,
+            extractText = { event ->
+                extractOpenAiCompatibleModel(event)?.let(onResolvedModel)
+                extractOpenAiCompatibleStreamText(event)
+            },
+            isComplete = ::isOpenAiCompatibleStreamComplete,
+            onTextDelta = onTextDelta,
             completeOnDoneSentinel = true
         ).ifEmpty { "Received empty message content." }
     }
@@ -881,7 +898,8 @@ class AiChatService {
         apiKey: String,
         systemInstruction: String?,
         conversationHistory: List<ModelChatMessage>,
-        provider: AiProvider
+        provider: AiProvider,
+        onResolvedModel: (String) -> Unit = {}
     ): String {
         val messagesArray = buildOpenAiCompatibleMessages(
             prompt = prompt,
@@ -905,7 +923,8 @@ class AiChatService {
 
         val responseBody = executeCancellableJson(request)
         val parsed = json.parseToJsonElement(responseBody).jsonObject
-        val choices = parsed["choices"]?.jsonArray
+        extractOpenAiCompatibleModel(parsed)?.let(onResolvedModel)
+        val choices = parsed[JSON_CHOICES_KEY]?.jsonArray
         val firstChoice = choices?.getOrNull(0)?.jsonObject
         val message = firstChoice?.get(STREAM_MESSAGE_KEY)?.jsonObject
         val content = message?.get(JSON_CONTENT_KEY)?.jsonPrimitive?.contentOrNull

@@ -67,7 +67,7 @@ Thinking configuration is model-family-specific. Prefer capability metadata over
 
 ### Gateways
 
-OpenRouter and other gateways may expose metadata that identifies the model actually used. LlmBench currently labels responses with the requested model/route. Capture a returned model identifier when available so router aliases such as `openrouter/free` do not hide the actual responder.
+OpenRouter and other OpenAI-compatible gateways may return the model actually used. LlmBench captures that response metadata when present and falls back to the requested model/route otherwise, so aliases such as `openrouter/free` can show the actual responder.
 
 ## API/runtime TODO
 
@@ -76,7 +76,7 @@ OpenRouter and other gateways may expose metadata that identifies the model actu
 - [ ] Preserve Gemini thought signatures or migrate that path to a stateful API with explicit storage semantics.
 - [ ] Preserve OpenAI stateless reasoning items while keeping `store=false`, or document a deliberate move to stateful Responses.
 - [ ] Add Claude thinking/effort only through model-aware capabilities; preserve opaque thinking blocks when enabled.
-- [ ] Record and display the actual routed model returned by OpenRouter when available.
+- [x] Record and display the actual routed model returned by OpenRouter when available.
 - [ ] Replace hard-coded output limits such as Claude's current `max_tokens=2048` with model/provider-aware limits.
 - [ ] Add a provider-aware Prompt Studio preview showing effective instruction placement, history size and enabled controls without exposing API keys or hidden reasoning state.
 - [ ] Parse provider usage/token metadata so comparisons can include latency and token/cost information when the API returns it.

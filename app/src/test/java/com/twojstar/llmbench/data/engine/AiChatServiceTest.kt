@@ -260,6 +260,24 @@ class AiChatServiceTest {
     }
 
     @Test
+    fun extractsResolvedOpenAiCompatibleModel() {
+        val service = AiChatService()
+        val routed = Json.parseToJsonElement(
+            """{"model":"anthropic/claude-sonnet-5","choices":[]}"""
+        ).jsonObject
+        val blank = Json.parseToJsonElement(
+            """{"model":"   ","choices":[]}"""
+        ).jsonObject
+        val malformed = Json.parseToJsonElement(
+            """{"model":{},"choices":[]}"""
+        ).jsonObject
+
+        assertEquals("anthropic/claude-sonnet-5", service.extractOpenAiCompatibleModel(routed))
+        assertEquals(null, service.extractOpenAiCompatibleModel(blank))
+        assertEquals(null, service.extractOpenAiCompatibleModel(malformed))
+    }
+
+    @Test
     fun ignoresNonTextNativeStreamingEvents() {
         val service = AiChatService()
         val openAi = Json.parseToJsonElement(
