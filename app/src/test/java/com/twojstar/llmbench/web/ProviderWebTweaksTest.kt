@@ -30,6 +30,29 @@ class ProviderWebTweaksTest {
     }
 
     @Test
+    fun acceptsVerifiedQwenAliasWithoutAcceptingSuffixSpoofs() {
+        assertTrue(providerHostMatches(WebAiService.QWEN, "qwen.ai"))
+        assertTrue(providerHostMatches(WebAiService.QWEN, "www.qwen.ai"))
+        assertTrue(providerHostMatches(WebAiService.QWEN, "chat.qwen.ai"))
+        assertFalse(providerHostMatches(WebAiService.QWEN, "notqwen.ai"))
+        assertFalse(providerHostMatches(WebAiService.QWEN, "qwen.ai.evil.example"))
+    }
+
+    @Test
+    fun qwenTopLevelNavigationUsesVerifiedBoundaryAndAuthHosts() {
+        assertTrue(shouldLoadHttpsInProviderWebView(WebAiService.QWEN, "https://chat.qwen.ai/"))
+        assertTrue(shouldLoadHttpsInProviderWebView(WebAiService.QWEN, "https://www.qwen.ai/"))
+        assertTrue(shouldLoadHttpsInProviderWebView(WebAiService.QWEN, "https://accounts.google.com/o/oauth2/v2/auth"))
+        assertTrue(shouldLoadHttpsInProviderWebView(WebAiService.QWEN, "https://github.com/login/oauth/authorize"))
+        assertFalse(shouldLoadHttpsInProviderWebView(WebAiService.QWEN, "https://example.com/"))
+        assertFalse(shouldLoadHttpsInProviderWebView(WebAiService.QWEN, "https://github.com.evil.example/"))
+        assertFalse(shouldLoadHttpsInProviderWebView(WebAiService.QWEN, "http://github.com/login/oauth/authorize"))
+
+        // Roll the stricter boundary out provider-by-provider after auth redirects are verified.
+        assertTrue(shouldLoadHttpsInProviderWebView(WebAiService.CHATGPT, "https://accounts.google.com/"))
+    }
+
+    @Test
     fun acceptsVerifiedCopilotAliasesWithoutAcceptingSuffixSpoofs() {
         listOf("copilot.com", "copilot.ai", "copilot.cloud.microsoft").forEach { host ->
             assertTrue(providerHostMatches(WebAiService.COPILOT, host))

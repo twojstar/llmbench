@@ -34,8 +34,13 @@ internal object ProviderWebTweakRegistry {
     // Canonical hosts come from WebAiService.url. Add only verified provider-owned aliases here.
     private val ownedHostAliases = mapOf(
         WebAiService.KIMI to setOf("kimi.com"),
+        WebAiService.QWEN to setOf("qwen.ai"),
         WebAiService.COPILOT to setOf("copilot.com", "copilot.ai", "copilot.cloud.microsoft"),
         WebAiService.META_AI to setOf("alpha.meta.ai")
+    )
+
+    private val topLevelNavigationAuthHosts = mapOf(
+        WebAiService.QWEN to setOf("accounts.google.com", "github.com")
     )
 
     private val providerTweaks = WebAiService.entries.associateWith { listOf(mobileBaseline) }
@@ -71,6 +76,12 @@ internal object ProviderWebTweakRegistry {
         addAll(ownedHostAliases[service].orEmpty())
     }
 
+    fun hasVerifiedTopLevelNavigationPolicy(service: WebAiService): Boolean =
+        service in topLevelNavigationAuthHosts
+
+    fun topLevelNavigationAuthHosts(service: WebAiService): Set<String> =
+        topLevelNavigationAuthHosts[service].orEmpty()
+
     fun forProvider(service: WebAiService): List<ProviderWebTweak> =
         providerTweaks[service].orEmpty()
 
@@ -95,6 +106,23 @@ internal fun providerHostMatches(service: WebAiService, host: String?): Boolean 
 internal fun providerUrlMatches(service: WebAiService, url: String): Boolean {
     val uri = runCatching { URI(url) }.getOrNull() ?: return false
     return uri.scheme.equals("https", ignoreCase = true) && providerHostMatches(service, uri.host)
+}
+
+internal fun providerNavigationUrlMatches(service: WebAiService, url: String): Boolean {
+    val uri = runCatching { URI(url) }.getOrNull() ?: return false
+    if (!uri.scheme.equals("https", ignoreCase = true)) return false
+    if (providerHostMatches(service, uri.host)) return true
+
+    val normalizedHost = uri.host?.trimEnd('.')?.lowercase() ?: return false
+    return normalizedHost in ProviderWebTweakRegistry.topLevelNavigationAuthHosts(service)
+}
+
+internal fun shouldLoadHttpsInProviderWebView(
+    service: WebAiService,
+    url: String
+): Boolean {
+    if (!ProviderWebTweakRegistry.hasVerifiedTopLevelNavigationPolicy(service)) return true
+    return providerNavigationUrlMatches(service, url)
 }
 
 internal fun applyProviderWebTweaks(
