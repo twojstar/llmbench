@@ -1,3 +1,5 @@
+<a href="https://deepwiki.com/twojstar/llmbench"><img src="https://deepwiki.com/badge.svg" alt="DeepWiki"></a>
+
 # LlmBench
 
 Kotlin Multiplatform workspace for using multiple AI services from one client without turning every provider into a separate installed app.
