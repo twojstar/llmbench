@@ -17,6 +17,7 @@ import com.twojstar.llmbench.share.PendingWebShare
 import com.twojstar.llmbench.share.claimText
 import com.twojstar.llmbench.share.completeTextClaim
 import com.twojstar.llmbench.share.releaseTextClaim
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -322,6 +323,8 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
                 if (models.isEmpty()) {
                     showSnackbar("No free text models are currently available for ${provider.shortName}.")
                 }
+            } catch (e: CancellationException) {
+                throw e
             } catch (_: Exception) {
                 showSnackbar("Could not refresh ${provider.shortName} models; using cached or bundled options.")
             } finally {
