@@ -424,6 +424,26 @@ class AiChatServiceTest {
     }
 
     @Test
+    fun stopsReadingAfterGatewayCompletionEvent() {
+        val service = AiChatService()
+        val response = Response.Builder()
+            .request(Request.Builder().url(TEST_STREAM_URL).build())
+            .protocol(Protocol.HTTP_1_1).code(200).message("OK")
+            .body((
+                "data: {\"choices\":[{\"delta\":{\"content\":\"hello\"},\"finish_reason\":\"stop\"}]}\n\n" +
+                    "data: definitely-not-json\n\n"
+                ).toResponseBody(TEST_EVENT_STREAM_TYPE.toMediaType()))
+            .build()
+
+        val text = service.readSseResponse(
+            response, service::extractOpenAiCompatibleStreamText,
+            service::isOpenAiCompatibleStreamComplete, {}, completeOnDoneSentinel = true
+        )
+
+        assertEquals(STREAM_HELLO, text)
+    }
+
+    @Test
     fun joinsMultiLineSseDataFieldsAtEventBoundary() {
         val service = AiChatService()
         val response = Response.Builder()

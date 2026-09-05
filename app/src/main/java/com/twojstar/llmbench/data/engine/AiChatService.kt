@@ -40,6 +40,9 @@ private const val JSON_PRICING_KEY = "pricing"
 private const val JSON_INPUT_KEY = "input"
 private const val JSON_OUTPUT_KEY = "output"
 private const val JSON_CANDIDATES_KEY = "candidates"
+private const val JSON_CHOICES_KEY = "choices"
+private const val JSON_DELTA_KEY = "delta"
+private const val JSON_FINISH_REASON_KEY = "finish_reason"
 private const val JSON_SYSTEM_KEY = "system"
 private const val JSON_MESSAGES_KEY = "messages"
 private const val JSON_MAX_TOKENS_KEY = "max_tokens"
@@ -516,14 +519,14 @@ class AiChatService {
 
     internal fun extractOpenAiStreamText(event: JsonObject): String? =
         if (event[STREAM_TYPE_KEY]?.jsonPrimitive?.contentOrNull == OPENAI_OUTPUT_TEXT_DELTA) {
-            event["delta"]?.jsonPrimitive?.contentOrNull
+            event[JSON_DELTA_KEY]?.jsonPrimitive?.contentOrNull
         } else {
             null
         }
 
     internal fun extractClaudeStreamText(event: JsonObject): String? =
         if (event[STREAM_TYPE_KEY]?.jsonPrimitive?.contentOrNull == CLAUDE_CONTENT_BLOCK_DELTA) {
-            event["delta"]?.jsonObject
+            event[JSON_DELTA_KEY]?.jsonObject
                 ?.takeIf { it[STREAM_TYPE_KEY]?.jsonPrimitive?.contentOrNull == CLAUDE_TEXT_DELTA }
                 ?.get(JSON_TEXT_KEY)?.jsonPrimitive?.contentOrNull
         } else {
@@ -531,9 +534,9 @@ class AiChatService {
         }
 
     internal fun extractOpenAiCompatibleStreamText(event: JsonObject): String? =
-        event["choices"]?.jsonArray
+        event[JSON_CHOICES_KEY]?.jsonArray
             ?.firstOrNull()?.jsonObject
-            ?.get("delta")?.jsonObject
+            ?.get(JSON_DELTA_KEY)?.jsonObject
             ?.get(JSON_CONTENT_KEY)?.jsonPrimitive?.contentOrNull
 
     private suspend fun callGeminiStreamApi(
@@ -663,8 +666,8 @@ class AiChatService {
         event[STREAM_TYPE_KEY]?.jsonPrimitive?.contentOrNull == OPENAI_RESPONSE_COMPLETED
 
     internal fun isOpenAiCompatibleStreamComplete(event: JsonObject): Boolean =
-        event["choices"]?.jsonArray.orEmpty().any { choice ->
-            choice.jsonObject["finish_reason"]?.jsonPrimitive?.contentOrNull != null
+        event[JSON_CHOICES_KEY]?.jsonArray.orEmpty().any { choice ->
+            choice.jsonObject[JSON_FINISH_REASON_KEY]?.jsonPrimitive?.contentOrNull != null
         }
 
     internal fun isClaudeStreamComplete(event: JsonObject): Boolean =
@@ -756,7 +759,10 @@ class AiChatService {
             val event = parseSseEvent(payload) ?: return
             val (delta, eventComplete) = decodeSseEvent(event, extractText, isComplete)
             appendStreamingDelta(collected, delta, onTextDelta)
-            if (eventComplete) completed = true
+            if (eventComplete) {
+                completed = true
+                stopped = true
+            }
         }
 
         while (!source.exhausted() && !stopped) {
