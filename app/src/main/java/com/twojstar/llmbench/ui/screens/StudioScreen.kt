@@ -21,7 +21,12 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.twojstar.llmbench.data.model.AiProvider
+import com.twojstar.llmbench.data.model.ConversationStateStrategy
+import com.twojstar.llmbench.data.model.NativeChatTransport
 import com.twojstar.llmbench.data.model.ProfileOverlay
+import com.twojstar.llmbench.data.model.SystemInstructionPlacement
+import com.twojstar.llmbench.data.model.runtimeCapabilities
 import com.twojstar.llmbench.ui.components.*
 import com.twojstar.llmbench.ui.theme.*
 import com.twojstar.llmbench.ui.viewmodel.StudioUiState
@@ -236,6 +241,10 @@ fun StudioScreen(
                         }
                     }
                 }
+            }
+
+            item {
+                PromptRoutePreviewCard(uiState)
             }
 
             // Section 1: Personality
@@ -660,6 +669,115 @@ fun StudioScreen(
             }
         )
     }
+}
+
+@Composable
+private fun PromptRoutePreviewCard(uiState: StudioUiState) {
+    val provider = uiState.selectedChatProvider
+    val capabilities = provider.runtimeCapabilities()
+    val modelLabel = if (provider == AiProvider.ALL) {
+        "Per-provider defaults"
+    } else {
+        uiState.selectedChatModel.ifBlank { provider.defaultModel }
+    }
+    val renderedRuleCount = uiState.renderedInstructions.lines().count { it.isNotBlank() }
+    val systemLabel = if (!uiState.includeSystemProfileInChat || uiState.renderedInstructions.isBlank()) {
+        "Profile not attached"
+    } else {
+        when (capabilities.systemInstructionPlacement) {
+            SystemInstructionPlacement.PER_PROVIDER -> "Attached using each provider's native route"
+            SystemInstructionPlacement.NATIVE_FIELD -> "Native provider instruction field"
+            SystemInstructionPlacement.SYSTEM_MESSAGE -> "OpenAI-compatible system message"
+        }
+    }
+    val stateLabel = when (capabilities.conversationStateStrategy) {
+        ConversationStateStrategy.PROVIDER_FAN_OUT -> "Isolated history per provider in compare fan-out"
+        ConversationStateStrategy.BOUNDED_PROVIDER_TEXT_REPLAY -> "Bounded provider-scoped text replay"
+    }
+    val resolvedModelLabel = when {
+        provider == AiProvider.ALL -> "Captured per gateway when returned"
+        capabilities.reportsResolvedModel -> "Gateway response metadata when returned"
+        else -> "Selected/requested model"
+    }
+
+    Card(
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.35f)
+        ),
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("prompt_route_preview")
+    ) {
+        Column(
+            verticalArrangement = Arrangement.spacedBy(7.dp),
+            modifier = Modifier.padding(14.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Route,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(18.dp)
+                )
+                Text(
+                    text = "Prompt delivery preview",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+            Text(
+                text = "What native chat will actually send without exposing keys or hidden reasoning state.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            PromptRouteRow("Target", "${provider.displayName} • $modelLabel")
+            PromptRouteRow("Transport", capabilities.transport.displayLabel())
+            PromptRouteRow("Profile", systemLabel)
+            PromptRouteRow("History", stateLabel)
+            PromptRouteRow("Streaming", if (capabilities.streamsText) "Incremental SSE" else "Buffered response")
+            PromptRouteRow("Model label", resolvedModelLabel)
+            if (uiState.includeSystemProfileInChat && uiState.renderedInstructions.isNotBlank()) {
+                Text(
+                    text = "$renderedRuleCount rendered rules • ${uiState.renderedInstructions.length} characters",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun PromptRouteRow(label: String, value: String) {
+    Row(
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.Top,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.width(76.dp)
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.weight(1f)
+        )
+    }
+}
+
+private fun NativeChatTransport.displayLabel(): String = when (this) {
+    NativeChatTransport.COMPARE_FAN_OUT -> "Compare fan-out"
+    NativeChatTransport.GEMINI_GENERATE_CONTENT -> "Gemini generateContent"
+    NativeChatTransport.OPENAI_RESPONSES -> "OpenAI Responses"
+    NativeChatTransport.ANTHROPIC_MESSAGES -> "Anthropic Messages"
+    NativeChatTransport.OPENAI_COMPATIBLE_CHAT_COMPLETIONS -> "OpenAI-compatible chat completions"
 }
 
 @Composable

@@ -72,13 +72,13 @@ OpenRouter and other OpenAI-compatible gateways may return the model actually us
 ## API/runtime TODO
 
 - [x] Make gateway model-catalog refresh cancellable through the same OkHttp coroutine bridge used by generation.
-- [ ] Add a provider capability model for reasoning controls, response metadata and state strategy.
+- [x] Add a provider capability model for transport, instruction placement, response metadata and state strategy; extend it as reasoning controls land.
 - [ ] Preserve Gemini thought signatures or migrate that path to a stateful API with explicit storage semantics.
 - [ ] Preserve OpenAI stateless reasoning items while keeping `store=false`, or document a deliberate move to stateful Responses.
 - [ ] Add Claude thinking/effort only through model-aware capabilities; preserve opaque thinking blocks when enabled.
 - [x] Record and display the actual routed model returned by OpenRouter when available.
 - [ ] Replace hard-coded output limits such as Claude's current `max_tokens=2048` with model/provider-aware limits.
-- [ ] Add a provider-aware Prompt Studio preview showing effective instruction placement, history size and enabled controls without exposing API keys or hidden reasoning state.
+- [x] Add a provider-aware Prompt Studio preview showing effective instruction placement, history strategy and transport metadata without exposing API keys or hidden reasoning state.
 - [ ] Parse provider usage/token metadata so comparisons can include latency and token/cost information when the API returns it.
 - [ ] Keep transport/SSE/history tests JVM-testable; device testing should be required only for Android/WebView behavior.
 
