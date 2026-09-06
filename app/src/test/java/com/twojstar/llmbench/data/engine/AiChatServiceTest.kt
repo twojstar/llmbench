@@ -57,10 +57,11 @@ class AiChatServiceTest {
         assertEquals(2_000L, metadataClient.callTimeoutMillis.toLong())
 
         val service = AiChatService()
-        assertEquals(2048, service.rememberClaudeMaxTokens("claude-outage", null))
-        assertEquals(2048, service.rememberClaudeMaxTokens("claude-outage", 128000))
-        assertEquals(128000, service.rememberClaudeMaxTokens("claude-healthy", 128000))
-        assertEquals(128000, service.rememberClaudeMaxTokens("claude-healthy", null))
+        assertEquals(2048, service.rememberClaudeMaxTokens("claude-outage", "bad-key", null))
+        assertEquals(2048, service.rememberClaudeMaxTokens("claude-outage", "bad-key", 128000))
+        assertEquals(128000, service.rememberClaudeMaxTokens("claude-outage", "fixed-key", 128000))
+        assertEquals(128000, service.rememberClaudeMaxTokens("claude-healthy", "same-key", 128000))
+        assertEquals(128000, service.rememberClaudeMaxTokens("claude-healthy", "same-key", null))
     }
 
     @Test

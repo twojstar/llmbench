@@ -28,6 +28,7 @@ import okhttp3.Response
 import okhttp3.RequestBody.Companion.toRequestBody
 import okio.BufferedSource
 import java.io.IOException
+import java.security.MessageDigest
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resume
@@ -87,6 +88,11 @@ internal fun buildClaudeMetadataHttpClient(baseClient: OkHttpClient): OkHttpClie
 
 class AiChatService {
 
+    private data class ClaudeMaxTokensCacheKey(
+        val model: String,
+        val credentialFingerprint: String
+    )
+
     private data class OpenAiCompatibleProviderConfig(
         val endpointUrl: String,
         val modelCatalogUrl: String? = null,
@@ -129,7 +135,8 @@ class AiChatService {
         ignoreUnknownKeys = true
         isLenient = true
     }
-    private val claudeMaxTokensByModel = ConcurrentHashMap<String, Int>()
+    private val claudeMaxTokensByModelAndCredential =
+        ConcurrentHashMap<ClaudeMaxTokensCacheKey, Int>()
 
     suspend fun fetchFreeGatewayModels(
         provider: AiProvider,
@@ -497,13 +504,22 @@ class AiChatService {
         .get()
         .build()
 
-    internal fun rememberClaudeMaxTokens(model: String, reported: Int?): Int {
+    private fun claudeMaxTokensCacheKey(model: String, apiKey: String): ClaudeMaxTokensCacheKey {
+        val fingerprint = MessageDigest.getInstance("SHA-256")
+            .digest(apiKey.toByteArray(Charsets.UTF_8))
+            .joinToString(separator = "") { byte -> "%02x".format(byte) }
+        return ClaudeMaxTokensCacheKey(model, fingerprint)
+    }
+
+    internal fun rememberClaudeMaxTokens(model: String, apiKey: String, reported: Int?): Int {
+        val cacheKey = claudeMaxTokensCacheKey(model, apiKey)
         val resolved = reported?.takeIf { it > 0 } ?: CLAUDE_MAX_TOKENS_COMPAT_FALLBACK
-        return claudeMaxTokensByModel.putIfAbsent(model, resolved) ?: resolved
+        return claudeMaxTokensByModelAndCredential.putIfAbsent(cacheKey, resolved) ?: resolved
     }
 
     private suspend fun resolveClaudeMaxTokens(model: String, apiKey: String): Int {
-        claudeMaxTokensByModel[model]?.let { return it }
+        val cacheKey = claudeMaxTokensCacheKey(model, apiKey)
+        claudeMaxTokensByModelAndCredential[cacheKey]?.let { return it }
         return try {
             val request = buildClaudeModelMetadataRequest(model, apiKey)
             val responseBody = executeCancellableJson(
@@ -511,9 +527,9 @@ class AiChatService {
                 httpErrorContext = "Anthropic model metadata",
                 client = claudeMetadataHttpClient
             )
-            rememberClaudeMaxTokens(model, parseClaudeModelMaxTokens(responseBody))
+            rememberClaudeMaxTokens(model, apiKey, parseClaudeModelMaxTokens(responseBody))
         } catch (_: IOException) {
-            rememberClaudeMaxTokens(model, null)
+            rememberClaudeMaxTokens(model, apiKey, null)
         }
     }
 
