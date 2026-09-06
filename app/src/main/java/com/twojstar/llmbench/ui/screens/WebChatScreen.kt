@@ -117,6 +117,29 @@ private data class WebGenerationProbeTarget(
     val url: String?
 )
 
+internal enum class WebRendererRecoveryAction {
+    RECREATE_LAST_URL,
+    EVICT_UNTIL_SELECTED,
+    REQUIRE_USER_RETRY
+}
+
+internal fun webRendererRecoveryAction(
+    didCrash: Boolean,
+    isSelected: Boolean
+): WebRendererRecoveryAction = when {
+    didCrash -> WebRendererRecoveryAction.REQUIRE_USER_RETRY
+    isSelected -> WebRendererRecoveryAction.RECREATE_LAST_URL
+    else -> WebRendererRecoveryAction.EVICT_UNTIL_SELECTED
+}
+
+internal fun webServicesForActivation(
+    current: List<WebAiService>,
+    activationTarget: WebAiService,
+    crashedServices: Set<WebAiService>
+): List<WebAiService> = current.filter { service ->
+    service == activationTarget || service !in crashedServices
+}
+
 internal fun fileChooserAcceptsMimeType(
     acceptTypes: Array<String>,
     actualMimeType: String?,
@@ -350,6 +373,8 @@ fun WebChatScreen(
     val desktopModes = remember { mutableStateMapOf<WebAiService, Boolean>() }
     val pendingDesktopModes = remember { mutableStateMapOf<WebAiService, Boolean>() }
     val providerFavicons = remember { mutableStateMapOf<WebAiService, Bitmap>() }
+    val webViewInstanceRevisions = remember { mutableStateMapOf<WebAiService, Int>() }
+    val rendererCrashServices = remember { mutableStateMapOf<WebAiService, Boolean>() }
     val currentSelectedService by rememberUpdatedState(selectedService)
     var livePoolDecisionRequestId by remember { mutableIntStateOf(0) }
 
@@ -362,6 +387,77 @@ fun WebChatScreen(
     }
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val drawerScope = rememberCoroutineScope()
+
+    fun bumpWebViewInstance(service: WebAiService) {
+        webViewInstanceRevisions[service] = (webViewInstanceRevisions[service] ?: 0) + 1
+    }
+
+    fun cancelPendingUploadFor(service: WebAiService) {
+        if (pendingFileService.value == service) {
+            val requestId = pendingFileRequestId.value
+            pendingFileCallback.value?.onReceiveValue(null)
+            pendingFileCallback.value = null
+            pendingFileService.value = null
+            pendingFileRequestId.value = null
+            requestId?.let { updateFileChooserOutcome(service, it, "renderer terminated") }
+        }
+        pendingSharedUploadConfirmation
+            ?.takeIf { it.service == service }
+            ?.let { confirmation ->
+                pendingSharedUploadConfirmation = null
+                updateFileChooserOutcome(service, confirmation.requestId, "renderer terminated")
+                confirmation.callback.onReceiveValue(null)
+            }
+    }
+
+    fun handleRendererGone(service: WebAiService, deadView: WebView, didCrash: Boolean) {
+        val isCurrentInstance = webViewMap[service] === deadView
+        releaseSharedTextClaimFor(deadView)
+        if (isCurrentInstance) {
+            // Renderer loss must not cancel an in-flight provider selection. Existing
+            // probe callbacks/timeouts will settle this dead target as UNKNOWN via
+            // the document-revision and WebView-identity guards below.
+            documentRevisions[service] = (documentRevisions[service] ?: 0) + 1
+            cancelPendingUploadFor(service)
+            activityStatuses[service]?.let { status ->
+                activityStatuses[service] = webChatActivityStatusAfterEviction(status)
+            }
+            webViewMap.remove(service)
+            if (selectedService == service) {
+                canGoBack = false
+                canGoForward = false
+                loadingProgress = 0
+                isLoading = false
+                currentUrl = lastKnownUrls[service] ?: service.url
+            }
+            val isSelectedService = selectedService == service
+            when (webRendererRecoveryAction(didCrash, isSelectedService)) {
+                WebRendererRecoveryAction.RECREATE_LAST_URL -> {
+                    rendererCrashServices.remove(service)
+                    bumpWebViewInstance(service)
+                }
+                WebRendererRecoveryAction.EVICT_UNTIL_SELECTED -> {
+                    rendererCrashServices.remove(service)
+                    liveServices = liveServices.filterNot { it == service }
+                }
+                WebRendererRecoveryAction.REQUIRE_USER_RETRY -> {
+                    rendererCrashServices[service] = true
+                    if (!isSelectedService) {
+                        liveServices = liveServices.filterNot { it == service }
+                    }
+                    viewModel.showSnackbar("${service.shortName} web renderer crashed")
+                }
+            }
+        }
+        releaseTerminatedWebView(deadView)
+    }
+
+    fun retryRendererAfterCrash(service: WebAiService) {
+        if (rendererCrashServices.remove(service) != true) return
+        lastKnownUrls[service] = service.url
+        if (selectedService == service) currentUrl = service.url
+        bumpWebViewInstance(service)
+    }
 
     fun updateLiveServices(nextServices: List<WebAiService>) {
         val evictedServices = liveServices.filterNot(nextServices.toSet()::contains)
@@ -441,7 +537,13 @@ fun WebChatScreen(
         activityStatuses[service]?.let { status ->
             activityStatuses[service] = markWebChatActivityRead(status)
         }
-        updateLiveServices(nextWebViewLru(liveServices, service, protectedServices))
+        val crashedServices = rendererCrashServices.filterValues { it }.keys.toSet()
+        val eligibleLiveServices = webServicesForActivation(
+            current = liveServices,
+            activationTarget = service,
+            crashedServices = crashedServices
+        )
+        updateLiveServices(nextWebViewLru(eligibleLiveServices, service, protectedServices))
     }
 
     fun currentGeneratingServices(): Set<WebAiService> = activityStatuses
@@ -476,11 +578,31 @@ fun WebChatScreen(
     ) {
         val requestId = ++livePoolDecisionRequestId
         val observations = mutableMapOf<WebAiService, WebChatGenerationObservation>()
+        val probeTargetsByService = probeTargets.associateBy(WebGenerationProbeTarget::service)
         var remaining = probeTargets.size
 
         fun finishProbeDecisionIfReady() {
             if (remaining != 0 || requestId != livePoolDecisionRequestId) return
-            observations.forEach { (observedService, freshObservation) ->
+            val invalidatedServices = mutableSetOf<WebAiService>()
+            val validatedObservations = observations.mapValues { (observedService, freshObservation) ->
+                val target = probeTargetsByService[observedService]
+                if (target == null || webViewMap[observedService] !== target.webView) {
+                    invalidatedServices += observedService
+                    WebChatGenerationObservation.UNKNOWN
+                } else {
+                    val sameDocument = webGenerationProbeDocumentMatches(
+                        expectedRevision = target.documentRevision,
+                        currentRevision = documentRevisions[observedService] ?: 0,
+                        expectedUrl = target.url,
+                        currentUrl = target.webView.url
+                    )
+                    if (sameDocument) freshObservation else {
+                        invalidatedServices += observedService
+                        WebChatGenerationObservation.UNKNOWN
+                    }
+                }
+            }
+            validatedObservations.forEach { (observedService, freshObservation) ->
                 val previous = activityStatuses[observedService] ?: WebChatActivityStatus.IDLE
                 activityStatuses[observedService] = webChatActivityStatusAfterFreshLruProbe(
                     previous = previous,
@@ -491,7 +613,11 @@ fun WebChatScreen(
             }
             finishActivateService(
                 service,
-                protectedWebServicesForLru(knownGenerating, observations)
+                protectedWebServicesForLru(
+                    knownGenerating = knownGenerating,
+                    freshObservations = validatedObservations,
+                    invalidatedServices = invalidatedServices
+                )
             )
         }
 
@@ -532,7 +658,9 @@ fun WebChatScreen(
     }
 
     fun activateService(service: WebAiService) {
-        val currentServices = liveServices
+        val crashedServices = rendererCrashServices.filterValues { it }.keys.toSet()
+        val currentServices = webServicesForActivation(liveServices, service, crashedServices)
+        if (currentServices != liveServices) liveServices = currentServices
         val knownGenerating = currentGeneratingServices()
         if (service in currentServices || currentServices.size < MAX_LIVE_WEBVIEWS) {
             activateWithoutProbe(service, knownGenerating)
@@ -841,7 +969,7 @@ fun WebChatScreen(
             ) {
             // Keep only a tiny MRU set of provider WebViews alive. Cookies and storage remain provider-owned.
             liveServices.forEach { service ->
-                key(service) {
+                key(service, webViewInstanceRevisions[service] ?: 0) {
                     val isCurrentService = selectedService == service
 
                     Box(
@@ -853,7 +981,15 @@ fun WebChatScreen(
                             Modifier.size(0.dp)
                         }
                     ) {
-                        AndroidView(
+                        if (rendererCrashServices[service] == true) {
+                            if (isCurrentService) {
+                                WebRendererCrashFallback(
+                                    service = service,
+                                    onRetry = { retryRendererAfterCrash(service) }
+                                )
+                            }
+                        } else {
+                            AndroidView(
                         factory = { ctx ->
                             val pendingDesktopMode = pendingDesktopModes[service]
                             val initialDesktopMode = pendingDesktopMode ?: (desktopModes[service] == true)
@@ -896,6 +1032,9 @@ fun WebChatScreen(
                                 },
                                 onExternalNavigationFailed = {
                                     viewModel.showSnackbar("Could not open external link")
+                                },
+                                onRendererGone = { deadView, didCrash ->
+                                    handleRendererGone(service, deadView, didCrash)
                                 },
                                 onFileChooserRequested = { callback, params, pageUrl ->
                                     if (pendingFileCallback.value != null ||
@@ -1012,7 +1151,8 @@ fun WebChatScreen(
                             }
                         },
                         modifier = Modifier.fillMaxSize()
-                    )
+                            )
+                        }
                     }
                 }
 
@@ -1189,6 +1329,34 @@ fun WebChatScreen(
                 }
             }
         )
+    }
+}
+
+@Composable
+private fun WebRendererCrashFallback(
+    service: WebAiService,
+    onRetry: () -> Unit
+) {
+    Box(
+        modifier = Modifier.fillMaxSize().padding(24.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Icon(Icons.Outlined.Refresh, contentDescription = null)
+            Text(
+                text = "${service.shortName} page stopped",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold
+            )
+            Text(
+                text = "The web renderer crashed. Retry opens the provider home page without clearing its cookies or storage.",
+                style = MaterialTheme.typography.bodyMedium
+            )
+            Button(onClick = onRetry) { Text("Retry") }
+        }
     }
 }
 
@@ -1936,8 +2104,9 @@ internal fun webChatActivityStatusAfterFreshLruProbe(
 
 internal fun protectedWebServicesForLru(
     knownGenerating: Set<WebAiService>,
-    freshObservations: Map<WebAiService, WebChatGenerationObservation>
-): Set<WebAiService> = knownGenerating.toMutableSet().apply {
+    freshObservations: Map<WebAiService, WebChatGenerationObservation>,
+    invalidatedServices: Set<WebAiService> = emptySet()
+): Set<WebAiService> = (knownGenerating - invalidatedServices).toMutableSet().apply {
     freshObservations.forEach { (service, observation) ->
         when (observation) {
             WebChatGenerationObservation.GENERATING -> add(service)
@@ -1947,6 +2116,11 @@ internal fun protectedWebServicesForLru(
             WebChatGenerationObservation.UNKNOWN -> Unit
         }
     }
+}
+
+private fun releaseTerminatedWebView(webView: WebView) {
+    (webView.parent as? ViewGroup)?.removeView(webView)
+    webView.destroy()
 }
 
 private fun releaseWebView(webView: WebView) {
@@ -1973,6 +2147,7 @@ private fun createConfiguredWebView(
     onNavStateChanged: (canGoBack: Boolean, canGoForward: Boolean) -> Unit,
     onExternalIntentRequested: (Uri) -> Unit,
     onExternalNavigationFailed: () -> Unit,
+    onRendererGone: (WebView, Boolean) -> Unit,
     onFileChooserRequested: (
         ValueCallback<Array<Uri>>,
         WebChromeClient.FileChooserParams,
@@ -2095,6 +2270,14 @@ private fun createConfiguredWebView(
                     onExternalIntentRequested,
                     onExternalNavigationFailed
                 )
+            }
+
+            override fun onRenderProcessGone(
+                view: WebView,
+                detail: RenderProcessGoneDetail
+            ): Boolean {
+                onRendererGone(view, detail.didCrash())
+                return true
             }
 
             override fun onReceivedSslError(

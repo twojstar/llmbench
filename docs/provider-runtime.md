@@ -83,7 +83,7 @@ OpenRouter and other OpenAI-compatible gateways may return the model actually us
 - [x] Skip periodic native activity probes entirely for web providers without verified tracking selectors.
 - [x] Keep the six mature account-backed chat integrations first in provider navigation while retaining every web provider under More chats.
 - [x] Persist the last selected web chat and favorite chats; starred providers move to a Favorites section in provider pickers.
-- [ ] Recover individual WebViews after renderer-process termination without clearing provider-owned sessions.
+- [x] Recover individual WebViews after renderer-process termination without clearing provider-owned sessions; selected low-memory loss recreates the last URL, inactive loss stays evicted until selected, and a renderer crash requires an explicit retry from the provider home page.
 - [ ] Continue provider-specific mobile performance tweaks where they are measurable and safely scoped.
 
 ### Manual/account verification (later)
