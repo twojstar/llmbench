@@ -15,29 +15,7 @@ class LocalTokenCounterTest {
     }
 
     @Test
-    fun probeSpecialTokenOrdinaryCount() {
-        when (LocalTokenCounter.count("hello <|endoftext|> world")) {
-            4 -> throw Count4()
-            5 -> throw Count5()
-            6 -> throw Count6()
-            7 -> throw Count7()
-            8 -> throw Count8()
-            9 -> throw Count9()
-            10 -> throw Count10()
-            11 -> throw Count11()
-            12 -> throw Count12()
-            else -> throw UnexpectedCount()
-        }
+    fun treatsSpecialTokenTextAsOrdinaryInput() {
+        assertEquals(9, LocalTokenCounter.count("hello <|endoftext|> world"))
     }
-
-    private class Count4 : RuntimeException()
-    private class Count5 : RuntimeException()
-    private class Count6 : RuntimeException()
-    private class Count7 : RuntimeException()
-    private class Count8 : RuntimeException()
-    private class Count9 : RuntimeException()
-    private class Count10 : RuntimeException()
-    private class Count11 : RuntimeException()
-    private class Count12 : RuntimeException()
-    private class UnexpectedCount : RuntimeException()
 }
