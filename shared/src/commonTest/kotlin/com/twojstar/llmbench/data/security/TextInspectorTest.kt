@@ -24,6 +24,15 @@ class TextInspectorTest {
     }
 
     @Test
+    fun locatesFindingAfterCarriageReturnOnlyLineEnding() {
+        val result = TextInspector.inspect("safe\rxx\u200Btail")
+        val finding = result.findings.first { it.label == "Zero-width space" }
+
+        assertEquals(2, finding.line)
+        assertEquals(3, finding.column)
+    }
+
+    @Test
     fun detectsBidiOverrideAsHighSeverity() {
         val result = TextInspector.inspect("safe \u202Etxt")
         val finding = result.findings.first { it.label == "Right-to-left override" }
