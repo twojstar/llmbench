@@ -1,10 +1,38 @@
 package com.twojstar.llmbench.ui.screens
 
 import com.twojstar.llmbench.data.model.WebAiService
+import com.twojstar.llmbench.data.model.WebChatGenerationObservation
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class WebRendererRecoveryTest {
+    @Test
+    fun onlyFreshlyConfirmedTrackedInactiveRendererWaivesPriorityWhenNotVisible() {
+        assertFalse(rendererPriorityWaivedWhenNotVisible(true, true, true))
+        assertFalse(rendererPriorityWaivedWhenNotVisible(false, true, false))
+        assertFalse(rendererPriorityWaivedWhenNotVisible(false, false, true))
+        assertTrue(rendererPriorityWaivedWhenNotVisible(false, true, true))
+    }
+
+    @Test
+    fun uncertainOrGeneratingObservationKeepsRendererProtected() {
+        assertTrue(rendererInactivityConfirmedByObservation(WebChatGenerationObservation.IDLE))
+        assertTrue(rendererInactivityConfirmedByObservation(WebChatGenerationObservation.COMPLETED))
+        assertTrue(rendererInactivityConfirmedByObservation(WebChatGenerationObservation.COMPLETED_WHILE_SELECTED))
+        assertFalse(rendererInactivityConfirmedByObservation(WebChatGenerationObservation.GENERATING))
+        assertFalse(rendererInactivityConfirmedByObservation(WebChatGenerationObservation.UNKNOWN))
+    }
+
+    @Test
+    fun lateGeneratingOrUnknownObservationRevokesConfirmedInactivity() {
+        assertFalse(rendererInactivityConfirmedAfterObservation(true, WebChatGenerationObservation.GENERATING))
+        assertFalse(rendererInactivityConfirmedAfterObservation(true, WebChatGenerationObservation.UNKNOWN))
+        assertTrue(rendererInactivityConfirmedAfterObservation(true, WebChatGenerationObservation.IDLE))
+        assertFalse(rendererInactivityConfirmedAfterObservation(false, WebChatGenerationObservation.IDLE))
+    }
+
     @Test
     fun lowMemoryRendererTerminationRecreatesLastUrl() {
         assertEquals(
