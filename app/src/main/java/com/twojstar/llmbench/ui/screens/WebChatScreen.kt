@@ -476,6 +476,14 @@ fun WebChatScreen(
                 }
                 remaining--
                 if (remaining == 0) {
+                    observations.forEach { (observedService, freshObservation) ->
+                        val previous = activityStatuses[observedService] ?: WebChatActivityStatus.IDLE
+                        activityStatuses[observedService] = webChatActivityStatusAfterFreshLruProbe(
+                            previous = previous,
+                            observation = freshObservation,
+                            isSelected = currentSelectedService == observedService
+                        )
+                    }
                     finishActivateService(
                         service,
                         protectedWebServicesForLru(knownGenerating, observations)
@@ -1846,6 +1854,17 @@ internal fun nextWebViewLru(
     current.filterTo(this) { it != selected && it in protectedServices }
     current.filterTo(this) { it != selected && it !in protectedServices }
 }.distinct().take(MAX_LIVE_WEBVIEWS)
+
+internal fun webChatActivityStatusAfterFreshLruProbe(
+    previous: WebChatActivityStatus,
+    observation: WebChatGenerationObservation,
+    isSelected: Boolean
+): WebChatActivityStatus = nextObservedWebChatActivityStatus(
+    previous = previous,
+    observation = observation,
+    isSelected = isSelected,
+    isLiveService = true
+)
 
 internal fun protectedWebServicesForLru(
     knownGenerating: Set<WebAiService>,

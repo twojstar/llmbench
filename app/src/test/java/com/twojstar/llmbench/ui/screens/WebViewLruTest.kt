@@ -2,6 +2,7 @@ package com.twojstar.llmbench.ui.screens
 
 import android.view.View
 import com.twojstar.llmbench.data.model.WebAiService
+import com.twojstar.llmbench.data.model.WebChatActivityStatus
 import com.twojstar.llmbench.data.model.WebChatGenerationObservation
 import org.junit.Assert.assertEquals
 import org.junit.Test
@@ -68,6 +69,18 @@ class WebViewLruTest {
             )
         )
         assertEquals(emptySet<WebAiService>(), protected)
+    }
+
+    @Test
+    fun freshCompletionBecomesUnreadBeforeEviction() {
+        assertEquals(
+            WebChatActivityStatus.UNREAD,
+            webChatActivityStatusAfterFreshLruProbe(
+                previous = WebChatActivityStatus.GENERATING,
+                observation = WebChatGenerationObservation.COMPLETED,
+                isSelected = false
+            )
+        )
     }
 
     @Test
