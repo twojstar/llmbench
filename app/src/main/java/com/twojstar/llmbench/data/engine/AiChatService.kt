@@ -18,6 +18,7 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.*
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.Call
 import okhttp3.Callback
@@ -27,6 +28,7 @@ import okhttp3.Response
 import okhttp3.RequestBody.Companion.toRequestBody
 import okio.BufferedSource
 import java.io.IOException
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
@@ -69,6 +71,12 @@ private const val OPENAI_OUTPUT_TEXT_DELTA = "response.output_text.delta"
 private const val CLAUDE_CONTENT_BLOCK_DELTA = "content_block_delta"
 private const val CLAUDE_TEXT_DELTA = "text_delta"
 private const val MALFORMED_STREAM_EVENT = "Malformed streaming event"
+private const val CLAUDE_MESSAGES_API_URL = "https://api.anthropic.com/v1/messages"
+private const val CLAUDE_MODELS_API_URL = "https://api.anthropic.com/v1/models"
+private const val CLAUDE_MAX_TOKENS_COMPAT_FALLBACK = 2048
+private const val HEADER_ANTHROPIC_API_KEY = "x-api-key"
+private const val HEADER_ANTHROPIC_VERSION = "anthropic-version"
+private const val ANTHROPIC_API_VERSION = "2023-06-01"
 
 class AiChatService {
 
@@ -113,6 +121,7 @@ class AiChatService {
         ignoreUnknownKeys = true
         isLenient = true
     }
+    private val claudeMaxTokensByModel = ConcurrentHashMap<String, Int>()
 
     suspend fun fetchFreeGatewayModels(
         provider: AiProvider,
@@ -466,6 +475,51 @@ class AiChatService {
         return text ?: "Received empty message content from OpenAI."
     }
 
+    internal fun parseClaudeModelMaxTokens(rawJson: String): Int? = runCatching {
+        json.parseToJsonElement(rawJson).jsonObject[JSON_MAX_TOKENS_KEY]?.jsonPrimitive?.intOrNull
+    }.getOrNull()?.takeIf { it > 0 }
+
+    internal fun buildClaudeModelMetadataRequest(
+        model: String,
+        apiKey: String
+    ): Request = Request.Builder()
+        .url(CLAUDE_MODELS_API_URL.toHttpUrl().newBuilder().addPathSegment(model).build())
+        .addHeader(HEADER_ANTHROPIC_API_KEY, apiKey)
+        .addHeader(HEADER_ANTHROPIC_VERSION, ANTHROPIC_API_VERSION)
+        .get()
+        .build()
+
+    private suspend fun resolveClaudeMaxTokens(model: String, apiKey: String): Int {
+        claudeMaxTokensByModel[model]?.let { return it }
+        return try {
+            val request = buildClaudeModelMetadataRequest(model, apiKey)
+            val responseBody = executeCancellableJson(
+                request,
+                httpErrorContext = "Anthropic model metadata"
+            )
+            val reported = parseClaudeModelMaxTokens(responseBody)
+            reported?.also { claudeMaxTokensByModel[model] = it } ?: CLAUDE_MAX_TOKENS_COMPAT_FALLBACK
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            CLAUDE_MAX_TOKENS_COMPAT_FALLBACK
+        }
+    }
+
+    internal fun buildClaudeRequestPayload(
+        model: String,
+        maxTokens: Int,
+        stream: Boolean,
+        systemInstruction: String?,
+        messages: JsonArray
+    ): JsonObject = buildJsonObject {
+        put(JSON_MODEL_KEY, model)
+        put(JSON_MAX_TOKENS_KEY, maxTokens)
+        if (stream) put("stream", true)
+        if (!systemInstruction.isNullOrBlank()) put(JSON_SYSTEM_KEY, systemInstruction)
+        put(JSON_MESSAGES_KEY, messages)
+    }
+
     // --- Anthropic Claude REST API ---
     private suspend fun callClaudeApi(
         prompt: String,
@@ -474,23 +528,18 @@ class AiChatService {
         systemInstruction: String?,
         conversationHistory: List<ModelChatMessage>
     ): String {
-        val url = "https://api.anthropic.com/v1/messages"
         val messagesArray = buildClaudeMessages(prompt, conversationHistory, systemInstruction)
+        val maxTokens = resolveClaudeMaxTokens(model, apiKey)
 
-        val requestPayload = buildJsonObject {
-            put(JSON_MODEL_KEY, model)
-            put(JSON_MAX_TOKENS_KEY, 2048)
-            if (!systemInstruction.isNullOrBlank()) {
-                put(JSON_SYSTEM_KEY, systemInstruction)
-            }
-            put(JSON_MESSAGES_KEY, messagesArray)
-        }
+        val requestPayload = buildClaudeRequestPayload(
+            model, maxTokens, stream = false, systemInstruction, messagesArray
+        )
 
         val body = requestPayload.toString().toRequestBody(JSON_MEDIA_TYPE.toMediaType())
         val request = Request.Builder()
-            .url(url)
-            .addHeader("x-api-key", apiKey)
-            .addHeader("anthropic-version", "2023-06-01")
+            .url(CLAUDE_MESSAGES_API_URL)
+            .addHeader(HEADER_ANTHROPIC_API_KEY, apiKey)
+            .addHeader(HEADER_ANTHROPIC_VERSION, ANTHROPIC_API_VERSION)
             .addHeader(HEADER_CONTENT_TYPE_LOWER, JSON_MEDIA_TYPE)
             .post(body)
             .build()
@@ -606,17 +655,15 @@ class AiChatService {
         conversationHistory: List<ModelChatMessage>,
         onTextDelta: (String) -> Unit
     ): String {
-        val requestPayload = buildJsonObject {
-            put(JSON_MODEL_KEY, model)
-            put(JSON_MAX_TOKENS_KEY, 2048)
-            put("stream", true)
-            if (!systemInstruction.isNullOrBlank()) put(JSON_SYSTEM_KEY, systemInstruction)
-            put(JSON_MESSAGES_KEY, buildClaudeMessages(prompt, conversationHistory, systemInstruction))
-        }
+        val maxTokens = resolveClaudeMaxTokens(model, apiKey)
+        val requestPayload = buildClaudeRequestPayload(
+            model, maxTokens, stream = true, systemInstruction,
+            buildClaudeMessages(prompt, conversationHistory, systemInstruction)
+        )
         val request = Request.Builder()
-            .url("https://api.anthropic.com/v1/messages")
-            .addHeader("x-api-key", apiKey)
-            .addHeader("anthropic-version", "2023-06-01")
+            .url(CLAUDE_MESSAGES_API_URL)
+            .addHeader(HEADER_ANTHROPIC_API_KEY, apiKey)
+            .addHeader(HEADER_ANTHROPIC_VERSION, ANTHROPIC_API_VERSION)
             .addHeader(HEADER_CONTENT_TYPE_LOWER, JSON_MEDIA_TYPE)
             .post(requestPayload.toString().toRequestBody(JSON_MEDIA_TYPE.toMediaType()))
             .build()

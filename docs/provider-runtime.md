@@ -100,7 +100,7 @@ OpenRouter and other OpenAI-compatible gateways may return the model actually us
 - [ ] Preserve OpenAI stateless reasoning items while keeping `store=false`, or document a deliberate move to stateful Responses.
 - [ ] Add Claude thinking/effort only through model-aware capabilities; preserve opaque thinking blocks when enabled.
 - [x] Record and display the actual routed model returned by OpenRouter when available.
-- [ ] Replace hard-coded output limits such as Claude's current `max_tokens=2048` with model/provider-aware limits.
+- [x] Resolve Claude `max_tokens` from the Anthropic Models API per model and cache successful metadata; keep the old 2048 value only as a compatibility fallback when model metadata is unavailable.
 - [x] Add a provider-aware Prompt Studio preview showing effective instruction placement, history strategy and transport metadata without exposing API keys or hidden reasoning state.
 - [ ] Parse provider usage/token metadata so comparisons can include latency and token/cost information when the API returns it.
 - [ ] Keep transport/SSE/history tests JVM-testable; device testing should be required only for Android/WebView behavior.
@@ -112,6 +112,7 @@ OpenRouter and other OpenAI-compatible gateways may return the model actually us
 - OpenAI Responses API: https://developers.openai.com/api/reference/resources/responses/methods/create
 - OpenAI model guidance: https://developers.openai.com/api/docs/guides/latest-model
 - Anthropic prompting/thinking guidance: https://docs.anthropic.com/en/docs/build-with-claude/prompt-engineering/prompt-templates-and-variables
+- Anthropic Models API: https://platform.claude.com/docs/en/api/models/retrieve
 - OpenRouter routing/fallbacks: https://openrouter.ai/docs/guides/routing/model-fallbacks
 
 Keep this file focused on provider/runtime behavior. Product-facing provider status belongs in `README.md`; implementation details should live next to code when they become stable enough to stop being TODOs.
