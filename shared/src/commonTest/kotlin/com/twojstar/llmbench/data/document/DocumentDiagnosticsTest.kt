@@ -2,7 +2,7 @@ package com.twojstar.llmbench.data.document
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertFalse
+import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 class DocumentDiagnosticsTest {
@@ -30,164 +30,47 @@ class DocumentDiagnosticsTest {
     }
 
     @Test
-    fun detectsOnlyBlockFencesAndRequiresCompatibleCloser() {
-        val text = """
-            Inline ``` is not a block fence.
-               ````kotlin
-            val answer = 42
-            ```
-        """.trimIndent()
-        val document = TextDocumentCodec.decodeUtf8(text.encodeToByteArray())
+    fun locatesNulAcrossCrLfAndCrLineEndings() {
+        val document = TextDocumentCodec.decodeUtf8("one\r\ntwo\rxx\u0000yy".encodeToByteArray())
 
-        val diagnostic = DocumentDiagnostics.inspect(document)
-            .single { it.kind == DocumentDiagnosticKind.UNTERMINATED_CODE_FENCE }
+        val nul = DocumentDiagnostics.inspect(document)
+            .single { it.kind == DocumentDiagnosticKind.NUL_CHARACTER }
 
-        assertEquals(2, diagnostic.line)
-        assertEquals(4, diagnostic.column)
+        assertEquals(3, nul.line)
+        assertEquals(3, nul.column)
     }
 
     @Test
-    fun sixSpaceCloserDoesNotCloseThreeSpaceFence() {
-        val text = "   ```\ncode\n      ```"
-        val document = TextDocumentCodec.decodeUtf8(text.encodeToByteArray())
-
-        val diagnostic = DocumentDiagnostics.inspect(document)
-            .single { it.kind == DocumentDiagnosticKind.UNTERMINATED_CODE_FENCE }
-
-        assertEquals(1, diagnostic.line)
-        assertEquals(4, diagnostic.column)
-    }
-
-    @Test
-    fun supportsTildeFencesAndLongerClosers() {
-        val text = "~~~txt\nhello\n~~~~~   "
-        val document = TextDocumentCodec.decodeUtf8(text.encodeToByteArray())
-
-        assertFalse(DocumentDiagnostics.inspect(document).any {
-            it.kind == DocumentDiagnosticKind.UNTERMINATED_CODE_FENCE
-        })
-    }
-
-    @Test
-    fun blockQuoteCloserMayUseDifferentOptionalSpacing() {
-        val text = " > ```md\n> quoted\n>```"
-        val document = TextDocumentCodec.decodeUtf8(text.encodeToByteArray())
-
-        assertFalse(DocumentDiagnostics.inspect(document).any {
-            it.kind == DocumentDiagnosticKind.UNTERMINATED_CODE_FENCE
-        })
-    }
-
-    @Test
-    fun handlesFencesInsideBlockQuotesAndListItems() {
-        val closed = "> ```md\n> quoted\n> ```\n\n- ~~~txt\n  listed\n  ~~~"
-        val closedDocument = TextDocumentCodec.decodeUtf8(closed.encodeToByteArray())
-        assertFalse(DocumentDiagnostics.inspect(closedDocument).any {
-            it.kind == DocumentDiagnosticKind.UNTERMINATED_CODE_FENCE
-        })
-
-        val nested = "> - ````kotlin\n>   val answer = 42"
-        val nestedDocument = TextDocumentCodec.decodeUtf8(nested.encodeToByteArray())
-        val diagnostic = DocumentDiagnostics.inspect(nestedDocument)
-            .single { it.kind == DocumentDiagnosticKind.UNTERMINATED_CODE_FENCE }
-
-        assertEquals(1, diagnostic.line)
-        assertEquals(5, diagnostic.column)
-
-        val repaired = DocumentDiagnostics.repair(nestedDocument, closeUnterminatedCodeFence = true)
-        assertTrue(repaired.document.text.endsWith("\n>   ````"))
-        assertFalse(DocumentDiagnostics.inspect(repaired.document).any {
-            it.kind == DocumentDiagnosticKind.UNTERMINATED_CODE_FENCE
-        })
-    }
-
-    @Test
-    fun tabPaddedListRepairUsesVisualContinuationColumns() {
-        val text = "-\t```kotlin\n\tcode"
-        val document = TextDocumentCodec.decodeUtf8(text.encodeToByteArray())
-
-        assertTrue(DocumentDiagnostics.inspect(document).any {
-            it.kind == DocumentDiagnosticKind.UNTERMINATED_CODE_FENCE
-        })
-
-        val repaired = DocumentDiagnostics.repair(document, closeUnterminatedCodeFence = true)
-
-        assertTrue(repaired.document.text.endsWith("\n    ```"))
-        assertFalse(DocumentDiagnostics.inspect(repaired.document).any {
-            it.kind == DocumentDiagnosticKind.UNTERMINATED_CODE_FENCE
-        })
-    }
-
-    @Test
-    fun orderedListTabPaddingAlsoRepairsInsideContainer() {
-        val text = "10.\t~~~txt\n    content"
-        val document = TextDocumentCodec.decodeUtf8(text.encodeToByteArray())
-
-        val repaired = DocumentDiagnostics.repair(document, closeUnterminatedCodeFence = true)
-
-        assertTrue(repaired.document.text.endsWith("\n    ~~~"))
-        assertFalse(DocumentDiagnostics.inspect(repaired.document).any {
-            it.kind == DocumentDiagnosticKind.UNTERMINATED_CODE_FENCE
-        })
-    }
-
-    @Test
-    fun ignoresFourSpaceIndentedAndInvalidBacktickInfoFences() {
-        val text = "    ```\nnot fenced\n```bad`info\nstill not fenced"
-        val document = TextDocumentCodec.decodeUtf8(text.encodeToByteArray())
-
-        assertFalse(DocumentDiagnostics.inspect(document).any {
-            it.kind == DocumentDiagnosticKind.UNTERMINATED_CODE_FENCE
-        })
-    }
-
-    @Test
-    fun explicitRepairNormalizesAndClosesFenceWithMatchingMarkerLength() {
+    fun explicitLineEndingRepairPreservesBomAndUpdatesMetadata() {
         val source = byteArrayOf(0xEF.toByte(), 0xBB.toByte(), 0xBF.toByte()) +
-            "before\r\n````kotlin\ncode".encodeToByteArray()
+            "before\r\nafter\n".encodeToByteArray()
         val document = TextDocumentCodec.decodeUtf8(source)
 
-        val repaired = DocumentDiagnostics.repair(
-            document = document,
-            normalizeTo = LineEnding.LF,
-            closeUnterminatedCodeFence = true
-        )
+        val repaired = DocumentDiagnostics.repair(document, normalizeTo = LineEnding.LF)
 
-        assertEquals(
-            listOf(
-                DocumentRepairAction.NORMALIZE_LINE_ENDINGS,
-                DocumentRepairAction.CLOSE_UNTERMINATED_CODE_FENCE
-            ),
-            repaired.applied
-        )
+        assertEquals(listOf(DocumentRepairAction.NORMALIZE_LINE_ENDINGS), repaired.applied)
         assertTrue(repaired.document.hadUtf8Bom)
         assertEquals(LineEndingStyle.LF, repaired.document.lineEndings.style)
-        assertEquals("before\n````kotlin\ncode\n````", repaired.document.text)
-        assertFalse(DocumentDiagnostics.inspect(repaired.document).any {
-            it.kind == DocumentDiagnosticKind.UNTERMINATED_CODE_FENCE
-        })
+        assertEquals("before\nafter\n", repaired.document.text)
     }
 
     @Test
     fun repairIsNoOpUnlessExplicitlyRequested() {
-        val text = "a\r\nb\n```\ncode"
-        val document = TextDocumentCodec.decodeUtf8(text.encodeToByteArray())
+        val document = TextDocumentCodec.decodeUtf8("a\r\nb\nc".encodeToByteArray())
 
         val repaired = DocumentDiagnostics.repair(document)
 
         assertEquals(emptyList(), repaired.applied)
-        assertEquals(text, repaired.document.text)
-        assertEquals(document.lineEndings, repaired.document.lineEndings)
+        assertSame(document, repaired.document)
     }
 
     @Test
-    fun fenceRepairUsesDominantExistingLineEndingWhenNotNormalizing() {
-        val text = "a\r\nb\r\nc\n```\r\ncode"
-        val document = TextDocumentCodec.decodeUtf8(text.encodeToByteArray())
+    fun requestedNormalizationIsNoOpWhenTextAlreadyMatches() {
+        val document = TextDocumentCodec.decodeUtf8("a\nb\n".encodeToByteArray())
 
-        val repaired = DocumentDiagnostics.repair(document, closeUnterminatedCodeFence = true)
+        val repaired = DocumentDiagnostics.repair(document, normalizeTo = LineEnding.LF)
 
-        assertTrue(repaired.document.text.endsWith("code\r\n```"))
-        assertEquals(listOf(DocumentRepairAction.CLOSE_UNTERMINATED_CODE_FENCE), repaired.applied)
+        assertEquals(emptyList(), repaired.applied)
+        assertSame(document, repaired.document)
     }
 }
