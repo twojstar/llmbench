@@ -1,7 +1,6 @@
 package com.twojstar.llmbench.data.tokenizer
 
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class LocalTokenCounterTest {
@@ -17,6 +16,6 @@ class LocalTokenCounterTest {
 
     @Test
     fun treatsSpecialTokenTextAsOrdinaryInput() {
-        assertTrue(LocalTokenCounter.count("hello <|endoftext|> world") > 2)
+        assertEquals(8, LocalTokenCounter.count("hello <|endoftext|> world"))
     }
 }
