@@ -107,7 +107,7 @@ platform clients
 └── iOS app (planned)
 ```
 
-Technical details for native provider transport, conversation state, Prompt Studio boundaries and API-level TODOs live in [docs/provider-runtime.md](docs/provider-runtime.md).
+Technical details for native provider transport, conversation state, Prompt Studio boundaries and API-level TODOs live in [docs/provider-runtime.md](docs/provider-runtime.md). Product/workflow ideas collected from app research and sibling tools live in [docs/product-ideas.md](docs/product-ideas.md).
 
 Backends are optional, not the default. If a feature truly needs one, prefer a tiny stateless service and evaluate Cloudflare, Google Cloud, AWS or Oracle free tiers based on the actual requirement rather than choosing infrastructure first.
 
@@ -126,6 +126,9 @@ Backends are optional, not the default. If a feature truly needs one, prefer a t
 - [x] show generating and unread response status on ChatGPT, Claude, Gemini, DeepSeek, Kimi and Vibe web tabs
 - [x] add Qwen, Microsoft Copilot, Z.ai, Grok, Character.AI, Venice and Meta AI account-backed WebView entries
 - [ ] verify embedded sign-in, embedded upload flows and provider-specific generation activity probes for Qwen, Copilot, Z.ai, Grok, Character.AI, Venice and Meta AI
+- [ ] add a local Markdown prompt vault with edit/import/export and chat-to-`.md` workflows
+- [ ] add manually editable/importable `SKILL.md` assets with safe capability gating
+- [ ] bring Docbench-style format validation/repair, EOL normalization and token counting into prompt/file tooling
 - [x] add CI build/lint checks
 - [x] document which providers work fully, partially, or block embedded login
 
