@@ -9,6 +9,17 @@ import org.junit.Test
 
 class WebChatObservationAcceptanceTest {
     @Test
+    fun selectedWebChatIsProbedEveryTickWhileInactiveChatIsThrottled() {
+        repeat(6) { tick ->
+            assertTrue(shouldProbeWebChatActivity(isSelected = true, pollTick = tick))
+        }
+        assertTrue(shouldProbeWebChatActivity(isSelected = false, pollTick = 0))
+        assertFalse(shouldProbeWebChatActivity(isSelected = false, pollTick = 1))
+        assertFalse(shouldProbeWebChatActivity(isSelected = false, pollTick = 2))
+        assertTrue(shouldProbeWebChatActivity(isSelected = false, pollTick = 3))
+    }
+
+    @Test
     fun completedObservationSurvivesEvictionWithoutReplacement() {
         assertTrue(
             shouldApplyWebChatObservation(

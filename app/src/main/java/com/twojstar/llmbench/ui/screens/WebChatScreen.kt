@@ -87,6 +87,8 @@ import kotlinx.coroutines.launch
 
 private const val WEBVIEW_LOG_TAG = "LlmBenchWeb"
 private const val MAX_LIVE_WEBVIEWS = 2
+private const val WEB_ACTIVITY_POLL_MS = 1_200L
+private const val INACTIVE_WEB_ACTIVITY_POLL_EVERY = 3
 private const val DIAGNOSTIC_NONE_YET = "None yet"
 
 internal fun studioPromptForWebChat(renderedInstructions: String): String? =
@@ -201,6 +203,10 @@ internal fun nextObservedWebChatActivityStatus(
     val nextStatus = nextWebChatActivityStatus(previous, observation, isSelected)
     return if (isLiveService) nextStatus else webChatActivityStatusAfterEviction(nextStatus)
 }
+
+// The page observer latches completion, so inactive live tabs do not need every native poll.
+internal fun shouldProbeWebChatActivity(isSelected: Boolean, pollTick: Int): Boolean =
+    isSelected || pollTick % INACTIVE_WEB_ACTIVITY_POLL_EVERY == 0
 
 internal fun shouldApplyPendingDesktopMode(
     observation: WebChatGenerationObservation,
@@ -450,11 +456,15 @@ fun WebChatScreen(
 
     LaunchedEffect(lifecycleStarted, liveServices) {
         if (!lifecycleStarted) return@LaunchedEffect
+        var pollTick = 0
         while (true) {
             liveServices.forEach { service ->
-                probeServiceActivity(service)
+                if (shouldProbeWebChatActivity(service == selectedService, pollTick)) {
+                    probeServiceActivity(service)
+                }
             }
-            delay(1_200)
+            pollTick = (pollTick + 1) % INACTIVE_WEB_ACTIVITY_POLL_EVERY
+            delay(WEB_ACTIVITY_POLL_MS)
         }
     }
 
