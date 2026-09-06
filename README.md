@@ -129,7 +129,7 @@ Backends are optional, not the default. If a feature truly needs one, prefer a t
 - [ ] add a local Markdown prompt vault with edit/import/export and chat-to-`.md` workflows
 - [ ] add manually editable/importable `SKILL.md` assets with safe capability gating
 - [ ] bring Docbench's format validation/repair, EOL normalization and built-in local token counter into prompt/file tooling
-- [ ] add first-party Bench tools/plugins for compatible chats, with Docbench/Codebench capabilities and a persistent Streambench radio mini-player
+- [ ] add first-party Docbench/Codebench tools/plugins for compatible chats, plus a persistent Streambench radio player as first-party companion UI
 - [x] add CI build/lint checks
 - [x] document which providers work fully, partially, or block embedded login
 

@@ -52,7 +52,7 @@ These are Docbench-style capabilities to bring into LlmBench, not changes to Doc
 
 ## Built-in Bench tools / plugins
 
-- Treat useful capabilities from `twojstar/twojstar` Benches as first-party LlmBench tools instead of requiring an external MCP or another service for things the app can already do locally.
+- Treat useful capabilities from `twojstar/twojstar` Benches as first-party LlmBench tools instead of requiring an external MCP or another service for capabilities LlmBench should provide locally.
 - Keep a small capability registry so each built-in tool declares its inputs, outputs, permissions, local/network behavior and which chat/provider transports can use it.
 - Expose tools selectively per provider. Native/API chats can receive real tool calls where supported; account-backed WebViews should get only reliable, explicit user-approved bridges or one-tap insert/share flows rather than brittle page scraping.
 - Keep one source of truth for Bench logic. Prefer extracting/reusing portable cores or a narrow typed bridge over copying implementations into LlmBench and letting them diverge.
