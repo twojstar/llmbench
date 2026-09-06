@@ -132,7 +132,10 @@ internal fun webRendererRecoveryAction(
     else -> WebRendererRecoveryAction.EVICT_UNTIL_SELECTED
 }
 
-internal fun rendererPriorityWaivedWhenNotVisible(isSelected: Boolean): Boolean = !isSelected
+internal fun rendererPriorityWaivedWhenNotVisible(
+    isSelected: Boolean,
+    isGenerating: Boolean
+): Boolean = !isSelected && !isGenerating
 
 internal fun webServicesForActivation(
     current: List<WebAiService>,
@@ -973,6 +976,7 @@ fun WebChatScreen(
             liveServices.forEach { service ->
                 key(service, webViewInstanceRevisions[service] ?: 0) {
                     val isCurrentService = selectedService == service
+                    val isGeneratingService = activityStatuses[service] == WebChatActivityStatus.GENERATING
 
                     Box(
                         modifier = if (isCurrentService) {
@@ -1001,6 +1005,9 @@ fun WebChatScreen(
                                 initialUrl = lastKnownUrls[service] ?: service.url,
                                 isDesktop = initialDesktopMode,
                                 isServiceSelected = { selectedService == service },
+                                isServiceGenerating = {
+                                    activityStatuses[service] == WebChatActivityStatus.GENERATING
+                                },
                                 onDocumentStarted = {
                                     documentRevisions[service] = (documentRevisions[service] ?: 0) + 1
                                     if (selectedService == service && showProviderDiagnosticsDialog) {
@@ -1137,7 +1144,10 @@ fun WebChatScreen(
                             wv.visibility = providerWebViewVisibility(isCurrentService)
                             wv.setRendererPriorityPolicy(
                                 WebView.RENDERER_PRIORITY_IMPORTANT,
-                                rendererPriorityWaivedWhenNotVisible(isCurrentService)
+                                rendererPriorityWaivedWhenNotVisible(
+                                    isSelected = isCurrentService,
+                                    isGenerating = isGeneratingService
+                                )
                             )
                             if (isCurrentService && lifecycleStarted) {
                                 wv.onResume()
@@ -2145,6 +2155,7 @@ private fun createConfiguredWebView(
     initialUrl: String,
     isDesktop: Boolean,
     isServiceSelected: () -> Boolean,
+    isServiceGenerating: () -> Boolean,
     onDocumentStarted: () -> Unit,
     onUrlChanged: (String) -> Unit,
     onTitleChanged: (String) -> Unit,
@@ -2165,11 +2176,14 @@ private fun createConfiguredWebView(
             ViewGroup.LayoutParams.MATCH_PARENT,
             ViewGroup.LayoutParams.MATCH_PARENT
         )
-        // Selected chats stay IMPORTANT even when the whole app is backgrounded.
-        // Only inactive retained WebViews may waive priority when not visible.
+        // Selected or generating chats stay IMPORTANT even when not visible.
+        // Only inactive retained WebViews with no active response may waive priority.
         setRendererPriorityPolicy(
             WebView.RENDERER_PRIORITY_IMPORTANT,
-            rendererPriorityWaivedWhenNotVisible(isServiceSelected())
+            rendererPriorityWaivedWhenNotVisible(
+                isSelected = isServiceSelected(),
+                isGenerating = isServiceGenerating()
+            )
         )
         isClickable = true
         isFocusable = true

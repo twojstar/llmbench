@@ -8,9 +8,10 @@ import org.junit.Test
 
 class WebRendererRecoveryTest {
     @Test
-    fun onlyInactiveRendererWaivesPriorityWhenNotVisible() {
-        assertFalse(rendererPriorityWaivedWhenNotVisible(isSelected = true))
-        assertTrue(rendererPriorityWaivedWhenNotVisible(isSelected = false))
+    fun onlyInactiveIdleRendererWaivesPriorityWhenNotVisible() {
+        assertFalse(rendererPriorityWaivedWhenNotVisible(isSelected = true, isGenerating = false))
+        assertFalse(rendererPriorityWaivedWhenNotVisible(isSelected = false, isGenerating = true))
+        assertTrue(rendererPriorityWaivedWhenNotVisible(isSelected = false, isGenerating = false))
     }
 
     @Test

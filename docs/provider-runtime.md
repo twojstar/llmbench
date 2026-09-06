@@ -84,7 +84,7 @@ OpenRouter and other OpenAI-compatible gateways may return the model actually us
 - [x] Keep the six mature account-backed chat integrations first in provider navigation while retaining every web provider under More chats.
 - [x] Persist the last selected web chat and favorite chats; starred providers move to a Favorites section in provider pickers.
 - [x] Recover individual WebViews after renderer-process termination without clearing provider-owned sessions; selected low-memory loss recreates the last URL, inactive loss stays evicted until selected, and a renderer crash requires an explicit retry from the provider home page.
-- [x] Keep the selected WebView renderer at IMPORTANT priority even while the app is backgrounded, while allowing only inactive hidden MRU WebViews to waive renderer priority under memory pressure now that renderer termination recovery is in place.
+- [x] Keep selected or actively generating WebView renderers at IMPORTANT priority even while not visible, while allowing only inactive idle hidden MRU WebViews to waive renderer priority under memory pressure now that renderer termination recovery is in place.
 - [ ] Continue provider-specific mobile performance tweaks where they are measurable and safely scoped.
 
 ### Manual/account verification (later)
