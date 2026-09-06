@@ -33,6 +33,24 @@ class TextInspectorTest {
     }
 
     @Test
+    fun locatesFindingAfterUnicodeLineSeparator() {
+        val result = TextInspector.inspect("safe\u2028xx\u200Btail")
+        val finding = result.findings.first { it.label == "Zero-width space" }
+
+        assertEquals(2, finding.line)
+        assertEquals(3, finding.column)
+    }
+
+    @Test
+    fun retainsBoundedFindingsButCountsAllDetections() {
+        val result = TextInspector.inspect("\u200B".repeat(600))
+
+        assertEquals(600, result.detectedCount)
+        assertEquals(500, result.findings.size)
+        assertTrue(result.truncated)
+    }
+
+    @Test
     fun detectsBidiOverrideAsHighSeverity() {
         val result = TextInspector.inspect("safe \u202Etxt")
         val finding = result.findings.first { it.label == "Right-to-left override" }
