@@ -578,11 +578,31 @@ fun WebChatScreen(
     ) {
         val requestId = ++livePoolDecisionRequestId
         val observations = mutableMapOf<WebAiService, WebChatGenerationObservation>()
+        val probeTargetsByService = probeTargets.associateBy(WebGenerationProbeTarget::service)
         var remaining = probeTargets.size
 
         fun finishProbeDecisionIfReady() {
             if (remaining != 0 || requestId != livePoolDecisionRequestId) return
-            observations.forEach { (observedService, freshObservation) ->
+            val invalidatedServices = mutableSetOf<WebAiService>()
+            val validatedObservations = observations.mapValues { (observedService, freshObservation) ->
+                val target = probeTargetsByService[observedService]
+                if (target == null || webViewMap[observedService] !== target.webView) {
+                    invalidatedServices += observedService
+                    WebChatGenerationObservation.UNKNOWN
+                } else {
+                    val sameDocument = webGenerationProbeDocumentMatches(
+                        expectedRevision = target.documentRevision,
+                        currentRevision = documentRevisions[observedService] ?: 0,
+                        expectedUrl = target.url,
+                        currentUrl = target.webView.url
+                    )
+                    if (sameDocument) freshObservation else {
+                        invalidatedServices += observedService
+                        WebChatGenerationObservation.UNKNOWN
+                    }
+                }
+            }
+            validatedObservations.forEach { (observedService, freshObservation) ->
                 val previous = activityStatuses[observedService] ?: WebChatActivityStatus.IDLE
                 activityStatuses[observedService] = webChatActivityStatusAfterFreshLruProbe(
                     previous = previous,
@@ -593,7 +613,11 @@ fun WebChatScreen(
             }
             finishActivateService(
                 service,
-                protectedWebServicesForLru(knownGenerating, observations)
+                protectedWebServicesForLru(
+                    knownGenerating = knownGenerating,
+                    freshObservations = validatedObservations,
+                    invalidatedServices = invalidatedServices
+                )
             )
         }
 
@@ -2080,8 +2104,9 @@ internal fun webChatActivityStatusAfterFreshLruProbe(
 
 internal fun protectedWebServicesForLru(
     knownGenerating: Set<WebAiService>,
-    freshObservations: Map<WebAiService, WebChatGenerationObservation>
-): Set<WebAiService> = knownGenerating.toMutableSet().apply {
+    freshObservations: Map<WebAiService, WebChatGenerationObservation>,
+    invalidatedServices: Set<WebAiService> = emptySet()
+): Set<WebAiService> = (knownGenerating - invalidatedServices).toMutableSet().apply {
     freshObservations.forEach { (service, observation) ->
         when (observation) {
             WebChatGenerationObservation.GENERATING -> add(service)

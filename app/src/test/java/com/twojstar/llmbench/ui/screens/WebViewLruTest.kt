@@ -61,6 +61,27 @@ class WebViewLruTest {
     }
 
     @Test
+    fun invalidatedProbeCannotDisplaceAnotherLiveGeneration() {
+        val protected = protectedWebServicesForLru(
+            knownGenerating = setOf(WebAiService.CLAUDE, WebAiService.CHATGPT),
+            freshObservations = mapOf(
+                WebAiService.CLAUDE to WebChatGenerationObservation.UNKNOWN,
+                WebAiService.CHATGPT to WebChatGenerationObservation.GENERATING
+            ),
+            invalidatedServices = setOf(WebAiService.CLAUDE)
+        )
+        assertEquals(setOf(WebAiService.CHATGPT), protected)
+        assertEquals(
+            listOf(WebAiService.GEMINI, WebAiService.CHATGPT),
+            nextWebViewLru(
+                current = listOf(WebAiService.CLAUDE, WebAiService.CHATGPT),
+                selected = WebAiService.GEMINI,
+                protectedServices = protected
+            )
+        )
+    }
+
+    @Test
     fun freshIdleProbeClearsStaleGeneratingProtection() {
         val protected = protectedWebServicesForLru(
             knownGenerating = setOf(WebAiService.CLAUDE),
