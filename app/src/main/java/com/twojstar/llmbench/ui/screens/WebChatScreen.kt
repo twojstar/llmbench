@@ -89,6 +89,9 @@ private const val WEBVIEW_LOG_TAG = "LlmBenchWeb"
 private const val MAX_LIVE_WEBVIEWS = 2
 private const val DIAGNOSTIC_NONE_YET = "None yet"
 
+internal fun studioPromptForWebChat(renderedInstructions: String): String? =
+    renderedInstructions.takeUnless(String::isBlank)
+
 private data class PendingSharedUploadConfirmation(
     val service: WebAiService,
     val shareId: Long,
@@ -475,13 +478,15 @@ fun WebChatScreen(
 
     val activeWebView = webViewMap[selectedService]
     val isDesktopMode = desktopModes[selectedService] == true
-    val studioPrompt = uiState.renderedInstructions.ifBlank {
-        "You are an expert AI assistant configured via LlmBench."
-    }
+    val studioPrompt = studioPromptForWebChat(uiState.renderedInstructions)
 
     fun copyStudioPrompt(message: String) {
+        val prompt = studioPrompt ?: run {
+            viewModel.showSnackbar("No Studio instructions are active.")
+            return
+        }
         val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        clipboard.setPrimaryClip(ClipData.newPlainText("AI Profile Instructions", studioPrompt))
+        clipboard.setPrimaryClip(ClipData.newPlainText("AI Profile Instructions", prompt))
         viewModel.showSnackbar(message)
     }
 
@@ -513,12 +518,16 @@ fun WebChatScreen(
     }
 
     fun applyStudioPrompt() {
+        val prompt = studioPrompt ?: run {
+            viewModel.showSnackbar("No Studio instructions are active.")
+            return
+        }
         val webView = activeWebView
         if (webView == null) {
             copyStudioPrompt("Provider is not ready yet; Studio instructions copied instead.")
             return
         }
-        applyStudioPromptToFocusedEditor(webView, selectedService, studioPrompt) { result ->
+        applyStudioPromptToFocusedEditor(webView, selectedService, prompt) { result ->
             when (result) {
                 StudioPromptApplyResult.INSERTED ->
                     viewModel.showSnackbar("Studio instructions inserted into ${selectedService.shortName}.")
@@ -1000,7 +1009,7 @@ fun WebChatScreen(
                             .heightIn(max = 180.dp)
                     ) {
                         Text(
-                            text = studioPrompt,
+                            text = studioPrompt ?: "No Studio instructions are active. Configure a profile in Studio first.",
                             style = MaterialTheme.typography.bodySmall,
                             fontSize = 11.sp,
                             modifier = Modifier.padding(10.dp)
@@ -1013,6 +1022,7 @@ fun WebChatScreen(
                             showPromptHelperDialog = false
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = AccentCyan),
+                        enabled = studioPrompt != null,
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Icon(Icons.Default.Tune, contentDescription = null, modifier = Modifier.size(16.dp))
@@ -1025,6 +1035,7 @@ fun WebChatScreen(
                             copyStudioPrompt("Copied Studio instructions to clipboard.")
                             showPromptHelperDialog = false
                         },
+                        enabled = studioPrompt != null,
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))

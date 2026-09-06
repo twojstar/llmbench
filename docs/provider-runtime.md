@@ -1,6 +1,12 @@
 # Provider runtime notes
 
-This document tracks the native/API chat runtime, provider-specific constraints and API-level TODOs. The WebView provider matrix stays in the main README.
+This document tracks provider runtime constraints and technical TODOs. The WebView provider matrix stays in the main README.
+
+## Product priority
+
+LlmBench is account-backed web chat first. Work that improves the normal ChatGPT, Claude, Gemini, DeepSeek, Kimi, Vibe and other provider web experiences takes priority over adding more API-key-only surfaces. Native/API chat remains useful for compare, diagnostics and provider experiments, but it is the secondary path when priorities compete.
+
+For WebViews, prefer verified provider behavior over speculative DOM hooks: keep session/login handling provider-owned, preserve uploads and focused-composer insertion, and add activity selectors only after the provider surface is verified.
 
 ## Current shape
 
@@ -68,6 +74,14 @@ Thinking configuration is model-family-specific. Prefer capability metadata over
 ### Gateways
 
 OpenRouter and other OpenAI-compatible gateways may return the model actually used. LlmBench captures that response metadata when present and falls back to the requested model/route otherwise, so aliases such as `openrouter/free` can show the actual responder.
+
+## Web/account-chat TODO
+
+- [x] Never invent a fallback Studio prompt when no rendered instructions are active.
+- [ ] Verify embedded sign-in and file upload for Qwen, Copilot, Z.ai, Grok, Character.AI, Venice and Meta AI.
+- [ ] Add generation/unread tracking for newer web providers only after stable provider-scoped controls are verified.
+- [ ] Keep WebView memory/LRU behavior responsive as the provider list grows without clearing provider-owned sessions.
+- [ ] Continue provider-specific mobile performance tweaks where they are measurable and safely scoped.
 
 ## API/runtime TODO
 
