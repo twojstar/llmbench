@@ -35,6 +35,9 @@ object TextInspector {
     private const val MAX_BASE64_DECODE_CHARS = 65_536
     private const val MAX_VARIATION_PREVIEW_BYTES = 512
     private const val MAX_TAG_PREVIEW_CHARS = 512
+    private const val KIND_MARKER_CARRIER = "marker-carrier"
+    private const val BIDI_ORDER_DETAIL = "Bidi control can make source render in a misleading order."
+    private const val INVISIBLE_FORMATTING_DETAIL = "Invisible formatting character."
 
     private data class RawFinding(
         val severity: TextFindingSeverity,
@@ -51,6 +54,22 @@ object TextInspector {
         val detail: String
     )
 
+    private data class MixedScriptTokenState(
+        var start: Int = -1,
+        var end: Int = -1,
+        var latin: Boolean = false,
+        var cyrillic: Boolean = false,
+        var greek: Boolean = false
+    ) {
+        fun reset() {
+            start = -1
+            end = -1
+            latin = false
+            cyrillic = false
+            greek = false
+        }
+    }
+
     private val specialCharacters = buildMap {
         put(0x00AD, SpecialCharacter(TextFindingSeverity.MEDIUM, "Soft hyphen", "Invisible discretionary hyphen."))
         put(0x034F, SpecialCharacter(TextFindingSeverity.MEDIUM, "Combining grapheme joiner", "Invisible combining control."))
@@ -60,16 +79,16 @@ object TextInspector {
         put(0x200D, SpecialCharacter(TextFindingSeverity.LOW, "Zero-width joiner", "Used legitimately in scripts and emoji; review unexpected use."))
         put(0x200E, SpecialCharacter(TextFindingSeverity.MEDIUM, "Left-to-right mark", "Invisible bidirectional text mark."))
         put(0x200F, SpecialCharacter(TextFindingSeverity.MEDIUM, "Right-to-left mark", "Invisible bidirectional text mark."))
-        put(0x202A, SpecialCharacter(TextFindingSeverity.HIGH, "Left-to-right embedding", "Bidi control can make source render in a misleading order."))
-        put(0x202B, SpecialCharacter(TextFindingSeverity.HIGH, "Right-to-left embedding", "Bidi control can make source render in a misleading order."))
+        put(0x202A, SpecialCharacter(TextFindingSeverity.HIGH, "Left-to-right embedding", BIDI_ORDER_DETAIL))
+        put(0x202B, SpecialCharacter(TextFindingSeverity.HIGH, "Right-to-left embedding", BIDI_ORDER_DETAIL))
         put(0x202C, SpecialCharacter(TextFindingSeverity.HIGH, "Pop directional formatting", "Bidi control terminator."))
-        put(0x202D, SpecialCharacter(TextFindingSeverity.HIGH, "Left-to-right override", "Bidi override can make source render in a misleading order."))
-        put(0x202E, SpecialCharacter(TextFindingSeverity.HIGH, "Right-to-left override", "Bidi override can make source render in a misleading order."))
-        put(0x2060, SpecialCharacter(TextFindingSeverity.MEDIUM, "Word joiner", "Invisible formatting character."))
-        put(0x2061, SpecialCharacter(TextFindingSeverity.MEDIUM, "Function application", "Invisible formatting character."))
-        put(0x2062, SpecialCharacter(TextFindingSeverity.MEDIUM, "Invisible times", "Invisible formatting character."))
-        put(0x2063, SpecialCharacter(TextFindingSeverity.MEDIUM, "Invisible separator", "Invisible formatting character."))
-        put(0x2064, SpecialCharacter(TextFindingSeverity.MEDIUM, "Invisible plus", "Invisible formatting character."))
+        put(0x202D, SpecialCharacter(TextFindingSeverity.HIGH, "Left-to-right override", BIDI_ORDER_DETAIL))
+        put(0x202E, SpecialCharacter(TextFindingSeverity.HIGH, "Right-to-left override", BIDI_ORDER_DETAIL))
+        put(0x2060, SpecialCharacter(TextFindingSeverity.MEDIUM, "Word joiner", INVISIBLE_FORMATTING_DETAIL))
+        put(0x2061, SpecialCharacter(TextFindingSeverity.MEDIUM, "Function application", INVISIBLE_FORMATTING_DETAIL))
+        put(0x2062, SpecialCharacter(TextFindingSeverity.MEDIUM, "Invisible times", INVISIBLE_FORMATTING_DETAIL))
+        put(0x2063, SpecialCharacter(TextFindingSeverity.MEDIUM, "Invisible separator", INVISIBLE_FORMATTING_DETAIL))
+        put(0x2064, SpecialCharacter(TextFindingSeverity.MEDIUM, "Invisible plus", INVISIBLE_FORMATTING_DETAIL))
         put(0x2066, SpecialCharacter(TextFindingSeverity.HIGH, "Left-to-right isolate", "Bidi isolation control can conceal source ordering."))
         put(0x2067, SpecialCharacter(TextFindingSeverity.HIGH, "Right-to-left isolate", "Bidi isolation control can conceal source ordering."))
         put(0x2068, SpecialCharacter(TextFindingSeverity.HIGH, "First-strong isolate", "Bidi isolation control can conceal source ordering."))
@@ -164,7 +183,7 @@ object TextInspector {
                 add(
                     RawFinding(
                         TextFindingSeverity.MEDIUM,
-                        "marker-carrier",
+                        KIND_MARKER_CARRIER,
                         "Variation-selector sequence",
                         "$variationCount consecutive variation selectors. Decoded payload: $preview",
                         variationStart,
@@ -224,7 +243,7 @@ object TextInspector {
                     isPrivateUse(codePoint) -> add(
                         RawFinding(
                             TextFindingSeverity.LOW,
-                            "marker-carrier",
+                            KIND_MARKER_CARRIER,
                             "Private-use character",
                             "${codePointLabel(codePoint)} has no standardized meaning and can carry application-specific metadata.",
                             offset,
@@ -268,7 +287,7 @@ object TextInspector {
             add(
                 RawFinding(
                     TextFindingSeverity.HIGH,
-                    "marker-carrier",
+                    KIND_MARKER_CARRIER,
                     "Unicode tag sequence",
                     detail,
                     start,
@@ -279,51 +298,57 @@ object TextInspector {
     }
 
     private fun scanMixedScripts(text: String, add: (RawFinding) -> Unit) {
+        val state = MixedScriptTokenState()
         var offset = 0
-        var tokenStart = -1
-        var tokenEnd = -1
-        var latin = false
-        var cyrillic = false
-        var greek = false
-
-        fun flush() {
-            if (tokenStart >= 0 && tokenEnd - tokenStart >= 3 && latin && (cyrillic || greek)) {
-                val preview = text.substring(tokenStart, tokenEnd).take(144)
-                add(
-                    RawFinding(
-                        TextFindingSeverity.MEDIUM,
-                        "confusable",
-                        "Mixed-script token",
-                        "Latin mixed with Cyrillic or Greek can create look-alike identifiers or links: ${quotedPreview(preview)}.",
-                        tokenStart,
-                        tokenEnd - tokenStart
-                    )
-                )
-            }
-            tokenStart = -1
-            tokenEnd = -1
-            latin = false
-            cyrillic = false
-            greek = false
-        }
-
         while (offset < text.length) {
             val (codePoint, width) = codePointAt(text, offset)
-            val tokenChar = isLatin(codePoint) || isCyrillic(codePoint) || isGreek(codePoint) ||
-                codePoint in '0'.code..'9'.code || codePoint == '_'.code || codePoint == '-'.code
-            if (!tokenChar) {
-                flush()
-                offset += width
-                continue
+            if (isMixedTokenCharacter(codePoint)) {
+                updateMixedScriptToken(state, codePoint, offset, width)
+            } else {
+                flushMixedScriptToken(text, state, add)
             }
-            if (tokenStart < 0) tokenStart = offset
-            tokenEnd = offset + width
-            latin = latin || isLatin(codePoint)
-            cyrillic = cyrillic || isCyrillic(codePoint)
-            greek = greek || isGreek(codePoint)
             offset += width
         }
-        flush()
+        flushMixedScriptToken(text, state, add)
+    }
+
+    private fun isMixedTokenCharacter(codePoint: Int): Boolean =
+        isLatin(codePoint) || isCyrillic(codePoint) || isGreek(codePoint) ||
+            codePoint in '0'.code..'9'.code || codePoint == '_'.code || codePoint == '-'.code
+
+    private fun updateMixedScriptToken(
+        state: MixedScriptTokenState,
+        codePoint: Int,
+        offset: Int,
+        width: Int
+    ) {
+        if (state.start < 0) state.start = offset
+        state.end = offset + width
+        state.latin = state.latin || isLatin(codePoint)
+        state.cyrillic = state.cyrillic || isCyrillic(codePoint)
+        state.greek = state.greek || isGreek(codePoint)
+    }
+
+    private fun flushMixedScriptToken(
+        text: String,
+        state: MixedScriptTokenState,
+        add: (RawFinding) -> Unit
+    ) {
+        val isSuspicious = state.start >= 0 && state.end - state.start >= 3 && state.latin && (state.cyrillic || state.greek)
+        if (isSuspicious) {
+            val preview = text.substring(state.start, state.end).take(144)
+            add(
+                RawFinding(
+                    TextFindingSeverity.MEDIUM,
+                    "confusable",
+                    "Mixed-script token",
+                    "Latin mixed with Cyrillic or Greek can create look-alike identifiers or links: ${quotedPreview(preview)}.",
+                    state.start,
+                    state.end - state.start
+                )
+            )
+        }
+        state.reset()
     }
 
     private fun scanPromptInjection(text: String, add: (RawFinding) -> Unit) {
@@ -377,7 +402,7 @@ object TextInspector {
                 add(
                     RawFinding(
                         TextFindingSeverity.MEDIUM,
-                        "marker-carrier",
+                        KIND_MARKER_CARRIER,
                         "Large Base64 carrier",
                         "Encoded run is $length characters; hidden content may exist inside.",
                         start,
@@ -449,7 +474,21 @@ object TextInspector {
 
     private fun makeLineStarts(text: String): IntArray {
         val starts = mutableListOf(0)
-        text.forEachIndexed { index, char -> if (char == '\n') starts += index + 1 }
+        var index = 0
+        while (index < text.length) {
+            when (text[index]) {
+                '\r' -> {
+                    val isCrLf = index + 1 < text.length && text[index + 1] == '\n'
+                    starts += index + if (isCrLf) 2 else 1
+                    index += if (isCrLf) 2 else 1
+                }
+                '\n' -> {
+                    starts += index + 1
+                    index += 1
+                }
+                else -> index += 1
+            }
+        }
         return starts.toIntArray()
     }
 
