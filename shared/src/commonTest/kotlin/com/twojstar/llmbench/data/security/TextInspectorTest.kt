@@ -116,7 +116,8 @@ class TextInspectorTest {
         val finding = result.findings.first { it.label == MIXED_SCRIPT_LABEL }
 
         assertEquals(token.length, finding.length)
-        assertTrue(finding.detail.length < 400)
+        assertTrue(finding.detail.contains("aа" + "x".repeat(142)))
+        assertFalse(finding.detail.contains("aа" + "x".repeat(143)))
     }
 
     @Test
