@@ -49,6 +49,7 @@ private const val JSON_SYSTEM_KEY = "system"
 private const val JSON_MESSAGES_KEY = "messages"
 private const val JSON_MAX_TOKENS_KEY = "max_tokens"
 private const val JSON_STORE_KEY = "store"
+private const val JSON_STREAM_KEY = "stream"
 private const val JSON_INSTRUCTIONS_KEY = "instructions"
 private const val JSON_MEDIA_TYPE = "application/json"
 private const val HEADER_AUTHORIZATION = "Authorization"
@@ -499,9 +500,8 @@ class AiChatService {
             )
             val reported = parseClaudeModelMaxTokens(responseBody)
             reported?.also { claudeMaxTokensByModel[model] = it } ?: CLAUDE_MAX_TOKENS_COMPAT_FALLBACK
-        } catch (e: CancellationException) {
-            throw e
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
             CLAUDE_MAX_TOKENS_COMPAT_FALLBACK
         }
     }
@@ -515,7 +515,7 @@ class AiChatService {
     ): JsonObject = buildJsonObject {
         put(JSON_MODEL_KEY, model)
         put(JSON_MAX_TOKENS_KEY, maxTokens)
-        if (stream) put("stream", true)
+        if (stream) put(JSON_STREAM_KEY, true)
         if (!systemInstruction.isNullOrBlank()) put(JSON_SYSTEM_KEY, systemInstruction)
         put(JSON_MESSAGES_KEY, messages)
     }
@@ -634,7 +634,7 @@ class AiChatService {
             put(JSON_MODEL_KEY, model)
             put(JSON_INPUT_KEY, buildOpenAiResponseInput(prompt, conversationHistory, systemInstruction))
             put(JSON_STORE_KEY, false)
-            put("stream", true)
+            put(JSON_STREAM_KEY, true)
             if (!systemInstruction.isNullOrBlank()) put(JSON_INSTRUCTIONS_KEY, systemInstruction)
         }
         val request = Request.Builder()
@@ -916,7 +916,7 @@ class AiChatService {
             put(JSON_MESSAGES_KEY, buildOpenAiCompatibleMessages(
                 prompt, systemInstruction, conversationHistory, provider
             ))
-            put("stream", true)
+            put(JSON_STREAM_KEY, true)
         }
         val requestBuilder = Request.Builder().url(config.endpointUrl)
             .addHeader(HEADER_AUTHORIZATION, bearerToken(apiKey))
