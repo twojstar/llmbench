@@ -56,9 +56,12 @@ class TextInspectorTest {
     }
 
     @Test
-    fun prioritizesHighSeverityFindingsForReview() {
-        val result = TextInspector.inspect("\u200B low first, then \u202E high")
+    fun retainsAndPrioritizesHighSeverityAfterFindingCap() {
+        val result = TextInspector.inspect("\u200B".repeat(500) + "\u202E")
 
+        assertEquals(501, result.detectedCount)
+        assertEquals(500, result.findings.size)
+        assertTrue(result.truncated)
         assertEquals(TextFindingSeverity.HIGH, result.findings.first().severity)
         assertEquals("Right-to-left override", result.findings.first().label)
     }
