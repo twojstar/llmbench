@@ -2,6 +2,8 @@ package com.twojstar.llmbench.ui.screens
 
 import android.view.View
 import com.twojstar.llmbench.data.model.WebAiService
+import com.twojstar.llmbench.data.model.WebChatActivityStatus
+import com.twojstar.llmbench.data.model.WebChatGenerationObservation
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -31,6 +33,115 @@ class WebViewLruTest {
         val revisit = nextWebViewLru(eviction, WebAiService.CHATGPT)
         assertEquals(listOf(WebAiService.CHATGPT, WebAiService.GEMINI), revisit)
     }
+    @Test
+    fun keepsGeneratingProviderAheadOfOrdinaryRecentProvider() {
+        val next = nextWebViewLru(
+            current = listOf(WebAiService.CHATGPT, WebAiService.CLAUDE),
+            selected = WebAiService.GEMINI,
+            protectedServices = setOf(WebAiService.CLAUDE)
+        )
+        assertEquals(listOf(WebAiService.GEMINI, WebAiService.CLAUDE), next)
+    }
+
+    @Test
+    fun freshGenerationProbeProtectsResponseBeforeNativePollCatchesUp() {
+        val protected = protectedWebServicesForLru(
+            knownGenerating = emptySet(),
+            freshObservations = mapOf(
+                WebAiService.CLAUDE to WebChatGenerationObservation.GENERATING,
+                WebAiService.CHATGPT to WebChatGenerationObservation.IDLE
+            )
+        )
+        val next = nextWebViewLru(
+            current = listOf(WebAiService.CHATGPT, WebAiService.CLAUDE),
+            selected = WebAiService.GEMINI,
+            protectedServices = protected
+        )
+        assertEquals(listOf(WebAiService.GEMINI, WebAiService.CLAUDE), next)
+    }
+
+    @Test
+    fun freshIdleProbeClearsStaleGeneratingProtection() {
+        val protected = protectedWebServicesForLru(
+            knownGenerating = setOf(WebAiService.CLAUDE),
+            freshObservations = mapOf(
+                WebAiService.CLAUDE to WebChatGenerationObservation.IDLE
+            )
+        )
+        assertEquals(emptySet<WebAiService>(), protected)
+    }
+
+    @Test
+    fun freshCompletionBecomesUnreadBeforeEviction() {
+        assertEquals(
+            WebChatActivityStatus.UNREAD,
+            webChatActivityStatusAfterFreshLruProbe(
+                previous = WebChatActivityStatus.GENERATING,
+                observation = WebChatGenerationObservation.COMPLETED,
+                observedService = WebAiService.CLAUDE,
+                activationTarget = WebAiService.GEMINI
+            )
+        )
+    }
+
+    @Test
+    fun unknownFreshProbePreservesKnownGeneratingStatus() {
+        assertEquals(
+            WebChatActivityStatus.GENERATING,
+            webChatActivityStatusAfterFreshLruProbe(
+                previous = WebChatActivityStatus.GENERATING,
+                observation = WebChatGenerationObservation.UNKNOWN,
+                observedService = WebAiService.CLAUDE,
+                activationTarget = WebAiService.GEMINI
+            )
+        )
+    }
+
+    @Test
+    fun completionOnActivationTargetStaysRead() {
+        assertEquals(
+            WebChatActivityStatus.IDLE,
+            webChatActivityStatusAfterFreshLruProbe(
+                previous = WebChatActivityStatus.GENERATING,
+                observation = WebChatGenerationObservation.COMPLETED,
+                observedService = WebAiService.GEMINI,
+                activationTarget = WebAiService.GEMINI
+            )
+        )
+    }
+
+    @Test
+    fun generationProbeRejectsNavigatedOrReplacedDocument() {
+        val stableChatUrl = "https://chatgpt.com/c/123"
+        assertEquals(
+            true,
+            webGenerationProbeDocumentMatches(
+                expectedRevision = 4,
+                currentRevision = 4,
+                expectedUrl = "https://chatgpt.com/c/123#first",
+                currentUrl = "https://chatgpt.com/c/123#second"
+            )
+        )
+        assertEquals(
+            false,
+            webGenerationProbeDocumentMatches(
+                expectedRevision = 4,
+                currentRevision = 5,
+                expectedUrl = stableChatUrl,
+                currentUrl = stableChatUrl
+            )
+        )
+        assertEquals(
+            false,
+            webGenerationProbeDocumentMatches(
+                expectedRevision = 4,
+                currentRevision = 4,
+                expectedUrl = stableChatUrl,
+                currentUrl = "https://chatgpt.com/c/456"
+            )
+        )
+    }
+
     @Test
     fun hidesInactiveProviderWebViewsAtTheViewLevel() {
         assertEquals(View.VISIBLE, providerWebViewVisibility(isCurrentService = true))
