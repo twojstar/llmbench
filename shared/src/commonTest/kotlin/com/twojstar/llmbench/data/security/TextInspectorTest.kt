@@ -55,6 +55,14 @@ class TextInspectorTest {
     }
 
     @Test
+    fun prioritizesHighSeverityFindingsForReview() {
+        val result = TextInspector.inspect("\u200B low first, then \u202E high")
+
+        assertEquals(TextFindingSeverity.HIGH, result.findings.first().severity)
+        assertEquals("Right-to-left override", result.findings.first().label)
+    }
+
+    @Test
     fun detectsBidiOverrideAsHighSeverity() {
         val result = TextInspector.inspect("safe \u202Etxt")
         val finding = result.findings.first { it.label == "Right-to-left override" }
