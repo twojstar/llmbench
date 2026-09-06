@@ -444,19 +444,13 @@ fun WebChatScreen(
         updateLiveServices(nextWebViewLru(liveServices, service, protectedServices))
     }
 
-    fun activateService(service: WebAiService) {
-        val currentServices = liveServices
-        val knownGenerating = activityStatuses
-            .filterValues { it == WebChatActivityStatus.GENERATING }
-            .keys
-            .toSet()
-        if (service in currentServices || currentServices.size < MAX_LIVE_WEBVIEWS) {
-            livePoolDecisionRequestId++
-            finishActivateService(service, knownGenerating)
-            return
-        }
+    fun currentGeneratingServices(): Set<WebAiService> = activityStatuses
+        .filterValues { it == WebChatActivityStatus.GENERATING }
+        .keys
+        .toSet()
 
-        val probeTargets = currentServices.mapNotNull { candidate ->
+    fun generationProbeTargets(services: List<WebAiService>): List<WebGenerationProbeTarget> =
+        services.mapNotNull { candidate ->
             val webView = webViewMap[candidate] ?: return@mapNotNull null
             if (!providerGenerationTrackingSupported(candidate)) return@mapNotNull null
             WebGenerationProbeTarget(
@@ -466,12 +460,20 @@ fun WebChatScreen(
                 url = webView.url
             )
         }
-        if (probeTargets.isEmpty()) {
-            livePoolDecisionRequestId++
-            finishActivateService(service, knownGenerating)
-            return
-        }
 
+    fun activateWithoutProbe(
+        service: WebAiService,
+        knownGenerating: Set<WebAiService>
+    ) {
+        livePoolDecisionRequestId++
+        finishActivateService(service, knownGenerating)
+    }
+
+    fun probeBeforeActivatingService(
+        service: WebAiService,
+        knownGenerating: Set<WebAiService>,
+        probeTargets: List<WebGenerationProbeTarget>
+    ) {
         val requestId = ++livePoolDecisionRequestId
         val observations = mutableMapOf<WebAiService, WebChatGenerationObservation>()
         var remaining = probeTargets.size
@@ -497,6 +499,7 @@ fun WebChatScreen(
             val candidate = target.service
             val webView = target.webView
             var settled = false
+
             fun settleProbe(observation: WebChatGenerationObservation) {
                 if (requestId != livePoolDecisionRequestId || settled) return
                 settled = true
@@ -526,6 +529,23 @@ fun WebChatScreen(
                 onResult = ::settleProbe
             )
         }
+    }
+
+    fun activateService(service: WebAiService) {
+        val currentServices = liveServices
+        val knownGenerating = currentGeneratingServices()
+        if (service in currentServices || currentServices.size < MAX_LIVE_WEBVIEWS) {
+            activateWithoutProbe(service, knownGenerating)
+            return
+        }
+
+        val probeTargets = generationProbeTargets(currentServices)
+        if (probeTargets.isEmpty()) {
+            activateWithoutProbe(service, knownGenerating)
+            return
+        }
+
+        probeBeforeActivatingService(service, knownGenerating, probeTargets)
     }
 
     fun evictInactiveWebViews() {
