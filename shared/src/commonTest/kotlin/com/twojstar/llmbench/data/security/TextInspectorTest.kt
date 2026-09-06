@@ -6,6 +6,10 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class TextInspectorTest {
+    private companion object {
+        const val ZERO_WIDTH_SPACE_LABEL = "Zero-width space"
+    }
+
     @Test
     fun cleanTextHasNoFindings() {
         val result = TextInspector.inspect("Normal markdown\n- one\n- two")
@@ -16,7 +20,7 @@ class TextInspectorTest {
     @Test
     fun locatesZeroWidthSpace() {
         val result = TextInspector.inspect("safe\nxx\u200Btail")
-        val finding = result.findings.first { it.label == "Zero-width space" }
+        val finding = result.findings.first { it.label == ZERO_WIDTH_SPACE_LABEL }
 
         assertEquals(TextFindingSeverity.MEDIUM, finding.severity)
         assertEquals(2, finding.line)
@@ -26,7 +30,7 @@ class TextInspectorTest {
     @Test
     fun locatesFindingAfterCarriageReturnOnlyLineEnding() {
         val result = TextInspector.inspect("safe\rxx\u200Btail")
-        val finding = result.findings.first { it.label == "Zero-width space" }
+        val finding = result.findings.first { it.label == ZERO_WIDTH_SPACE_LABEL }
 
         assertEquals(2, finding.line)
         assertEquals(3, finding.column)
@@ -35,7 +39,7 @@ class TextInspectorTest {
     @Test
     fun locatesFindingAfterUnicodeLineSeparator() {
         val result = TextInspector.inspect("safe\u2028xx\u200Btail")
-        val finding = result.findings.first { it.label == "Zero-width space" }
+        val finding = result.findings.first { it.label == ZERO_WIDTH_SPACE_LABEL }
 
         assertEquals(2, finding.line)
         assertEquals(3, finding.column)
