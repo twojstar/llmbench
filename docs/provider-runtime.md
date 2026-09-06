@@ -78,14 +78,18 @@ OpenRouter and other OpenAI-compatible gateways may return the model actually us
 ## Web/account-chat TODO
 
 - [x] Never invent a fallback Studio prompt when no rendered instructions are active.
-- [ ] Verify embedded sign-in and file upload for Qwen, Copilot, Z.ai, Grok, Character.AI, Venice and Meta AI.
-- [ ] Add generation/unread tracking for newer web providers only after stable provider-scoped controls are verified.
 - [x] Keep WebView memory/LRU behavior responsive as the provider list grows without clearing provider-owned sessions; use a fresh non-consuming in-page generation probe before destructive LRU eviction so a response that started between native polls stays live when possible.
 - [x] Throttle native activity polling for inactive live WebViews while retaining in-page completion latches.
 - [x] Skip periodic native activity probes entirely for web providers without verified tracking selectors.
 - [x] Keep the six mature account-backed chat integrations first in provider navigation while retaining every web provider under More chats.
 - [x] Persist the last selected web chat and favorite chats; starred providers move to a Favorites section in provider pickers.
+- [ ] Recover individual WebViews after renderer-process termination without clearing provider-owned sessions.
 - [ ] Continue provider-specific mobile performance tweaks where they are measurable and safely scoped.
+
+### Manual/account verification (later)
+
+- [ ] Verify embedded sign-in and file upload for Qwen, Copilot, Z.ai, Grok, Character.AI, Venice and Meta AI.
+- [ ] Add generation/unread tracking for newer web providers only after stable provider-scoped controls are verified.
 
 ## API/runtime TODO
 
