@@ -25,6 +25,14 @@ class WebRendererRecoveryTest {
     }
 
     @Test
+    fun lateGeneratingOrUnknownObservationRevokesConfirmedInactivity() {
+        assertFalse(rendererInactivityConfirmedAfterObservation(true, WebChatGenerationObservation.GENERATING))
+        assertFalse(rendererInactivityConfirmedAfterObservation(true, WebChatGenerationObservation.UNKNOWN))
+        assertTrue(rendererInactivityConfirmedAfterObservation(true, WebChatGenerationObservation.IDLE))
+        assertFalse(rendererInactivityConfirmedAfterObservation(false, WebChatGenerationObservation.IDLE))
+    }
+
+    @Test
     fun lowMemoryRendererTerminationRecreatesLastUrl() {
         assertEquals(
             WebRendererRecoveryAction.RECREATE_LAST_URL,

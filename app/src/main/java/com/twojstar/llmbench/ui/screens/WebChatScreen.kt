@@ -149,6 +149,17 @@ internal fun rendererPriorityWaivedWhenNotVisible(
     inactivityConfirmed: Boolean
 ): Boolean = !isSelected && trackingSupported && inactivityConfirmed
 
+internal fun rendererInactivityConfirmedAfterObservation(
+    wasConfirmed: Boolean,
+    observation: WebChatGenerationObservation
+): Boolean = when (observation) {
+    WebChatGenerationObservation.GENERATING,
+    WebChatGenerationObservation.UNKNOWN -> false
+    WebChatGenerationObservation.IDLE,
+    WebChatGenerationObservation.COMPLETED,
+    WebChatGenerationObservation.COMPLETED_WHILE_SELECTED -> wasConfirmed
+}
+
 internal fun webServicesForActivation(
     current: List<WebAiService>,
     activationTarget: WebAiService,
@@ -550,6 +561,10 @@ fun WebChatScreen(
                 hasCurrentWebView = mappedWebView != null
             )
             if (!shouldApply) return@probeProviderGenerationActivity
+            rendererInactivityConfirmed[service] = rendererInactivityConfirmedAfterObservation(
+                wasConfirmed = rendererInactivityConfirmed[service] == true,
+                observation = observation
+            )
             val previous = activityStatuses[service] ?: WebChatActivityStatus.IDLE
             activityStatuses[service] = nextObservedWebChatActivityStatus(
                 previous = previous,
