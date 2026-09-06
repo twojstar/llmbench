@@ -126,6 +126,7 @@ Backends are optional, not the default. If a feature truly needs one, prefer a t
 - [x] show generating and unread response status on ChatGPT, Claude, Gemini, DeepSeek, Kimi and Vibe web tabs
 - [x] add Qwen, Microsoft Copilot, Z.ai, Grok, Character.AI, Venice and Meta AI account-backed WebView entries
 - [ ] verify embedded sign-in, embedded upload flows and provider-specific generation activity probes for Qwen, Copilot, Z.ai, Grok, Character.AI, Venice and Meta AI
+- [ ] add identity-assisted provider onboarding with a preferred Google/GitHub/Microsoft sign-in path, verified provider capabilities and browser-backed auth where needed, without a mandatory LlmBench account or cookie/token copying
 - [ ] add a local Markdown prompt vault with edit/import/export and chat-to-`.md` workflows
 - [ ] add manually editable/importable `SKILL.md` assets with safe capability gating
 - [ ] bring Docbench's format validation/repair, EOL normalization, local tokenizer and hidden-text/prompt-smuggling inspector into prompt/file tooling
