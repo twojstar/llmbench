@@ -100,7 +100,7 @@ OpenRouter and other OpenAI-compatible gateways may return the model actually us
 - [ ] Preserve OpenAI stateless reasoning items while keeping `store=false`, or document a deliberate move to stateful Responses.
 - [ ] Add Claude thinking/effort only through model-aware capabilities; preserve opaque thinking blocks when enabled.
 - [x] Record and display the actual routed model returned by OpenRouter when available.
-- [x] Resolve Claude `max_tokens` from the Anthropic Models API per model and cache successful metadata; keep the old 2048 value only as a compatibility fallback when model metadata is unavailable.
+- [x] Resolve Claude `max_tokens` from the Anthropic Models API per model with a short independent lookup budget; cache either the reported value or the old 2048 compatibility fallback so metadata outages do not repeatedly delay generation.
 - [x] Add a provider-aware Prompt Studio preview showing effective instruction placement, history strategy and transport metadata without exposing API keys or hidden reasoning state.
 - [ ] Parse provider usage/token metadata so comparisons can include latency and token/cost information when the API returns it.
 - [ ] Keep transport/SSE/history tests JVM-testable; device testing should be required only for Android/WebView behavior.

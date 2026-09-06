@@ -78,6 +78,12 @@ private const val CLAUDE_MAX_TOKENS_COMPAT_FALLBACK = 2048
 private const val HEADER_ANTHROPIC_API_KEY = "x-api-key"
 private const val HEADER_ANTHROPIC_VERSION = "anthropic-version"
 private const val ANTHROPIC_API_VERSION = "2023-06-01"
+private const val CLAUDE_METADATA_TIMEOUT_SECONDS = 2L
+
+internal fun buildClaudeMetadataHttpClient(baseClient: OkHttpClient): OkHttpClient =
+    baseClient.newBuilder()
+        .callTimeout(CLAUDE_METADATA_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+        .build()
 
 class AiChatService {
 
@@ -117,6 +123,7 @@ class AiChatService {
     private val streamingHttpClient: OkHttpClient = httpClient.newBuilder()
         .readTimeout(0, TimeUnit.MILLISECONDS)
         .build()
+    private val claudeMetadataHttpClient: OkHttpClient = buildClaudeMetadataHttpClient(httpClient)
 
     private val json = Json {
         ignoreUnknownKeys = true
@@ -490,19 +497,23 @@ class AiChatService {
         .get()
         .build()
 
+    internal fun rememberClaudeMaxTokens(model: String, reported: Int?): Int {
+        val resolved = reported?.takeIf { it > 0 } ?: CLAUDE_MAX_TOKENS_COMPAT_FALLBACK
+        return claudeMaxTokensByModel.putIfAbsent(model, resolved) ?: resolved
+    }
+
     private suspend fun resolveClaudeMaxTokens(model: String, apiKey: String): Int {
         claudeMaxTokensByModel[model]?.let { return it }
         return try {
             val request = buildClaudeModelMetadataRequest(model, apiKey)
             val responseBody = executeCancellableJson(
                 request,
-                httpErrorContext = "Anthropic model metadata"
+                httpErrorContext = "Anthropic model metadata",
+                client = claudeMetadataHttpClient
             )
-            val reported = parseClaudeModelMaxTokens(responseBody)
-            reported?.also { claudeMaxTokensByModel[model] = it } ?: CLAUDE_MAX_TOKENS_COMPAT_FALLBACK
-        } catch (e: Exception) {
-            if (e is CancellationException) throw e
-            CLAUDE_MAX_TOKENS_COMPAT_FALLBACK
+            rememberClaudeMaxTokens(model, parseClaudeModelMaxTokens(responseBody))
+        } catch (_: IOException) {
+            rememberClaudeMaxTokens(model, null)
         }
     }
 
@@ -876,9 +887,10 @@ class AiChatService {
     private suspend fun executeCancellableJson(
         request: Request,
         emptyResponseMessage: String = "Empty response from server",
-        httpErrorContext: String? = null
+        httpErrorContext: String? = null,
+        client: OkHttpClient = httpClient
     ): String = suspendCancellableCoroutine { continuation ->
-        val call = httpClient.newCall(request)
+        val call = client.newCall(request)
         continuation.invokeOnCancellation { call.cancel() }
         call.enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) {

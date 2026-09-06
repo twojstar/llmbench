@@ -52,6 +52,18 @@ class AiChatServiceTest {
     }
 
     @Test
+    fun claudeMetadataLookupUsesShortTimeoutAndCachesFallback() {
+        val metadataClient = buildClaudeMetadataHttpClient(okhttp3.OkHttpClient())
+        assertEquals(2_000L, metadataClient.callTimeoutMillis.toLong())
+
+        val service = AiChatService()
+        assertEquals(2048, service.rememberClaudeMaxTokens("claude-outage", null))
+        assertEquals(2048, service.rememberClaudeMaxTokens("claude-outage", 128000))
+        assertEquals(128000, service.rememberClaudeMaxTokens("claude-healthy", 128000))
+        assertEquals(128000, service.rememberClaudeMaxTokens("claude-healthy", null))
+    }
+
+    @Test
     fun claudePayloadUsesResolvedOutputLimitInBufferedAndStreamingModes() {
         val service = AiChatService()
         val messages = Json.parseToJsonElement("""[{"role":"user","content":"hello"}]""").jsonArray
