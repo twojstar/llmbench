@@ -2159,6 +2159,9 @@ private fun createConfiguredWebView(
             ViewGroup.LayoutParams.MATCH_PARENT,
             ViewGroup.LayoutParams.MATCH_PARENT
         )
+        // The selected WebView remains IMPORTANT. Hidden MRU WebViews may drop to
+        // WAIVED under memory pressure; onRenderProcessGone handles recovery.
+        setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, true)
         isClickable = true
         isFocusable = true
         isFocusableInTouchMode = true
