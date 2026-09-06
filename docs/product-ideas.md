@@ -77,7 +77,7 @@ These are Docbench-style capabilities to bring into LlmBench, not changes to Doc
 
 Treat Token Arena as the overlap between Bench tooling and a small experimental Lab: a place to compare how the same intent is represented, tokenized, priced and answered across model/provider families.
 
-- Keep the bundled local `o200k_base` counter as the always-available reference baseline. Label it by encoding and never present it as a universal token count for unrelated model families.
+- Keep the bundled local `o200k_base` counter as the always-available Android reference baseline today. Keep the shared `TokenCounter` contract portable so other clients can add equivalent local backends later. Label every result by encoding and never present `o200k_base` as a universal token count for unrelated model families.
 - Add model/provider-specific counters only when they provide useful signal through an official count API or a lightweight, trustworthy tokenizer. Do not bundle a tokenizer zoo merely to make the comparison table look complete.
 - Distinguish measurement modes clearly: provider-exact count, local exact-for-encoding count, and reference/fallback estimate. Never blend them into one unlabeled number.
 - Compare token count and percentage delta alongside provider-reported input/output/cached/reasoning usage where available, plus cost, latency, response length and LlmBench quality scores.
@@ -85,7 +85,7 @@ Treat Token Arena as the overlap between Bench tooling and a small experimental 
 - Add a **Prompt Tournament** mode that keeps the intent fixed while testing representations such as concise vs verbose, plain text vs Markdown/JSON/YAML, or different natural languages across selected models.
 - Optimize for task success and clarity, not minimum token count alone. A slightly larger structured prompt may be the winner if it improves quality, lowers output cost or avoids another round trip.
 - Make experiments reproducible by recording the model/provider identity, counter backend/encoding, prompt variant and relevant pricing snapshot instead of comparing anonymous numbers that may drift over time.
-- Keep the local baseline fully usable offline and without an LlmBench account. Network-backed provider counting is optional and must not silently upload text merely to obtain a more exact number.
+- Keep the Android local baseline fully usable offline and without an LlmBench account; future platform backends should preserve the same property. Network-backed provider counting is optional and must not silently upload text merely to obtain a more exact number.
 - Use accumulated Arena results to reveal practical family/model tendencies without claiming that tokenization alone explains model reasoning or internal processing.
 
 ## UI/UX architecture and smoothness
