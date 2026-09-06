@@ -7,6 +7,30 @@ import kotlin.test.assertTrue
 
 class ChatModelsTest {
     @Test
+    fun webChatGroupsCoverEveryAccountBackedProviderExactlyOnce() {
+        assertEquals(
+            listOf(
+                WebAiService.CLAUDE,
+                WebAiService.CHATGPT,
+                WebAiService.GEMINI,
+                WebAiService.DEEPSEEK,
+                WebAiService.KIMI,
+                WebAiService.VIBE
+            ),
+            WebAiService.primaryChats
+        )
+        assertTrue(
+            WebAiService.primaryChats.toSet()
+                .intersect(WebAiService.additionalChats.toSet())
+                .isEmpty()
+        )
+        assertEquals(
+            WebAiService.entries.toSet(),
+            (WebAiService.primaryChats + WebAiService.additionalChats).toSet()
+        )
+    }
+
+    @Test
     fun vibeWebProviderUsesCanonicalMistralChatEndpoint() {
         assertEquals("https://chat.mistral.ai", WebAiService.VIBE.url)
         assertEquals("Vibe", WebAiService.VIBE.shortName)

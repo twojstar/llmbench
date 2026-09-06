@@ -82,6 +82,7 @@ OpenRouter and other OpenAI-compatible gateways may return the model actually us
 - [ ] Add generation/unread tracking for newer web providers only after stable provider-scoped controls are verified.
 - [ ] Keep WebView memory/LRU behavior responsive as the provider list grows without clearing provider-owned sessions.
 - [x] Throttle native activity polling for inactive live WebViews while retaining in-page completion latches.
+- [x] Keep the six mature account-backed chat integrations first in provider navigation while retaining every web provider under More chats.
 - [ ] Continue provider-specific mobile performance tweaks where they are measurable and safely scoped.
 
 ## API/runtime TODO

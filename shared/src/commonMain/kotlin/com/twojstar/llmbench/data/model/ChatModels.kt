@@ -119,6 +119,17 @@ enum class WebAiService(
     );
 
     companion object {
+        val primaryChats: List<WebAiService> = listOf(
+            CLAUDE,
+            CHATGPT,
+            GEMINI,
+            DEEPSEEK,
+            KIMI,
+            VIBE
+        )
+
+        val additionalChats: List<WebAiService> = entries.filterNot(primaryChats::contains)
+
         fun fromId(id: String): WebAiService {
             return entries.firstOrNull { it.id.equals(id, ignoreCase = true) } ?: CLAUDE
         }
