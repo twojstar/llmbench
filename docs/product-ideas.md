@@ -82,7 +82,7 @@ Treat Token Arena as the overlap between Bench tooling and a small experimental 
 - Distinguish measurement modes clearly: provider-exact count, local exact-for-encoding count, and reference/fallback estimate. Never blend them into one unlabeled number.
 - Compare token count and percentage delta alongside provider-reported input/output/cached/reasoning usage where available, plus cost, latency, response length and LlmBench quality scores.
 - Record response provenance for every Arena run, including live provider responses, cached/replayed data and local `isSimulated` fallbacks.
-- Exclude simulated/fallback responses from live-provider efficiency rankings by default, or show them in a clearly separate group so they cannot win on fake latency/cost/quality data.
+- Exclude cached/replayed and simulated/fallback responses from live-provider efficiency rankings by default, or show them in clearly separate groups so they cannot win on replayed or synthetic latency/cost/quality data.
 - Derive efficiency views such as quality per 1k input tokens, quality per cost unit and whether extra prompt structure reduces output length, retries or failure rate.
 - Add a **Prompt Tournament** mode that keeps the intent fixed while testing representations such as concise vs verbose, plain text vs Markdown/JSON/YAML, or different natural languages across selected models.
 - Optimize for task success and clarity, not minimum token count alone. A slightly larger structured prompt may be the winner if it improves quality, lowers output cost or avoids another round trip.
