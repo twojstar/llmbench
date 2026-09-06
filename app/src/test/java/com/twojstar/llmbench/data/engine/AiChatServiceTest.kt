@@ -31,12 +31,14 @@ private const val SYSTEM_PROMPT = "system"
 private const val STREAM_HELLO = "hello"
 private const val TEST_STREAM_URL = "https://example.test/stream"
 private const val TEST_EVENT_STREAM_TYPE = "text/event-stream"
+private const val TEST_CLAUDE_MAX_TOKENS = 128000
+private const val TEST_CLAUDE_OUTAGE_MODEL = "claude-outage"
 
 class AiChatServiceTest {
     @Test
     fun parsesClaudeReportedMaxTokensAndRejectsInvalidMetadata() {
         val service = AiChatService()
-        assertEquals(128000, service.parseClaudeModelMaxTokens("""{"max_tokens":128000}"""))
+        assertEquals(TEST_CLAUDE_MAX_TOKENS, service.parseClaudeModelMaxTokens("""{"max_tokens":128000}"""))
         assertEquals(null, service.parseClaudeModelMaxTokens("""{"max_tokens":0}"""))
         assertEquals(null, service.parseClaudeModelMaxTokens("""{"id":"claude-sonnet-5"}"""))
         assertEquals(null, service.parseClaudeModelMaxTokens("not json"))
@@ -57,11 +59,11 @@ class AiChatServiceTest {
         assertEquals(2_000L, metadataClient.callTimeoutMillis.toLong())
 
         val service = AiChatService()
-        assertEquals(2048, service.rememberClaudeMaxTokens("claude-outage", "bad-key", null))
-        assertEquals(2048, service.rememberClaudeMaxTokens("claude-outage", "bad-key", 128000))
-        assertEquals(128000, service.rememberClaudeMaxTokens("claude-outage", "fixed-key", 128000))
-        assertEquals(128000, service.rememberClaudeMaxTokens("claude-healthy", "same-key", 128000))
-        assertEquals(128000, service.rememberClaudeMaxTokens("claude-healthy", "same-key", null))
+        assertEquals(2048, service.rememberClaudeMaxTokens(TEST_CLAUDE_OUTAGE_MODEL, "bad-key", null))
+        assertEquals(2048, service.rememberClaudeMaxTokens(TEST_CLAUDE_OUTAGE_MODEL, "bad-key", TEST_CLAUDE_MAX_TOKENS))
+        assertEquals(128000, service.rememberClaudeMaxTokens(TEST_CLAUDE_OUTAGE_MODEL, "fixed-key", TEST_CLAUDE_MAX_TOKENS))
+        assertEquals(TEST_CLAUDE_MAX_TOKENS, service.rememberClaudeMaxTokens("claude-healthy", "same-key", TEST_CLAUDE_MAX_TOKENS))
+        assertEquals(TEST_CLAUDE_MAX_TOKENS, service.rememberClaudeMaxTokens("claude-healthy", "same-key", null))
     }
 
     @Test
