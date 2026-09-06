@@ -47,7 +47,7 @@ These are Docbench-style capabilities to bring into LlmBench, not changes to Doc
 - Validate the construction/structure of prompt and Markdown formats.
 - Offer safe repair/normalization when the structure is malformed.
 - Detect and normalize EOL conventions instead of letting mixed line endings quietly accumulate.
-- Add a token counter directly to the editing/prompt workflow.
+- Port the proven Docbench token counter into the editing/prompt workflow: use a real bundled tokenizer locally (currently `js-tiktoken` with `o200k_base`), not a character-count estimate; keep lazy loading, encoder reuse and debounced recounting.
 - Keep those tools useful for manually edited prompts, imported `.md`, skills and chat exports.
 
 ## UX patterns worth keeping in mind

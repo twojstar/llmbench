@@ -128,7 +128,7 @@ Backends are optional, not the default. If a feature truly needs one, prefer a t
 - [ ] verify embedded sign-in, embedded upload flows and provider-specific generation activity probes for Qwen, Copilot, Z.ai, Grok, Character.AI, Venice and Meta AI
 - [ ] add a local Markdown prompt vault with edit/import/export and chat-to-`.md` workflows
 - [ ] add manually editable/importable `SKILL.md` assets with safe capability gating
-- [ ] bring Docbench-style format validation/repair, EOL normalization and token counting into prompt/file tooling
+- [ ] bring Docbench's format validation/repair, EOL normalization and built-in local token counter into prompt/file tooling
 - [x] add CI build/lint checks
 - [x] document which providers work fully, partially, or block embedded login
 
