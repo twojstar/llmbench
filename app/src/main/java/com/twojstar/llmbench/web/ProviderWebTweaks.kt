@@ -143,7 +143,7 @@ internal object ProviderWebTweakRegistry {
 
                 const processNode = (node) => {
                     if (!(node instanceof Element)) return;
-                    const candidates = [node, ...node.querySelectorAll('pre, img, nav a[href^="/chat/"], nav li, aside a[href^="/chat/"]')];
+                    const candidates = [node, ...node.querySelectorAll('pre, img, nav a[href^="/chat/"], nav li, aside a[href^="/chat/"], .llmbench-cv-side')];
                     candidates.forEach((candidate) => {
                         if (candidate.matches?.('pre') && !candidate.closest(OVERLAY_SELECTOR)) candidate.classList.add('llmbench-cv-code');
                         if (candidate.matches?.('img')) {
@@ -151,7 +151,10 @@ internal object ProviderWebTweakRegistry {
                             candidate.decoding = 'async';
                             candidate.dataset.llmbenchLazy = '1';
                         }
-                        if (candidate.matches?.(SIDE_SELECTOR)) candidate.classList.toggle('llmbench-cv-side', !isDesktop());
+                        const isSide = candidate.matches?.(SIDE_SELECTOR) === true;
+                        if (isSide || candidate.classList.contains('llmbench-cv-side')) {
+                            candidate.classList.toggle('llmbench-cv-side', isSide && !isDesktop());
+                        }
                     });
                 };
 
