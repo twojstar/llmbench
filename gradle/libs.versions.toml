@@ -13,6 +13,7 @@ room = "2.6.1"
 ksp = "2.1.0-1.0.29"
 coroutines = "1.11.0"
 okhttp = "4.12.0"
+jtokkit = "1.1.0"
 junit = "4.13.2"
 rhino = "1.9.1"
 
@@ -34,6 +35,7 @@ kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-
 kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "coroutines" }
 okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version.ref = "okhttp" }
 okhttp-logging = { group = "com.squareup.okhttp3", name = "logging-interceptor", version.ref = "okhttp" }
+jtokkit = { group = "com.knuddels", name = "jtokkit", version.ref = "jtokkit" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }
 rhino = { group = "org.mozilla", name = "rhino", version.ref = "rhino" }
 
