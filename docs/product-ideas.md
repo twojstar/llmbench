@@ -61,6 +61,45 @@ These are Docbench-style capabilities to bring into LlmBench, not changes to Doc
 - **Streambench companion:** a persistent compact radio/media player that can keep playing while chatting, with station search/favorites/recents and now-playing metadata. Treat playback primarily as app UI, not as a fake model tool; optional chat actions can be layered on later.
 - Let users enable/disable built-in tools globally and, where useful, per chat/provider, with clear capability/permission indicators.
 
+## UI/UX architecture and smoothness
+
+- Before the UI refactor, align the currently pinned Compose BOM/Material 3 dependencies with the then-current stable releases. Use stable Material 3 + Material 3 Adaptive as the baseline instead of inventing parallel breakpoint/navigation systems; keep experimental/alpha-only Expressive APIs optional and isolated until they are needed.
+- Adapt the main shell by width: compact screens keep bottom navigation; medium/expanded screens should prefer a navigation rail or drawer through `NavigationSuiteScaffold` rather than stretching phone chrome.
+- Use a list-detail pattern for locally owned conversations on larger screens: conversation list on the leading pane, active chat in the main pane, and an optional supporting pane for tools/files/provider controls. Preserve pane and scroll state when resizing or rotating.
+- Keep account-backed Web chats immersive on phones, but allow their modal provider drawer to become a persistent rail/drawer on wider layouts.
+- Use Material 3 Expressive selectively for discovery, prominent actions and transitions. Keep repeated chat/message interactions calmer and faster with standard motion instead of animating every surface.
+- The native chat list already uses stable message IDs. Add `contentType` for user/assistant/error/status rows so Lazy layouts can reuse compatible compositions efficiently.
+- Auto-scroll only while the user is already near the latest message. If they scroll upward, never yank them back during streaming; show a compact jump-to-latest/unread control instead.
+- Coalesce streaming text updates to a UI-friendly cadence and keep message rows fed by stable/immutable state so token-by-token updates do not recompose unrelated chrome or old messages.
+- Avoid composition-driven infinite animation for incidental effects when a draw/graphics phase update can do the same job. Keep typing/generating indicators cheap.
+- Replace fixed narrow message widths on expanded screens with adaptive readable widths: do not stretch text edge-to-edge, but do not keep the current phone-sized bubble cap on tablets either.
+- Prefer Material typography over hard-coded tiny essential labels; keep touch targets and Android font-scaling/accessibility behavior intact.
+- Keep edge-to-edge, IME handling and predictive back coherent across chats, sheets, drawers and list-detail panes.
+- Add Macrobenchmark journeys and Baseline Profiles for cold/warm start, opening a chat, provider switching, long-message-list scrolling, returning from a detail pane and active streaming. Judge smoothness from release builds and frame timing, not debug feel.\n- Re-check the current Android guidance at implementation time: Material 3, Material 3 Adaptive, Compose lazy-list performance and Baseline Profile/Macrobenchmark docs are the source of truth rather than version numbers frozen in this backlog.
+
+### UI construction shortlist from the inspected APK batch
+
+- **Google AI Edge Gallery:** strongest structural reference for native-feeling tool/skill management, import flows and capability surfaces.
+- **ChatGPT / Claude:** strongest reference for keeping the main chat surface focused, with secondary capabilities discoverable without permanently crowding the composer.
+- **Kimi:** strongest reference for fitting projects, files, skills and workspace actions into a feature-dense product without turning every action into a top-level tab.
+- **Perplexity:** useful separation of chats/projects/library/artifacts and quick reuse of generated work.
+- **Obsidian:** strongest local-file/source-of-truth ergonomics for create/open/search/edit flows.
+- Treat these as interaction references, not a runtime benchmark; the APK inspection does not justify claiming one app has better frame timing than another.
+## Android widgets and conversation notifications
+
+- Build first-party home-screen widgets with Jetpack Glance and responsive layouts; update them from local state changes rather than aggressive polling.
+- Persist locally owned native/API conversations with stable conversation IDs before exposing message widgets or conversation notifications. The current native chat history lives in ViewModel state and is not durable enough to back a widget across process death/reboot.
+- Offer three configurable widget modes: **Chats** (recent/favorite conversations or provider shortcuts), **Messages** (latest locally known messages across chats), and **Pinned chat** (latest messages/status for one chosen conversation with a direct deep-link back into it).
+- Back collection widgets with `LazyColumn` and stable item IDs so list state survives updates where the platform supports it; resize by showing more or fewer rows rather than scaling text into mush.
+- Treat WebView account providers honestly: if LlmBench does not own their conversation history, the widget may expose provider/chat shortcuts and locally tracked status, but must not periodically scrape remote pages just to manufacture a message list.
+- Make widget rows deep-link directly to the corresponding local conversation/provider. Do not use background activity-launch trampolines.
+- Add privacy controls for widget/notification previews: allow hiding message bodies, model/provider details or all sensitive text while keeping a useful title/status.
+- For locally owned native/API chats, publish proper conversation notifications with `MessagingStyle`, `Person` metadata and long-lived conversation shortcuts so Android can surface them consistently in conversation UI and system widgets.
+- Add `RemoteInput` Direct Reply per conversation with a unique reply `PendingIntent`. Feed the reply through the same native send pipeline, reflect sending/failure state, then update the same notification instead of canceling it so repeated replies remain possible.
+- For account-backed WebView providers, do not pretend background Direct Reply is reliable. Until a provider has a safe supported transport, capture the reply as a staged draft and deep-link into that exact provider/chat for explicit send rather than automating a hidden WebView.
+- Keep a provider capability matrix for notifications/widgets (`messageHistory`, `completionNotification`, `directReply`, `draftReply`, `deepLink`) so UI only promises actions that actually work.
+- Free-form typing does not belong inside a Glance/RemoteViews widget. A pinned-chat widget should open the composer; true inline text entry belongs to notification Direct Reply where Android provides `RemoteInput`.\n- Re-check current Glance, conversation-notification and Direct Reply guidance at implementation time; these platform surfaces evolve independently from ordinary Compose UI.
+
 ## UX patterns worth keeping in mind
 
 - File/library layer: reusable assets should outlive one attachment action.

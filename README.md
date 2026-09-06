@@ -130,6 +130,8 @@ Backends are optional, not the default. If a feature truly needs one, prefer a t
 - [ ] add manually editable/importable `SKILL.md` assets with safe capability gating
 - [ ] bring Docbench's format validation/repair, EOL normalization and built-in local token counter into prompt/file tooling
 - [ ] add first-party Docbench/Codebench tools/plugins for compatible chats, plus a persistent Streambench radio player as first-party companion UI
+- [ ] modernize chat/navigation UX with current stable Material 3 Adaptive, measured Compose performance work and large-screen list-detail layouts
+- [ ] add provider-aware chat/message widgets and notification replies, including real Direct Reply where the transport can safely send in background
 - [x] add CI build/lint checks
 - [x] document which providers work fully, partially, or block embedded login
 
