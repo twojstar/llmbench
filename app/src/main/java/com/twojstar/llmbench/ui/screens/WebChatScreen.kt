@@ -414,7 +414,9 @@ fun WebChatScreen(
         val isCurrentInstance = webViewMap[service] === deadView
         releaseSharedTextClaimFor(deadView)
         if (isCurrentInstance) {
-            livePoolDecisionRequestId++
+            // Renderer loss must not cancel an in-flight provider selection. Existing
+            // probe callbacks/timeouts will settle this dead target as UNKNOWN via
+            // the document-revision and WebView-identity guards below.
             documentRevisions[service] = (documentRevisions[service] ?: 0) + 1
             cancelPendingUploadFor(service)
             activityStatuses[service]?.let { status ->
@@ -535,7 +537,13 @@ fun WebChatScreen(
         activityStatuses[service]?.let { status ->
             activityStatuses[service] = markWebChatActivityRead(status)
         }
-        updateLiveServices(nextWebViewLru(liveServices, service, protectedServices))
+        val crashedServices = rendererCrashServices.filterValues { it }.keys.toSet()
+        val eligibleLiveServices = webServicesForActivation(
+            current = liveServices,
+            activationTarget = service,
+            crashedServices = crashedServices
+        )
+        updateLiveServices(nextWebViewLru(eligibleLiveServices, service, protectedServices))
     }
 
     fun currentGeneratingServices(): Set<WebAiService> = activityStatuses
