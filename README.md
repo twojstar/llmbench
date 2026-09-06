@@ -111,6 +111,8 @@ Technical details for native provider transport, conversation state, Prompt Stud
 
 Backends are optional, not the default. If a feature truly needs one, prefer a tiny stateless service and evaluate Cloudflare, Google Cloud, AWS or Oracle free tiers based on the actual requirement rather than choosing infrastructure first.
 
+**No account wall:** LlmBench itself must remain useful without an LlmBench account, cloud sync or hosted backup. Provider logins/API keys are required only for the providers the user explicitly chooses. Local chats, projects, files, tools, settings, import/export and manual backup/restore stay available locally. Any future LlmBench cloud/sync/integration account is additive and opt-in, never a prerequisite for local features.
+
 ## Near-term roadmap
 
 - [x] remove generated/build-machine files from version control
