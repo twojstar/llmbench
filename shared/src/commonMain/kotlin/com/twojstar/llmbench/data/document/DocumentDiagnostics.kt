@@ -36,13 +36,25 @@ object DocumentDiagnostics {
         val marker: Char,
         val length: Int,
         val line: Int,
-        val column: Int
+        val column: Int,
+        val closingPrefix: String
+    )
+
+    private data class FenceLineContext(
+        val contentStart: Int,
+        val closingPrefix: String
+    )
+
+    private data class ListMarker(
+        val contentStart: Int,
+        val consumedWidth: Int
     )
 
     fun inspect(document: TextDocument): List<DocumentDiagnostic> {
         val diagnostics = mutableListOf<DocumentDiagnostic>()
+        val currentLineEndings = TextDocumentCodec.detectLineEndings(document.text)
 
-        if (document.lineEndings.style == LineEndingStyle.MIXED) {
+        if (currentLineEndings.style == LineEndingStyle.MIXED) {
             diagnostics += DocumentDiagnostic(
                 kind = DocumentDiagnosticKind.MIXED_LINE_ENDINGS,
                 severity = DocumentDiagnosticSeverity.WARNING,
@@ -96,7 +108,7 @@ object DocumentDiagnostics {
             if (fence != null) {
                 val eol = normalizeTo ?: preferredLineEnding(TextDocumentCodec.detectLineEndings(text))
                 if (!endsWithLineEnding(text)) text += eol.value
-                text += fence.marker.toString().repeat(fence.length)
+                text += fence.closingPrefix + fence.marker.toString().repeat(fence.length)
                 applied += DocumentRepairAction.CLOSE_UNTERMINATED_CODE_FENCE
             }
         }
@@ -116,7 +128,7 @@ object DocumentDiagnostics {
         var column = 1
         var index = 0
         while (index < text.length) {
-            when (val char = text[index]) {
+            when (text[index]) {
                 '\u0000' -> return line to column
                 '\r' -> {
                     line++
@@ -153,27 +165,116 @@ object DocumentDiagnostics {
     }
 
     private fun parseOpeningFence(line: String, lineNumber: Int): OpenFence? {
-        val indentation = line.takeWhile { it == ' ' }.length
-        if (indentation > 3 || indentation == line.length) return null
+        val context = fenceLineContext(line) ?: return null
+        val start = context.contentStart
+        if (start >= line.length) return null
 
-        val marker = line[indentation]
+        val marker = line[start]
         if (marker != '`' && marker != '~') return null
-        val length = line.drop(indentation).takeWhile { it == marker }.length
+        val length = line.drop(start).takeWhile { it == marker }.length
         if (length < 3) return null
 
-        val info = line.substring(indentation + length)
+        val info = line.substring(start + length)
         if (marker == '`' && '`' in info) return null
 
-        return OpenFence(marker = marker, length = length, line = lineNumber, column = indentation + 1)
+        return OpenFence(
+            marker = marker,
+            length = length,
+            line = lineNumber,
+            column = start + 1,
+            closingPrefix = context.closingPrefix
+        )
     }
 
     private fun isClosingFence(line: String, open: OpenFence): Boolean {
-        val indentation = line.takeWhile { it == ' ' }.length
-        if (indentation > 3 || indentation == line.length || line[indentation] != open.marker) return false
+        if (!line.startsWith(open.closingPrefix)) return false
+        var index = open.closingPrefix.length
+        var extraIndent = 0
+        while (index < line.length && line[index] == ' ' && extraIndent < 3) {
+            index++
+            extraIndent++
+        }
+        if (index >= line.length || line[index] != open.marker) return false
 
-        val markerLength = line.drop(indentation).takeWhile { it == open.marker }.length
+        val markerLength = line.drop(index).takeWhile { it == open.marker }.length
         if (markerLength < open.length) return false
-        return line.substring(indentation + markerLength).all { it == ' ' || it == '\t' }
+        return line.substring(index + markerLength).all { it == ' ' || it == '\t' }
+    }
+
+    /**
+     * Extract a fence position while preserving enough Markdown container context to
+     * close a fence inside block quotes and list items. List markers become equivalent
+     * continuation indentation in the repair prefix.
+     */
+    private fun fenceLineContext(line: String): FenceLineContext? {
+        var index = 0
+        val closingPrefix = StringBuilder()
+        var sawContainer = false
+
+        while (index < line.length) {
+            val spacesStart = index
+            while (index < line.length && line[index] == ' ') index++
+            val spaces = index - spacesStart
+
+            if (!sawContainer && spaces > 3) return null
+
+            if (index < line.length && line[index] == '>') {
+                closingPrefix.append(" ".repeat(spaces)).append('>')
+                index++
+                if (index < line.length && (line[index] == ' ' || line[index] == '\t')) {
+                    closingPrefix.append(line[index])
+                    index++
+                }
+                sawContainer = true
+                continue
+            }
+
+            parseListMarker(line, index)?.let { list ->
+                closingPrefix.append(" ".repeat(spaces + list.consumedWidth))
+                index = list.contentStart
+                sawContainer = true
+                continue
+            }
+
+            if (spaces > 3) return null
+            closingPrefix.append(" ".repeat(spaces))
+            return FenceLineContext(contentStart = index, closingPrefix = closingPrefix.toString())
+        }
+
+        return FenceLineContext(contentStart = index, closingPrefix = closingPrefix.toString())
+    }
+
+    private fun parseListMarker(line: String, start: Int): ListMarker? {
+        if (start >= line.length) return null
+        var markerEnd = start
+
+        when (line[start]) {
+            '-', '+', '*' -> markerEnd++
+            in '0'..'9' -> {
+                while (markerEnd < line.length && line[markerEnd].isDigit() && markerEnd - start < 9) {
+                    markerEnd++
+                }
+                if (markerEnd == start || markerEnd >= line.length || (line[markerEnd] != '.' && line[markerEnd] != ')')) {
+                    return null
+                }
+                markerEnd++
+            }
+            else -> return null
+        }
+
+        if (markerEnd >= line.length || (line[markerEnd] != ' ' && line[markerEnd] != '\t')) return null
+        var contentStart = markerEnd
+        var padding = 0
+        while (contentStart < line.length && (line[contentStart] == ' ' || line[contentStart] == '\t') && padding < 4) {
+            contentStart++
+            padding++
+        }
+        if (padding == 0) return null
+
+        return ListMarker(
+            contentStart = contentStart,
+            consumedWidth = contentStart - start
+        )
     }
 
     private fun preferredLineEnding(counts: LineEndingCounts): LineEnding = when {
