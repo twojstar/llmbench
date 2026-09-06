@@ -55,6 +55,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.twojstar.llmbench.data.model.WebAiService
+import com.twojstar.llmbench.data.model.webChatSections
 import com.twojstar.llmbench.data.model.WebChatActivityStatus
 import com.twojstar.llmbench.data.model.WebChatGenerationObservation
 import com.twojstar.llmbench.data.model.markWebChatActivityRead
@@ -660,6 +661,8 @@ fun WebChatScreen(
                 selectedService = selectedService,
                 activityStatuses = activityStatuses,
                 providerFavicons = providerFavicons,
+                favoriteServices = uiState.favoriteWebServices,
+                onToggleFavorite = viewModel::toggleFavoriteWebService,
                 onSelectService = { service ->
                     activateService(service)
                     drawerScope.launch { drawerState.close() }
@@ -1519,10 +1522,13 @@ private fun WebProviderDrawer(
     selectedService: WebAiService,
     activityStatuses: Map<WebAiService, WebChatActivityStatus>,
     providerFavicons: Map<WebAiService, Bitmap>,
+    favoriteServices: Set<WebAiService>,
+    onToggleFavorite: (WebAiService) -> Unit,
     onSelectService: (WebAiService) -> Unit,
     onOpenNativeCompare: () -> Unit,
     onOpenStudio: () -> Unit
 ) {
+    val sections = webChatSections(favoriteServices)
     ModalDrawerSheet(modifier = Modifier.width(292.dp)) {
         Column(
             modifier = Modifier
@@ -1536,30 +1542,57 @@ private fun WebProviderDrawer(
                 modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 20.dp, bottom = 10.dp)
             )
 
-            WebAiService.primaryChats.forEach { service ->
+            if (sections.favorites.isNotEmpty()) {
+                Text(
+                    text = "Favorites",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 2.dp, bottom = 4.dp)
+                )
+                sections.favorites.forEach { service ->
+                    WebProviderDrawerItem(
+                        service = service,
+                        isSelected = selectedService == service,
+                        isFavorite = true,
+                        activityStatus = activityStatuses[service] ?: WebChatActivityStatus.IDLE,
+                        favicon = providerFavicons[service],
+                        onToggleFavorite = { onToggleFavorite(service) },
+                        onSelect = { onSelectService(service) }
+                    )
+                }
+                HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+            }
+
+            sections.primary.forEach { service ->
                 WebProviderDrawerItem(
                     service = service,
                     isSelected = selectedService == service,
+                    isFavorite = service in favoriteServices,
                     activityStatus = activityStatuses[service] ?: WebChatActivityStatus.IDLE,
                     favicon = providerFavicons[service],
+                    onToggleFavorite = { onToggleFavorite(service) },
                     onSelect = { onSelectService(service) }
                 )
             }
 
-            Text(
-                text = "More chats",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 4.dp)
-            )
-            WebAiService.additionalChats.forEach { service ->
-                WebProviderDrawerItem(
-                    service = service,
-                    isSelected = selectedService == service,
-                    activityStatus = activityStatuses[service] ?: WebChatActivityStatus.IDLE,
-                    favicon = providerFavicons[service],
-                    onSelect = { onSelectService(service) }
+            if (sections.additional.isNotEmpty()) {
+                Text(
+                    text = "More chats",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 4.dp)
                 )
+                sections.additional.forEach { service ->
+                    WebProviderDrawerItem(
+                        service = service,
+                        isSelected = selectedService == service,
+                        isFavorite = service in favoriteServices,
+                        activityStatus = activityStatuses[service] ?: WebChatActivityStatus.IDLE,
+                        favicon = providerFavicons[service],
+                        onToggleFavorite = { onToggleFavorite(service) },
+                        onSelect = { onSelectService(service) }
+                    )
+                }
             }
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
@@ -1597,8 +1630,10 @@ private fun WebProviderDrawer(
 private fun WebProviderDrawerItem(
     service: WebAiService,
     isSelected: Boolean,
+    isFavorite: Boolean,
     activityStatus: WebChatActivityStatus,
     favicon: Bitmap?,
+    onToggleFavorite: () -> Unit,
     onSelect: () -> Unit
 ) {
     val brandColor = Color(service.brandHexColor)
@@ -1620,7 +1655,26 @@ private fun WebProviderDrawerItem(
             )
         },
         badge = {
-            WebProviderActivityIndicator(service, activityStatus, brandColor)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                WebProviderActivityIndicator(service, activityStatus, brandColor)
+                IconButton(
+                    onClick = onToggleFavorite,
+                    modifier = Modifier
+                        .size(32.dp)
+                        .testTag("btn_favorite_web_service_${service.id}")
+                ) {
+                    Icon(
+                        imageVector = if (isFavorite) Icons.Default.Star else Icons.Outlined.StarBorder,
+                        contentDescription = if (isFavorite) {
+                            "Remove ${service.shortName} from favorites"
+                        } else {
+                            "Add ${service.shortName} to favorites"
+                        },
+                        tint = if (isFavorite) brandColor else MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            }
         },
         colors = NavigationDrawerItemDefaults.colors(
             selectedContainerColor = brandColor.copy(alpha = 0.12f),

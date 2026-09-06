@@ -11,6 +11,7 @@ import com.twojstar.llmbench.data.engine.YamlParser
 import com.twojstar.llmbench.data.model.*
 import com.twojstar.llmbench.data.preferences.StudioStateStore
 import com.twojstar.llmbench.data.preferences.StudioStateWriter
+import com.twojstar.llmbench.data.preferences.WebChatPreferencesStore
 import com.twojstar.llmbench.data.security.ApiKeyStore
 import com.twojstar.llmbench.share.IncomingSharePayload
 import com.twojstar.llmbench.share.PendingWebShare
@@ -47,6 +48,7 @@ data class StudioUiState(
     val isSimulating: Boolean = false,
     val currentTab: NavigationTab = NavigationTab.WEB_CHATS,
     val selectedWebService: WebAiService = WebAiService.CLAUDE,
+    val favoriteWebServices: Set<WebAiService> = emptySet(),
     val snackbarMessage: String? = null,
     val incomingShare: IncomingSharePayload? = null,
     val pendingWebShare: PendingWebShare? = null,
@@ -84,9 +86,15 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
     private val aiChatService = AiChatService()
     private val apiKeyStore = ApiKeyStore(application.applicationContext)
     private val studioStateStore = StudioStateStore(application.applicationContext)
+    private val webChatPreferencesStore = WebChatPreferencesStore(application.applicationContext)
     private var studioStateWriter: StudioStateWriter? = null
 
-    private val _uiState = MutableStateFlow(StudioUiState())
+    private val _uiState = MutableStateFlow(
+        StudioUiState(
+            selectedWebService = webChatPreferencesStore.loadSelectedService(),
+            favoriteWebServices = webChatPreferencesStore.loadFavorites()
+        )
+    )
     private val pendingGatewayCatalogRefreshes = mutableSetOf<AiProvider>()
     private var chatGenerationJob: Job? = null
     private var studioPersistenceJob: Job? = null
@@ -156,6 +164,14 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
 
     fun selectWebService(service: WebAiService) {
         _uiState.update { it.copy(selectedWebService = service) }
+        webChatPreferencesStore.saveSelectedService(service)
+    }
+
+    fun toggleFavoriteWebService(service: WebAiService) {
+        val current = _uiState.value.favoriteWebServices
+        val updated = if (service in current) current - service else current + service
+        _uiState.update { it.copy(favoriteWebServices = updated) }
+        webChatPreferencesStore.saveFavorites(updated)
     }
 
     fun receiveIncomingShare(payload: IncomingSharePayload) {
@@ -190,8 +206,10 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
 
     fun routeIncomingShareToWeb(service: WebAiService) {
         val shareId = pendingWebShareId.incrementAndGet()
+        var routed = false
         _uiState.update { state ->
             val payload = state.incomingShare ?: return@update state
+            routed = true
             state.copy(
                 currentTab = NavigationTab.WEB_CHATS,
                 selectedWebService = service,
@@ -199,6 +217,7 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
                 pendingWebShare = PendingWebShare(shareId, service, payload)
             )
         }
+        if (routed) webChatPreferencesStore.saveSelectedService(service)
     }
 
     fun claimPendingWebShareText(service: WebAiService, shareId: Long): String? {

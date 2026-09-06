@@ -20,6 +20,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.twojstar.llmbench.data.model.WebAiService
+import com.twojstar.llmbench.data.model.webChatSections
 import com.twojstar.llmbench.share.IncomingSharePayload
 import com.twojstar.llmbench.share.PendingWebShare
 import com.twojstar.llmbench.share.extractIncomingSharePayload
@@ -53,6 +54,7 @@ class MainActivity : ComponentActivity() {
                 uiState.incomingShare?.let { payload ->
                     IncomingShareProviderDialog(
                         payload = payload,
+                        favoriteServices = uiState.favoriteWebServices,
                         onSelect = viewModel::routeIncomingShareToWeb,
                         onDismiss = viewModel::dismissIncomingShare
                     )
@@ -243,6 +245,7 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun IncomingShareProviderDialog(
     payload: IncomingSharePayload,
+    favoriteServices: Set<WebAiService>,
     onSelect: (WebAiService) -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -253,6 +256,7 @@ private fun IncomingShareProviderDialog(
             add("${payload.attachmentCount} attachment$suffix")
         }
     }.joinToString(" + ")
+    val sections = webChatSections(favoriteServices)
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -270,7 +274,21 @@ private fun IncomingShareProviderDialog(
                     style = MaterialTheme.typography.bodyMedium
                 )
                 Spacer(Modifier.height(4.dp))
-                WebAiService.primaryChats.forEach { service ->
+                if (sections.favorites.isNotEmpty()) {
+                    Text(
+                        "Favorites",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
+                    )
+                    sections.favorites.forEach { service ->
+                        TextButton(onClick = { onSelect(service) }, modifier = Modifier.fillMaxWidth()) {
+                            Text("★ ${service.displayName}", modifier = Modifier.fillMaxWidth())
+                        }
+                    }
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+                }
+                sections.primary.forEach { service ->
                     TextButton(
                         onClick = { onSelect(service) },
                         modifier = Modifier.fillMaxWidth()
@@ -278,19 +296,21 @@ private fun IncomingShareProviderDialog(
                         Text(service.displayName, modifier = Modifier.fillMaxWidth())
                     }
                 }
-                HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
-                Text(
-                    "More chats",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
-                )
-                WebAiService.additionalChats.forEach { service ->
-                    TextButton(
-                        onClick = { onSelect(service) },
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text(service.displayName, modifier = Modifier.fillMaxWidth())
+                if (sections.additional.isNotEmpty()) {
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+                    Text(
+                        "More chats",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
+                    )
+                    sections.additional.forEach { service ->
+                        TextButton(
+                            onClick = { onSelect(service) },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(service.displayName, modifier = Modifier.fillMaxWidth())
+                        }
                     }
                 }
             }
