@@ -47,8 +47,30 @@ class DocumentDiagnosticsTest {
     }
 
     @Test
+    fun sixSpaceCloserDoesNotCloseThreeSpaceFence() {
+        val text = "   ```\ncode\n      ```"
+        val document = TextDocumentCodec.decodeUtf8(text.encodeToByteArray())
+
+        val diagnostic = DocumentDiagnostics.inspect(document)
+            .single { it.kind == DocumentDiagnosticKind.UNTERMINATED_CODE_FENCE }
+
+        assertEquals(1, diagnostic.line)
+        assertEquals(4, diagnostic.column)
+    }
+
+    @Test
     fun supportsTildeFencesAndLongerClosers() {
         val text = "~~~txt\nhello\n~~~~~   "
+        val document = TextDocumentCodec.decodeUtf8(text.encodeToByteArray())
+
+        assertFalse(DocumentDiagnostics.inspect(document).any {
+            it.kind == DocumentDiagnosticKind.UNTERMINATED_CODE_FENCE
+        })
+    }
+
+    @Test
+    fun blockQuoteCloserMayUseDifferentOptionalSpacing() {
+        val text = " > ```md\n> quoted\n>```"
         val document = TextDocumentCodec.decodeUtf8(text.encodeToByteArray())
 
         assertFalse(DocumentDiagnostics.inspect(document).any {
@@ -74,6 +96,36 @@ class DocumentDiagnosticsTest {
 
         val repaired = DocumentDiagnostics.repair(nestedDocument, closeUnterminatedCodeFence = true)
         assertTrue(repaired.document.text.endsWith("\n>   ````"))
+        assertFalse(DocumentDiagnostics.inspect(repaired.document).any {
+            it.kind == DocumentDiagnosticKind.UNTERMINATED_CODE_FENCE
+        })
+    }
+
+    @Test
+    fun tabPaddedListRepairUsesVisualContinuationColumns() {
+        val text = "-\t```kotlin\n\tcode"
+        val document = TextDocumentCodec.decodeUtf8(text.encodeToByteArray())
+
+        assertTrue(DocumentDiagnostics.inspect(document).any {
+            it.kind == DocumentDiagnosticKind.UNTERMINATED_CODE_FENCE
+        })
+
+        val repaired = DocumentDiagnostics.repair(document, closeUnterminatedCodeFence = true)
+
+        assertTrue(repaired.document.text.endsWith("\n    ```"))
+        assertFalse(DocumentDiagnostics.inspect(repaired.document).any {
+            it.kind == DocumentDiagnosticKind.UNTERMINATED_CODE_FENCE
+        })
+    }
+
+    @Test
+    fun orderedListTabPaddingAlsoRepairsInsideContainer() {
+        val text = "10.\t~~~txt\n    content"
+        val document = TextDocumentCodec.decodeUtf8(text.encodeToByteArray())
+
+        val repaired = DocumentDiagnostics.repair(document, closeUnterminatedCodeFence = true)
+
+        assertTrue(repaired.document.text.endsWith("\n    ~~~"))
         assertFalse(DocumentDiagnostics.inspect(repaired.document).any {
             it.kind == DocumentDiagnosticKind.UNTERMINATED_CODE_FENCE
         })
