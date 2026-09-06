@@ -31,8 +31,56 @@ private const val SYSTEM_PROMPT = "system"
 private const val STREAM_HELLO = "hello"
 private const val TEST_STREAM_URL = "https://example.test/stream"
 private const val TEST_EVENT_STREAM_TYPE = "text/event-stream"
+private const val TEST_CLAUDE_MAX_TOKENS = 128000
+private const val TEST_CLAUDE_OUTAGE_MODEL = "claude-outage"
 
 class AiChatServiceTest {
+    @Test
+    fun parsesClaudeReportedMaxTokensAndRejectsInvalidMetadata() {
+        val service = AiChatService()
+        assertEquals(TEST_CLAUDE_MAX_TOKENS, service.parseClaudeModelMaxTokens("""{"max_tokens":128000}"""))
+        assertEquals(null, service.parseClaudeModelMaxTokens("""{"max_tokens":0}"""))
+        assertEquals(null, service.parseClaudeModelMaxTokens("""{"id":"claude-sonnet-5"}"""))
+        assertEquals(null, service.parseClaudeModelMaxTokens("not json"))
+    }
+
+    @Test
+    fun claudeModelMetadataRequestEncodesModelAndUsesAnthropicHeaders() {
+        val request = AiChatService().buildClaudeModelMetadataRequest("claude/custom model", "test-key")
+        assertEquals("/v1/models/claude%2Fcustom%20model", request.url.encodedPath)
+        assertEquals("test-key", request.header("x-api-key"))
+        assertEquals("2023-06-01", request.header("anthropic-version"))
+        assertEquals("GET", request.method)
+    }
+
+    @Test
+    fun claudeMetadataLookupUsesShortTimeoutAndCachesFallback() {
+        val metadataClient = buildClaudeMetadataHttpClient(okhttp3.OkHttpClient())
+        assertEquals(2_000L, metadataClient.callTimeoutMillis.toLong())
+
+        val service = AiChatService()
+        assertEquals(2048, service.rememberClaudeMaxTokens(TEST_CLAUDE_OUTAGE_MODEL, "bad-key", null))
+        assertEquals(2048, service.rememberClaudeMaxTokens(TEST_CLAUDE_OUTAGE_MODEL, "bad-key", TEST_CLAUDE_MAX_TOKENS))
+        assertEquals(128000, service.rememberClaudeMaxTokens(TEST_CLAUDE_OUTAGE_MODEL, "fixed-key", TEST_CLAUDE_MAX_TOKENS))
+        assertEquals(TEST_CLAUDE_MAX_TOKENS, service.rememberClaudeMaxTokens("claude-healthy", "same-key", TEST_CLAUDE_MAX_TOKENS))
+        assertEquals(TEST_CLAUDE_MAX_TOKENS, service.rememberClaudeMaxTokens("claude-healthy", "same-key", null))
+    }
+
+    @Test
+    fun claudePayloadUsesResolvedOutputLimitInBufferedAndStreamingModes() {
+        val service = AiChatService()
+        val messages = Json.parseToJsonElement("""[{"role":"user","content":"hello"}]""").jsonArray
+        val buffered = service.buildClaudeRequestPayload("claude-sonnet-5", 128000, false, SYSTEM_PROMPT, messages)
+        val streaming = service.buildClaudeRequestPayload("claude-sonnet-5", 128000, true, null, messages)
+
+        assertEquals("128000", buffered.getValue("max_tokens").jsonPrimitive.content)
+        assertEquals(SYSTEM_PROMPT, buffered.getValue("system").jsonPrimitive.content)
+        assertFalse("stream" in buffered)
+        assertEquals("128000", streaming.getValue("max_tokens").jsonPrimitive.content)
+        assertEquals("true", streaming.getValue("stream").jsonPrimitive.content)
+        assertFalse("system" in streaming)
+    }
+
     @Test
     fun compatibleHistoryKeepsOnlyCurrentProviderAssistantTurns() {
         val history = listOf(

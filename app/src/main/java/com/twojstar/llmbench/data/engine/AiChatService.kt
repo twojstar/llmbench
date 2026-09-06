@@ -18,6 +18,7 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.*
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.Call
 import okhttp3.Callback
@@ -27,6 +28,8 @@ import okhttp3.Response
 import okhttp3.RequestBody.Companion.toRequestBody
 import okio.BufferedSource
 import java.io.IOException
+import java.security.MessageDigest
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
@@ -47,6 +50,7 @@ private const val JSON_SYSTEM_KEY = "system"
 private const val JSON_MESSAGES_KEY = "messages"
 private const val JSON_MAX_TOKENS_KEY = "max_tokens"
 private const val JSON_STORE_KEY = "store"
+private const val JSON_STREAM_KEY = "stream"
 private const val JSON_INSTRUCTIONS_KEY = "instructions"
 private const val JSON_MEDIA_TYPE = "application/json"
 private const val HEADER_AUTHORIZATION = "Authorization"
@@ -69,8 +73,25 @@ private const val OPENAI_OUTPUT_TEXT_DELTA = "response.output_text.delta"
 private const val CLAUDE_CONTENT_BLOCK_DELTA = "content_block_delta"
 private const val CLAUDE_TEXT_DELTA = "text_delta"
 private const val MALFORMED_STREAM_EVENT = "Malformed streaming event"
+private const val CLAUDE_MESSAGES_API_URL = "https://api.anthropic.com/v1/messages"
+private const val CLAUDE_MODELS_API_URL = "https://api.anthropic.com/v1/models"
+private const val CLAUDE_MAX_TOKENS_COMPAT_FALLBACK = 2048
+private const val HEADER_ANTHROPIC_API_KEY = "x-api-key"
+private const val HEADER_ANTHROPIC_VERSION = "anthropic-version"
+private const val ANTHROPIC_API_VERSION = "2023-06-01"
+private const val CLAUDE_METADATA_TIMEOUT_SECONDS = 2L
+
+internal fun buildClaudeMetadataHttpClient(baseClient: OkHttpClient): OkHttpClient =
+    baseClient.newBuilder()
+        .callTimeout(CLAUDE_METADATA_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+        .build()
 
 class AiChatService {
+
+    private data class ClaudeMaxTokensCacheKey(
+        val model: String,
+        val credentialFingerprint: String
+    )
 
     private data class OpenAiCompatibleProviderConfig(
         val endpointUrl: String,
@@ -108,11 +129,14 @@ class AiChatService {
     private val streamingHttpClient: OkHttpClient = httpClient.newBuilder()
         .readTimeout(0, TimeUnit.MILLISECONDS)
         .build()
+    private val claudeMetadataHttpClient: OkHttpClient = buildClaudeMetadataHttpClient(httpClient)
 
     private val json = Json {
         ignoreUnknownKeys = true
         isLenient = true
     }
+    private val claudeMaxTokensByModelAndCredential =
+        ConcurrentHashMap<ClaudeMaxTokensCacheKey, Int>()
 
     suspend fun fetchFreeGatewayModels(
         provider: AiProvider,
@@ -466,6 +490,63 @@ class AiChatService {
         return text ?: "Received empty message content from OpenAI."
     }
 
+    internal fun parseClaudeModelMaxTokens(rawJson: String): Int? = runCatching {
+        json.parseToJsonElement(rawJson).jsonObject[JSON_MAX_TOKENS_KEY]?.jsonPrimitive?.intOrNull
+    }.getOrNull()?.takeIf { it > 0 }
+
+    internal fun buildClaudeModelMetadataRequest(
+        model: String,
+        apiKey: String
+    ): Request = Request.Builder()
+        .url(CLAUDE_MODELS_API_URL.toHttpUrl().newBuilder().addPathSegment(model).build())
+        .addHeader(HEADER_ANTHROPIC_API_KEY, apiKey)
+        .addHeader(HEADER_ANTHROPIC_VERSION, ANTHROPIC_API_VERSION)
+        .get()
+        .build()
+
+    private fun claudeMaxTokensCacheKey(model: String, apiKey: String): ClaudeMaxTokensCacheKey {
+        val fingerprint = MessageDigest.getInstance("SHA-256")
+            .digest(apiKey.toByteArray(Charsets.UTF_8))
+            .joinToString(separator = "") { byte -> "%02x".format(byte) }
+        return ClaudeMaxTokensCacheKey(model, fingerprint)
+    }
+
+    internal fun rememberClaudeMaxTokens(model: String, apiKey: String, reported: Int?): Int {
+        val cacheKey = claudeMaxTokensCacheKey(model, apiKey)
+        val resolved = reported?.takeIf { it > 0 } ?: CLAUDE_MAX_TOKENS_COMPAT_FALLBACK
+        return claudeMaxTokensByModelAndCredential.putIfAbsent(cacheKey, resolved) ?: resolved
+    }
+
+    private suspend fun resolveClaudeMaxTokens(model: String, apiKey: String): Int {
+        val cacheKey = claudeMaxTokensCacheKey(model, apiKey)
+        claudeMaxTokensByModelAndCredential[cacheKey]?.let { return it }
+        return try {
+            val request = buildClaudeModelMetadataRequest(model, apiKey)
+            val responseBody = executeCancellableJson(
+                request,
+                httpErrorContext = "Anthropic model metadata",
+                client = claudeMetadataHttpClient
+            )
+            rememberClaudeMaxTokens(model, apiKey, parseClaudeModelMaxTokens(responseBody))
+        } catch (_: IOException) {
+            rememberClaudeMaxTokens(model, apiKey, null)
+        }
+    }
+
+    internal fun buildClaudeRequestPayload(
+        model: String,
+        maxTokens: Int,
+        stream: Boolean,
+        systemInstruction: String?,
+        messages: JsonArray
+    ): JsonObject = buildJsonObject {
+        put(JSON_MODEL_KEY, model)
+        put(JSON_MAX_TOKENS_KEY, maxTokens)
+        if (stream) put(JSON_STREAM_KEY, true)
+        if (!systemInstruction.isNullOrBlank()) put(JSON_SYSTEM_KEY, systemInstruction)
+        put(JSON_MESSAGES_KEY, messages)
+    }
+
     // --- Anthropic Claude REST API ---
     private suspend fun callClaudeApi(
         prompt: String,
@@ -474,23 +555,18 @@ class AiChatService {
         systemInstruction: String?,
         conversationHistory: List<ModelChatMessage>
     ): String {
-        val url = "https://api.anthropic.com/v1/messages"
         val messagesArray = buildClaudeMessages(prompt, conversationHistory, systemInstruction)
+        val maxTokens = resolveClaudeMaxTokens(model, apiKey)
 
-        val requestPayload = buildJsonObject {
-            put(JSON_MODEL_KEY, model)
-            put(JSON_MAX_TOKENS_KEY, 2048)
-            if (!systemInstruction.isNullOrBlank()) {
-                put(JSON_SYSTEM_KEY, systemInstruction)
-            }
-            put(JSON_MESSAGES_KEY, messagesArray)
-        }
+        val requestPayload = buildClaudeRequestPayload(
+            model, maxTokens, stream = false, systemInstruction, messagesArray
+        )
 
         val body = requestPayload.toString().toRequestBody(JSON_MEDIA_TYPE.toMediaType())
         val request = Request.Builder()
-            .url(url)
-            .addHeader("x-api-key", apiKey)
-            .addHeader("anthropic-version", "2023-06-01")
+            .url(CLAUDE_MESSAGES_API_URL)
+            .addHeader(HEADER_ANTHROPIC_API_KEY, apiKey)
+            .addHeader(HEADER_ANTHROPIC_VERSION, ANTHROPIC_API_VERSION)
             .addHeader(HEADER_CONTENT_TYPE_LOWER, JSON_MEDIA_TYPE)
             .post(body)
             .build()
@@ -585,7 +661,7 @@ class AiChatService {
             put(JSON_MODEL_KEY, model)
             put(JSON_INPUT_KEY, buildOpenAiResponseInput(prompt, conversationHistory, systemInstruction))
             put(JSON_STORE_KEY, false)
-            put("stream", true)
+            put(JSON_STREAM_KEY, true)
             if (!systemInstruction.isNullOrBlank()) put(JSON_INSTRUCTIONS_KEY, systemInstruction)
         }
         val request = Request.Builder()
@@ -606,17 +682,15 @@ class AiChatService {
         conversationHistory: List<ModelChatMessage>,
         onTextDelta: (String) -> Unit
     ): String {
-        val requestPayload = buildJsonObject {
-            put(JSON_MODEL_KEY, model)
-            put(JSON_MAX_TOKENS_KEY, 2048)
-            put("stream", true)
-            if (!systemInstruction.isNullOrBlank()) put(JSON_SYSTEM_KEY, systemInstruction)
-            put(JSON_MESSAGES_KEY, buildClaudeMessages(prompt, conversationHistory, systemInstruction))
-        }
+        val maxTokens = resolveClaudeMaxTokens(model, apiKey)
+        val requestPayload = buildClaudeRequestPayload(
+            model, maxTokens, stream = true, systemInstruction,
+            buildClaudeMessages(prompt, conversationHistory, systemInstruction)
+        )
         val request = Request.Builder()
-            .url("https://api.anthropic.com/v1/messages")
-            .addHeader("x-api-key", apiKey)
-            .addHeader("anthropic-version", "2023-06-01")
+            .url(CLAUDE_MESSAGES_API_URL)
+            .addHeader(HEADER_ANTHROPIC_API_KEY, apiKey)
+            .addHeader(HEADER_ANTHROPIC_VERSION, ANTHROPIC_API_VERSION)
             .addHeader(HEADER_CONTENT_TYPE_LOWER, JSON_MEDIA_TYPE)
             .post(requestPayload.toString().toRequestBody(JSON_MEDIA_TYPE.toMediaType()))
             .build()
@@ -829,9 +903,10 @@ class AiChatService {
     private suspend fun executeCancellableJson(
         request: Request,
         emptyResponseMessage: String = "Empty response from server",
-        httpErrorContext: String? = null
+        httpErrorContext: String? = null,
+        client: OkHttpClient = httpClient
     ): String = suspendCancellableCoroutine { continuation ->
-        val call = httpClient.newCall(request)
+        val call = client.newCall(request)
         continuation.invokeOnCancellation { call.cancel() }
         call.enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) {
@@ -869,7 +944,7 @@ class AiChatService {
             put(JSON_MESSAGES_KEY, buildOpenAiCompatibleMessages(
                 prompt, systemInstruction, conversationHistory, provider
             ))
-            put("stream", true)
+            put(JSON_STREAM_KEY, true)
         }
         val requestBuilder = Request.Builder().url(config.endpointUrl)
             .addHeader(HEADER_AUTHORIZATION, bearerToken(apiKey))
