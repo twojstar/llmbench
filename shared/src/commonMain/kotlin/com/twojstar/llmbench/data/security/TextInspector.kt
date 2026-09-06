@@ -36,8 +36,10 @@ object TextInspector {
     private const val MAX_BASE64_DECODE_CHARS = 65_536
     private const val MAX_VARIATION_PREVIEW_BYTES = 512
     private const val MAX_TAG_PREVIEW_CHARS = 512
+    private const val MIXED_SCRIPT_PREVIEW_CHARS = 144
     private const val KIND_MARKER_CARRIER = "marker-carrier"
     private const val BIDI_ORDER_DETAIL = "Bidi control can make source render in a misleading order."
+    private const val BIDI_ISOLATION_DETAIL = "Bidi isolation control can conceal source ordering."
     private const val INVISIBLE_FORMATTING_DETAIL = "Invisible formatting character."
 
     private data class RawFinding(
@@ -114,10 +116,10 @@ object TextInspector {
         put(0x2062, SpecialCharacter(TextFindingSeverity.MEDIUM, "Invisible times", INVISIBLE_FORMATTING_DETAIL))
         put(0x2063, SpecialCharacter(TextFindingSeverity.MEDIUM, "Invisible separator", INVISIBLE_FORMATTING_DETAIL))
         put(0x2064, SpecialCharacter(TextFindingSeverity.MEDIUM, "Invisible plus", INVISIBLE_FORMATTING_DETAIL))
-        put(0x2066, SpecialCharacter(TextFindingSeverity.HIGH, "Left-to-right isolate", "Bidi isolation control can conceal source ordering."))
-        put(0x2067, SpecialCharacter(TextFindingSeverity.HIGH, "Right-to-left isolate", "Bidi isolation control can conceal source ordering."))
-        put(0x2068, SpecialCharacter(TextFindingSeverity.HIGH, "First-strong isolate", "Bidi isolation control can conceal source ordering."))
-        put(0x2069, SpecialCharacter(TextFindingSeverity.HIGH, "Pop directional isolate", "Bidi isolation control can conceal source ordering."))
+        put(0x2066, SpecialCharacter(TextFindingSeverity.HIGH, "Left-to-right isolate", BIDI_ISOLATION_DETAIL))
+        put(0x2067, SpecialCharacter(TextFindingSeverity.HIGH, "Right-to-left isolate", BIDI_ISOLATION_DETAIL))
+        put(0x2068, SpecialCharacter(TextFindingSeverity.HIGH, "First-strong isolate", BIDI_ISOLATION_DETAIL))
+        put(0x2069, SpecialCharacter(TextFindingSeverity.HIGH, "Pop directional isolate", BIDI_ISOLATION_DETAIL))
         for (codePoint in 0x206A..0x206F) {
             put(codePoint, SpecialCharacter(TextFindingSeverity.HIGH, "Deprecated bidi control", "Deprecated invisible directional control."))
         }
@@ -356,9 +358,10 @@ object TextInspector {
         state: MixedScriptTokenState,
         add: (RawFinding) -> Unit
     ) {
-        val isSuspicious = state.start >= 0 && state.end - state.start >= 3 && state.latin && (state.cyrillic || state.greek)
+        val isSuspicious = state.start >= 0 && state.latin && (state.cyrillic || state.greek)
         if (isSuspicious) {
-            val preview = text.substring(state.start, state.end).take(144)
+            val previewEnd = state.start + minOf(MIXED_SCRIPT_PREVIEW_CHARS, state.end - state.start)
+            val preview = text.substring(state.start, previewEnd)
             add(
                 RawFinding(
                     TextFindingSeverity.MEDIUM,
