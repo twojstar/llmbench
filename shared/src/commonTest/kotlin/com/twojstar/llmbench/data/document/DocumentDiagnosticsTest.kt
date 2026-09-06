@@ -19,6 +19,17 @@ class DocumentDiagnosticsTest {
     }
 
     @Test
+    fun derivesLineEndingDiagnosticsFromCurrentTextInsteadOfStaleMetadata() {
+        val original = TextDocumentCodec.decodeUtf8("a\nb".encodeToByteArray())
+        val edited = original.copy(text = "a\r\nb\nc")
+
+        assertEquals(LineEndingStyle.LF, edited.lineEndings.style)
+        assertTrue(DocumentDiagnostics.inspect(edited).any {
+            it.kind == DocumentDiagnosticKind.MIXED_LINE_ENDINGS
+        })
+    }
+
+    @Test
     fun detectsOnlyBlockFencesAndRequiresCompatibleCloser() {
         val text = """
             Inline ``` is not a block fence.
@@ -41,6 +52,29 @@ class DocumentDiagnosticsTest {
         val document = TextDocumentCodec.decodeUtf8(text.encodeToByteArray())
 
         assertFalse(DocumentDiagnostics.inspect(document).any {
+            it.kind == DocumentDiagnosticKind.UNTERMINATED_CODE_FENCE
+        })
+    }
+
+    @Test
+    fun handlesFencesInsideBlockQuotesAndListItems() {
+        val closed = "> ```md\n> quoted\n> ```\n\n- ~~~txt\n  listed\n  ~~~"
+        val closedDocument = TextDocumentCodec.decodeUtf8(closed.encodeToByteArray())
+        assertFalse(DocumentDiagnostics.inspect(closedDocument).any {
+            it.kind == DocumentDiagnosticKind.UNTERMINATED_CODE_FENCE
+        })
+
+        val nested = "> - ````kotlin\n>   val answer = 42"
+        val nestedDocument = TextDocumentCodec.decodeUtf8(nested.encodeToByteArray())
+        val diagnostic = DocumentDiagnostics.inspect(nestedDocument)
+            .single { it.kind == DocumentDiagnosticKind.UNTERMINATED_CODE_FENCE }
+
+        assertEquals(1, diagnostic.line)
+        assertEquals(5, diagnostic.column)
+
+        val repaired = DocumentDiagnostics.repair(nestedDocument, closeUnterminatedCodeFence = true)
+        assertTrue(repaired.document.text.endsWith("\n>   ````"))
+        assertFalse(DocumentDiagnostics.inspect(repaired.document).any {
             it.kind == DocumentDiagnosticKind.UNTERMINATED_CODE_FENCE
         })
     }
