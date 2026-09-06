@@ -254,10 +254,7 @@ private fun IncomingShareProviderDialog(
     onSelect: (WebAiService) -> Unit,
     onDismiss: () -> Unit
 ) {
-    val safetyKey = remember(payload.text, payload.uriStrings) {
-        listOf(payload.text?.length ?: 0, payload.text?.hashCode() ?: 0, payload.uriStrings.hashCode()).hashCode()
-    }
-    var safetyReviewed by rememberSaveable(safetyKey) { mutableStateOf(false) }
+    var safetyReviewed by rememberSaveable(payload.text, payload.uriStrings) { mutableStateOf(false) }
     var inspection by remember(payload.text, payload.uriStrings) {
         mutableStateOf<TextInspectionResult?>(
             if (payload.text == null) TextInspectionResult(emptyList()) else null
