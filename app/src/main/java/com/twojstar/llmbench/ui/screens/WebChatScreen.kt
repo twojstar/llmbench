@@ -91,6 +91,7 @@ private const val MAX_LIVE_WEBVIEWS = 2
 private const val WEB_ACTIVITY_POLL_MS = 1_200L
 private const val INACTIVE_WEB_ACTIVITY_POLL_EVERY = 3
 private const val LRU_GENERATION_PROBE_TIMEOUT_MS = 500L
+private const val RENDERER_INACTIVITY_CONFIRM_DELAY_MS = 500L
 private const val DIAGNOSTIC_NONE_YET = "None yet"
 
 internal fun studioPromptForWebChat(renderedInstructions: String): String? =
@@ -132,10 +133,21 @@ internal fun webRendererRecoveryAction(
     else -> WebRendererRecoveryAction.EVICT_UNTIL_SELECTED
 }
 
+internal fun rendererInactivityConfirmedByObservation(
+    observation: WebChatGenerationObservation
+): Boolean = when (observation) {
+    WebChatGenerationObservation.IDLE,
+    WebChatGenerationObservation.COMPLETED,
+    WebChatGenerationObservation.COMPLETED_WHILE_SELECTED -> true
+    WebChatGenerationObservation.GENERATING,
+    WebChatGenerationObservation.UNKNOWN -> false
+}
+
 internal fun rendererPriorityWaivedWhenNotVisible(
     isSelected: Boolean,
-    isGenerating: Boolean
-): Boolean = !isSelected && !isGenerating
+    trackingSupported: Boolean,
+    inactivityConfirmed: Boolean
+): Boolean = !isSelected && trackingSupported && inactivityConfirmed
 
 internal fun webServicesForActivation(
     current: List<WebAiService>,
@@ -380,6 +392,8 @@ fun WebChatScreen(
     val providerFavicons = remember { mutableStateMapOf<WebAiService, Bitmap>() }
     val webViewInstanceRevisions = remember { mutableStateMapOf<WebAiService, Int>() }
     val rendererCrashServices = remember { mutableStateMapOf<WebAiService, Boolean>() }
+    val rendererInactivityConfirmed = remember { mutableStateMapOf<WebAiService, Boolean>() }
+    val rendererPriorityProbeRequestIds = remember { mutableMapOf<WebAiService, Int>() }
     val currentSelectedService by rememberUpdatedState(selectedService)
     var livePoolDecisionRequestId by remember { mutableIntStateOf(0) }
 
@@ -415,10 +429,37 @@ fun WebChatScreen(
             }
     }
 
+    fun invalidateRendererWaiveEligibility(service: WebAiService): Int {
+        rendererInactivityConfirmed[service] = false
+        val requestId = (rendererPriorityProbeRequestIds[service] ?: 0) + 1
+        rendererPriorityProbeRequestIds[service] = requestId
+        return requestId
+    }
+
+    fun protectRendererUntilFreshInactivity(service: WebAiService) {
+        val requestId = invalidateRendererWaiveEligibility(service)
+        val webView = webViewMap[service] ?: return
+        if (!providerGenerationTrackingSupported(service)) return
+        val expectedRevision = documentRevisions[service] ?: 0
+        val expectedUrl = webView.url
+        drawerScope.launch {
+            delay(RENDERER_INACTIVITY_CONFIRM_DELAY_MS)
+            if (rendererPriorityProbeRequestIds[service] != requestId || webViewMap[service] !== webView) return@launch
+            probeProviderGenerationActivity(webView, service, consumeCompletion = false) { observation ->
+                if (rendererPriorityProbeRequestIds[service] != requestId || webViewMap[service] !== webView) return@probeProviderGenerationActivity
+                val sameDocument = webGenerationProbeDocumentMatches(
+                    expectedRevision, documentRevisions[service] ?: 0, expectedUrl, webView.url
+                )
+                rendererInactivityConfirmed[service] = sameDocument && rendererInactivityConfirmedByObservation(observation)
+            }
+        }
+    }
+
     fun handleRendererGone(service: WebAiService, deadView: WebView, didCrash: Boolean) {
         val isCurrentInstance = webViewMap[service] === deadView
         releaseSharedTextClaimFor(deadView)
         if (isCurrentInstance) {
+            invalidateRendererWaiveEligibility(service)
             // Renderer loss must not cancel an in-flight provider selection. Existing
             // probe callbacks/timeouts will settle this dead target as UNKNOWN via
             // the document-revision and WebView-identity guards below.
@@ -467,6 +508,7 @@ fun WebChatScreen(
     fun updateLiveServices(nextServices: List<WebAiService>) {
         val evictedServices = liveServices.filterNot(nextServices.toSet()::contains)
         evictedServices.forEach { service ->
+            invalidateRendererWaiveEligibility(service)
             activityStatuses[service]?.let { status ->
                 activityStatuses[service] = webChatActivityStatusAfterEviction(status)
             }
@@ -528,6 +570,8 @@ fun WebChatScreen(
             webViewMap[previousService]?.let { webView ->
                 setProviderGenerationTrackerSelected(webView, previousService, isSelected = false)
             }
+            protectRendererUntilFreshInactivity(previousService)
+            invalidateRendererWaiveEligibility(service)
             webViewMap[service]?.let { webView ->
                 setProviderGenerationTrackerSelected(webView, service, isSelected = true)
             }
@@ -976,7 +1020,7 @@ fun WebChatScreen(
             liveServices.forEach { service ->
                 key(service, webViewInstanceRevisions[service] ?: 0) {
                     val isCurrentService = selectedService == service
-                    val isGeneratingService = activityStatuses[service] == WebChatActivityStatus.GENERATING
+                    val isRendererInactivityConfirmed = rendererInactivityConfirmed[service] == true
 
                     Box(
                         modifier = if (isCurrentService) {
@@ -1005,10 +1049,11 @@ fun WebChatScreen(
                                 initialUrl = lastKnownUrls[service] ?: service.url,
                                 isDesktop = initialDesktopMode,
                                 isServiceSelected = { selectedService == service },
-                                isServiceGenerating = {
-                                    activityStatuses[service] == WebChatActivityStatus.GENERATING
+                                isRendererInactivityConfirmed = {
+                                    rendererInactivityConfirmed[service] == true
                                 },
                                 onDocumentStarted = {
+                                    invalidateRendererWaiveEligibility(service)
                                     documentRevisions[service] = (documentRevisions[service] ?: 0) + 1
                                     if (selectedService == service && showProviderDiagnosticsDialog) {
                                         diagnosticsProbeResult = ProviderDiagnosticsProbeResult.Failed
@@ -1146,7 +1191,8 @@ fun WebChatScreen(
                                 WebView.RENDERER_PRIORITY_IMPORTANT,
                                 rendererPriorityWaivedWhenNotVisible(
                                     isSelected = isCurrentService,
-                                    isGenerating = isGeneratingService
+                                    trackingSupported = providerGenerationTrackingSupported(service),
+                                    inactivityConfirmed = isRendererInactivityConfirmed
                                 )
                             )
                             if (isCurrentService && lifecycleStarted) {
@@ -2155,7 +2201,7 @@ private fun createConfiguredWebView(
     initialUrl: String,
     isDesktop: Boolean,
     isServiceSelected: () -> Boolean,
-    isServiceGenerating: () -> Boolean,
+    isRendererInactivityConfirmed: () -> Boolean,
     onDocumentStarted: () -> Unit,
     onUrlChanged: (String) -> Unit,
     onTitleChanged: (String) -> Unit,
@@ -2176,13 +2222,13 @@ private fun createConfiguredWebView(
             ViewGroup.LayoutParams.MATCH_PARENT,
             ViewGroup.LayoutParams.MATCH_PARENT
         )
-        // Selected or generating chats stay IMPORTANT even when not visible.
-        // Only inactive retained WebViews with no active response may waive priority.
+        // Only hidden tracked chats with freshly confirmed inactivity may waive priority.
         setRendererPriorityPolicy(
             WebView.RENDERER_PRIORITY_IMPORTANT,
             rendererPriorityWaivedWhenNotVisible(
                 isSelected = isServiceSelected(),
-                isGenerating = isServiceGenerating()
+                trackingSupported = providerGenerationTrackingSupported(service),
+                inactivityConfirmed = isRendererInactivityConfirmed()
             )
         )
         isClickable = true

@@ -1,6 +1,7 @@
 package com.twojstar.llmbench.ui.screens
 
 import com.twojstar.llmbench.data.model.WebAiService
+import com.twojstar.llmbench.data.model.WebChatGenerationObservation
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -8,10 +9,19 @@ import org.junit.Test
 
 class WebRendererRecoveryTest {
     @Test
-    fun onlyInactiveIdleRendererWaivesPriorityWhenNotVisible() {
-        assertFalse(rendererPriorityWaivedWhenNotVisible(isSelected = true, isGenerating = false))
-        assertFalse(rendererPriorityWaivedWhenNotVisible(isSelected = false, isGenerating = true))
-        assertTrue(rendererPriorityWaivedWhenNotVisible(isSelected = false, isGenerating = false))
+    fun onlyFreshlyConfirmedTrackedInactiveRendererWaivesPriorityWhenNotVisible() {
+        assertFalse(rendererPriorityWaivedWhenNotVisible(true, true, true))
+        assertFalse(rendererPriorityWaivedWhenNotVisible(false, true, false))
+        assertFalse(rendererPriorityWaivedWhenNotVisible(false, false, true))
+        assertTrue(rendererPriorityWaivedWhenNotVisible(false, true, true))
+    }
+
+    @Test
+    fun uncertainOrGeneratingObservationKeepsRendererProtected() {
+        assertTrue(rendererInactivityConfirmedByObservation(WebChatGenerationObservation.IDLE))
+        assertTrue(rendererInactivityConfirmedByObservation(WebChatGenerationObservation.COMPLETED))
+        assertFalse(rendererInactivityConfirmedByObservation(WebChatGenerationObservation.GENERATING))
+        assertFalse(rendererInactivityConfirmedByObservation(WebChatGenerationObservation.UNKNOWN))
     }
 
     @Test
