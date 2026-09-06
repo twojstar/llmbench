@@ -32,22 +32,35 @@ data class DocumentRepairResult(
 
 /** Objective, low-risk diagnostics for editable text documents. */
 object DocumentDiagnostics {
+    private sealed interface MarkdownContainer
+
+    private data object BlockQuoteContainer : MarkdownContainer
+
+    private data class ListContainer(
+        val continuationColumns: Int
+    ) : MarkdownContainer
+
+    private data class Cursor(
+        val index: Int,
+        val column: Int
+    )
+
     private data class OpenFence(
         val marker: Char,
         val length: Int,
         val line: Int,
         val column: Int,
-        val closingPrefix: String
+        val containers: List<MarkdownContainer>
     )
 
     private data class FenceLineContext(
         val contentStart: Int,
-        val closingPrefix: String
+        val containers: List<MarkdownContainer>
     )
 
     private data class ListMarker(
         val contentStart: Int,
-        val consumedWidth: Int
+        val contentColumn: Int
     )
 
     fun inspect(document: TextDocument): List<DocumentDiagnostic> {
@@ -108,7 +121,7 @@ object DocumentDiagnostics {
             if (fence != null) {
                 val eol = normalizeTo ?: preferredLineEnding(TextDocumentCodec.detectLineEndings(text))
                 if (!endsWithLineEnding(text)) text += eol.value
-                text += fence.closingPrefix + fence.marker.toString().repeat(fence.length)
+                text += repairPrefix(fence.containers) + fence.marker.toString().repeat(fence.length)
                 applied += DocumentRepairAction.CLOSE_UNTERMINATED_CODE_FENCE
             }
         }
@@ -165,7 +178,7 @@ object DocumentDiagnostics {
     }
 
     private fun parseOpeningFence(line: String, lineNumber: Int): OpenFence? {
-        val context = fenceLineContext(line) ?: return null
+        val context = openingFenceContext(line) ?: return null
         val start = context.contentStart
         if (start >= line.length) return null
 
@@ -182,99 +195,141 @@ object DocumentDiagnostics {
             length = length,
             line = lineNumber,
             column = start + 1,
-            closingPrefix = context.closingPrefix
+            containers = context.containers
         )
     }
 
     private fun isClosingFence(line: String, open: OpenFence): Boolean {
-        if (!line.startsWith(open.closingPrefix)) return false
-        var index = open.closingPrefix.length
-        var extraIndent = 0
-        while (index < line.length && line[index] == ' ' && extraIndent < 3) {
-            index++
-            extraIndent++
+        var cursor = Cursor(index = 0, column = 0)
+        for (container in open.containers) {
+            cursor = when (container) {
+                BlockQuoteContainer -> consumeBlockQuote(line, cursor) ?: return false
+                is ListContainer -> consumeRequiredIndent(line, cursor, container.continuationColumns) ?: return false
+            }
         }
-        if (index >= line.length || line[index] != open.marker) return false
 
-        val markerLength = line.drop(index).takeWhile { it == open.marker }.length
+        cursor = consumeIndentAtMost(line, cursor, MAX_FENCE_INDENT_COLUMNS) ?: return false
+        if (cursor.index >= line.length || line[cursor.index] != open.marker) return false
+
+        val markerLength = line.drop(cursor.index).takeWhile { it == open.marker }.length
         if (markerLength < open.length) return false
-        return line.substring(index + markerLength).all { it == ' ' || it == '\t' }
+        return line.substring(cursor.index + markerLength).all { it == ' ' || it == '\t' }
     }
 
-    /**
-     * Extract a fence position while preserving enough Markdown container context to
-     * close a fence inside block quotes and list items. List markers become equivalent
-     * continuation indentation in the repair prefix.
-     */
-    private fun fenceLineContext(line: String): FenceLineContext? {
-        var index = 0
-        val closingPrefix = StringBuilder()
-        var sawContainer = false
+    private fun openingFenceContext(line: String): FenceLineContext? {
+        var cursor = Cursor(index = 0, column = 0)
+        val containers = mutableListOf<MarkdownContainer>()
 
-        while (index < line.length) {
-            val spacesStart = index
-            while (index < line.length && line[index] == ' ') index++
-            val spaces = index - spacesStart
+        while (cursor.index < line.length) {
+            val levelStartColumn = cursor.column
+            cursor = consumeIndentAtMost(line, cursor, MAX_FENCE_INDENT_COLUMNS) ?: return null
 
-            if (!sawContainer && spaces > 3) return null
-
-            if (index < line.length && line[index] == '>') {
-                closingPrefix.append(" ".repeat(spaces)).append('>')
-                index++
-                if (index < line.length && (line[index] == ' ' || line[index] == '\t')) {
-                    closingPrefix.append(line[index])
-                    index++
-                }
-                sawContainer = true
+            if (line.getOrNull(cursor.index) == '>') {
+                cursor = consumeBlockQuoteMarker(line, cursor)
+                containers += BlockQuoteContainer
                 continue
             }
 
-            parseListMarker(line, index)?.let { list ->
-                closingPrefix.append(" ".repeat(spaces + list.consumedWidth))
-                index = list.contentStart
-                sawContainer = true
+            val list = parseListMarker(line, cursor)
+            if (list != null) {
+                containers += ListContainer(continuationColumns = list.contentColumn - levelStartColumn)
+                cursor = Cursor(index = list.contentStart, column = list.contentColumn)
                 continue
             }
 
-            if (spaces > 3) return null
-            closingPrefix.append(" ".repeat(spaces))
-            return FenceLineContext(contentStart = index, closingPrefix = closingPrefix.toString())
+            return FenceLineContext(contentStart = cursor.index, containers = containers.toList())
         }
 
-        return FenceLineContext(contentStart = index, closingPrefix = closingPrefix.toString())
+        return FenceLineContext(contentStart = cursor.index, containers = containers.toList())
     }
 
-    private fun parseListMarker(line: String, start: Int): ListMarker? {
-        if (start >= line.length) return null
-        var markerEnd = start
+    private fun consumeBlockQuote(line: String, start: Cursor): Cursor? {
+        val indented = consumeIndentAtMost(line, start, MAX_FENCE_INDENT_COLUMNS) ?: return null
+        if (line.getOrNull(indented.index) != '>') return null
+        return consumeBlockQuoteMarker(line, indented)
+    }
 
-        when (line[start]) {
-            '-', '+', '*' -> markerEnd++
-            in '0'..'9' -> {
-                while (markerEnd < line.length && line[markerEnd].isDigit() && markerEnd - start < 9) {
-                    markerEnd++
-                }
-                if (markerEnd == start || markerEnd >= line.length || (line[markerEnd] != '.' && line[markerEnd] != ')')) {
-                    return null
-                }
-                markerEnd++
+    private fun consumeBlockQuoteMarker(line: String, start: Cursor): Cursor {
+        var cursor = Cursor(index = start.index + 1, column = start.column + 1)
+        val next = line.getOrNull(cursor.index)
+        if (next == ' ' || next == '\t') cursor = advanceWhitespace(cursor, next)
+        return cursor
+    }
+
+    private fun parseListMarker(line: String, start: Cursor): ListMarker? = when (line.getOrNull(start.index)) {
+        '-', '+', '*' -> finishListMarker(line, start, markerLength = 1)
+        in '0'..'9' -> parseOrderedListMarker(line, start)
+        else -> null
+    }
+
+    private fun parseOrderedListMarker(line: String, start: Cursor): ListMarker? {
+        var index = start.index
+        var digits = 0
+        while (index < line.length && line[index].isDigit() && digits < MAX_ORDERED_LIST_DIGITS) {
+            index++
+            digits++
+        }
+        if (digits == 0 || line.getOrNull(index) !in listOf('.', ')')) return null
+        return finishListMarker(line, start, markerLength = digits + 1)
+    }
+
+    private fun finishListMarker(line: String, start: Cursor, markerLength: Int): ListMarker? {
+        val afterMarker = Cursor(index = start.index + markerLength, column = start.column + markerLength)
+        val firstPadding = line.getOrNull(afterMarker.index)
+        if (firstPadding != ' ' && firstPadding != '\t') return null
+
+        var cursor = afterMarker
+        val paddingStartColumn = cursor.column
+        while (cursor.index < line.length) {
+            val char = line[cursor.index]
+            if (char != ' ' && char != '\t') break
+            val next = advanceWhitespace(cursor, char)
+            if (next.column - paddingStartColumn > MAX_LIST_PADDING_COLUMNS) break
+            cursor = next
+        }
+        if (cursor.column == paddingStartColumn) return null
+
+        return ListMarker(contentStart = cursor.index, contentColumn = cursor.column)
+    }
+
+    private fun consumeIndentAtMost(line: String, start: Cursor, maxColumns: Int): Cursor? {
+        var cursor = start
+        while (cursor.index < line.length) {
+            val char = line[cursor.index]
+            if (char != ' ' && char != '\t') break
+            val next = advanceWhitespace(cursor, char)
+            if (next.column - start.column > maxColumns) return null
+            cursor = next
+        }
+        return cursor
+    }
+
+    private fun consumeRequiredIndent(line: String, start: Cursor, requiredColumns: Int): Cursor? {
+        var cursor = start
+        while (cursor.index < line.length && cursor.column - start.column < requiredColumns) {
+            val char = line[cursor.index]
+            if (char != ' ' && char != '\t') return null
+            cursor = advanceWhitespace(cursor, char)
+        }
+        return cursor.takeIf { it.column - start.column >= requiredColumns }
+    }
+
+    private fun advanceWhitespace(cursor: Cursor, char: Char): Cursor {
+        val nextColumn = if (char == '\t') {
+            cursor.column + (TAB_STOP_COLUMNS - (cursor.column % TAB_STOP_COLUMNS))
+        } else {
+            cursor.column + 1
+        }
+        return Cursor(index = cursor.index + 1, column = nextColumn)
+    }
+
+    private fun repairPrefix(containers: List<MarkdownContainer>): String = buildString {
+        containers.forEach { container ->
+            when (container) {
+                BlockQuoteContainer -> append("> ")
+                is ListContainer -> append(" ".repeat(container.continuationColumns))
             }
-            else -> return null
         }
-
-        if (markerEnd >= line.length || (line[markerEnd] != ' ' && line[markerEnd] != '\t')) return null
-        var contentStart = markerEnd
-        var padding = 0
-        while (contentStart < line.length && (line[contentStart] == ' ' || line[contentStart] == '\t') && padding < 4) {
-            contentStart++
-            padding++
-        }
-        if (padding == 0) return null
-
-        return ListMarker(
-            contentStart = contentStart,
-            consumedWidth = contentStart - start
-        )
     }
 
     private fun preferredLineEnding(counts: LineEndingCounts): LineEnding = when {
@@ -285,4 +340,9 @@ object DocumentDiagnostics {
     }
 
     private fun endsWithLineEnding(text: String): Boolean = text.endsWith('\n') || text.endsWith('\r')
+
+    private const val MAX_FENCE_INDENT_COLUMNS = 3
+    private const val MAX_LIST_PADDING_COLUMNS = 4
+    private const val MAX_ORDERED_LIST_DIGITS = 9
+    private const val TAB_STOP_COLUMNS = 4
 }
