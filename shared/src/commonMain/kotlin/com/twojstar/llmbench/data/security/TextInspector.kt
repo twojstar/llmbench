@@ -149,23 +149,34 @@ object TextInspector {
         scanPromptInjection(text, collector::add)
         scanEncodedPrompts(text, collector::add)
 
-        val retained = collector.retained()
-        val lineStarts = makeLineStarts(text)
-        val located = retained
+        val retainedByOffset = collector.retained()
             .sortedWith(compareBy<RawFinding> { it.offset }.thenBy(::severityRank))
-            .map { finding ->
-                val lineIndex = lineIndexForOffset(lineStarts, finding.offset)
-                TextSafetyFinding(
-                    severity = finding.severity,
-                    kind = finding.kind,
-                    label = finding.label,
-                    detail = finding.detail,
-                    offset = finding.offset,
-                    length = finding.length,
-                    line = lineIndex + 1,
-                    column = codePointColumn(text, lineStarts[lineIndex], finding.offset)
-                )
+        val lineStarts = makeLineStarts(text)
+        var cursorLine = -1
+        var cursorOffset = 0
+        var cursorColumn = 1
+        val located = retainedByOffset.map { finding ->
+            val lineIndex = lineIndexForOffset(lineStarts, finding.offset)
+            if (lineIndex != cursorLine || finding.offset < cursorOffset) {
+                cursorLine = lineIndex
+                cursorOffset = lineStarts[lineIndex]
+                cursorColumn = 1
             }
+            while (cursorOffset < finding.offset) {
+                cursorOffset += codePointAt(text, cursorOffset).second
+                cursorColumn += 1
+            }
+            TextSafetyFinding(
+                severity = finding.severity,
+                kind = finding.kind,
+                label = finding.label,
+                detail = finding.detail,
+                offset = finding.offset,
+                length = finding.length,
+                line = lineIndex + 1,
+                column = cursorColumn
+            )
+        }.sortedWith(compareBy<TextSafetyFinding> { it.severity.ordinal }.thenBy { it.offset })
         return TextInspectionResult(
             findings = located,
             detectedCount = collector.detectedCount,
@@ -511,16 +522,6 @@ object TextInspector {
             if (starts[mid] <= offset) low = mid + 1 else high = mid - 1
         }
         return high.coerceAtLeast(0)
-    }
-
-    private fun codePointColumn(text: String, lineStart: Int, offset: Int): Int {
-        var cursor = lineStart
-        var column = 1
-        while (cursor < offset) {
-            cursor += codePointAt(text, cursor).second
-            column += 1
-        }
-        return column
     }
 
     private fun hasVisibleText(value: String): Boolean = value.any { it.code > 0x1F && it.code != 0x7F }
