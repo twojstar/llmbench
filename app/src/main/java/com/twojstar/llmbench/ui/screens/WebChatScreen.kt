@@ -429,7 +429,10 @@ fun WebChatScreen(
         activityStatuses[service]?.let { status ->
             activityStatuses[service] = markWebChatActivityRead(status)
         }
-        updateLiveServices(nextWebViewLru(liveServices, service))
+        val generatingServices = activityStatuses
+            .filterValues { it == WebChatActivityStatus.GENERATING }
+            .keys
+        updateLiveServices(nextWebViewLru(liveServices, service, generatingServices))
     }
 
     fun evictInactiveWebViews() {
@@ -1785,11 +1788,13 @@ internal fun providerWebViewVisibility(isCurrentService: Boolean): Int =
 
 internal fun nextWebViewLru(
     current: List<WebAiService>,
-    selected: WebAiService
+    selected: WebAiService,
+    protectedServices: Set<WebAiService> = emptySet()
 ): List<WebAiService> = buildList {
     add(selected)
-    current.filterTo(this) { it != selected }
-}.take(MAX_LIVE_WEBVIEWS)
+    current.filterTo(this) { it != selected && it in protectedServices }
+    current.filterTo(this) { it != selected && it !in protectedServices }
+}.distinct().take(MAX_LIVE_WEBVIEWS)
 
 private fun releaseWebView(webView: WebView) {
     webView.onPause()

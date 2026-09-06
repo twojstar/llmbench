@@ -32,6 +32,16 @@ class WebViewLruTest {
         assertEquals(listOf(WebAiService.CHATGPT, WebAiService.GEMINI), revisit)
     }
     @Test
+    fun keepsGeneratingProviderAheadOfOrdinaryRecentProvider() {
+        val next = nextWebViewLru(
+            current = listOf(WebAiService.CHATGPT, WebAiService.CLAUDE),
+            selected = WebAiService.GEMINI,
+            protectedServices = setOf(WebAiService.CLAUDE)
+        )
+        assertEquals(listOf(WebAiService.GEMINI, WebAiService.CLAUDE), next)
+    }
+
+    @Test
     fun hidesInactiveProviderWebViewsAtTheViewLevel() {
         assertEquals(View.VISIBLE, providerWebViewVisibility(isCurrentService = true))
         assertEquals(View.GONE, providerWebViewVisibility(isCurrentService = false))
