@@ -8,6 +8,7 @@ import kotlin.test.assertTrue
 class TextInspectorTest {
     private companion object {
         const val ZERO_WIDTH_SPACE_LABEL = "Zero-width space"
+        const val MIXED_SCRIPT_LABEL = "Mixed-script token"
     }
 
     @Test
@@ -93,9 +94,26 @@ class TextInspectorTest {
     @Test
     fun detectsMixedLatinCyrillicToken() {
         val result = TextInspector.inspect("pаypal.example")
-        val finding = result.findings.first { it.label == "Mixed-script token" }
+        val finding = result.findings.first { it.label == MIXED_SCRIPT_LABEL }
 
         assertEquals(TextFindingSeverity.MEDIUM, finding.severity)
+    }
+
+    @Test
+    fun detectsTwoCharacterMixedScriptToken() {
+        val result = TextInspector.inspect("aа")
+
+        assertTrue(result.findings.any { it.label == MIXED_SCRIPT_LABEL })
+    }
+
+    @Test
+    fun boundsMixedScriptPreviewWithoutDroppingFindingLength() {
+        val token = "aа" + "x".repeat(10_000)
+        val result = TextInspector.inspect(token)
+        val finding = result.findings.first { it.label == MIXED_SCRIPT_LABEL }
+
+        assertEquals(token.length, finding.length)
+        assertTrue(finding.detail.length < 400)
     }
 
     @Test
