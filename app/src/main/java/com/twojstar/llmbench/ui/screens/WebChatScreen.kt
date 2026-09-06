@@ -109,6 +109,13 @@ private data class PendingSharedTextInsertion(
     val webView: WebView
 )
 
+private data class WebGenerationProbeTarget(
+    val service: WebAiService,
+    val webView: WebView,
+    val documentRevision: Int,
+    val url: String?
+)
+
 internal fun fileChooserAcceptsMimeType(
     acceptTypes: Array<String>,
     actualMimeType: String?,
@@ -451,7 +458,12 @@ fun WebChatScreen(
         val probeTargets = currentServices.mapNotNull { candidate ->
             val webView = webViewMap[candidate] ?: return@mapNotNull null
             if (!providerGenerationTrackingSupported(candidate)) return@mapNotNull null
-            candidate to webView
+            WebGenerationProbeTarget(
+                service = candidate,
+                webView = webView,
+                documentRevision = documentRevisions[candidate] ?: 0,
+                url = webView.url
+            )
         }
         if (probeTargets.isEmpty()) {
             livePoolDecisionRequestId++
@@ -462,14 +474,22 @@ fun WebChatScreen(
         val requestId = ++livePoolDecisionRequestId
         val observations = mutableMapOf<WebAiService, WebChatGenerationObservation>()
         var remaining = probeTargets.size
-        probeTargets.forEach { (candidate, webView) ->
+        probeTargets.forEach { target ->
+            val candidate = target.service
+            val webView = target.webView
             probeProviderGenerationActivity(
                 webView = webView,
                 service = candidate,
                 consumeCompletion = false
             ) { observation ->
                 if (requestId != livePoolDecisionRequestId) return@probeProviderGenerationActivity
-                observations[candidate] = if (webViewMap[candidate] === webView) {
+                val sameDocument = webGenerationProbeDocumentMatches(
+                    expectedRevision = target.documentRevision,
+                    currentRevision = documentRevisions[candidate] ?: 0,
+                    expectedUrl = target.url,
+                    currentUrl = webView.url
+                )
+                observations[candidate] = if (webViewMap[candidate] === webView && sameDocument) {
                     observation
                 } else {
                     WebChatGenerationObservation.UNKNOWN
@@ -1854,6 +1874,14 @@ internal fun nextWebViewLru(
     current.filterTo(this) { it != selected && it in protectedServices }
     current.filterTo(this) { it != selected && it !in protectedServices }
 }.distinct().take(MAX_LIVE_WEBVIEWS)
+
+internal fun webGenerationProbeDocumentMatches(
+    expectedRevision: Int,
+    currentRevision: Int,
+    expectedUrl: String?,
+    currentUrl: String?
+): Boolean = expectedRevision == currentRevision &&
+    providerDiagnosticsDocumentMatches(expectedUrl, currentUrl)
 
 internal fun webChatActivityStatusAfterFreshLruProbe(
     previous: WebChatActivityStatus,

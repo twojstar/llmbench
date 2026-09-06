@@ -84,6 +84,37 @@ class WebViewLruTest {
     }
 
     @Test
+    fun generationProbeRejectsNavigatedOrReplacedDocument() {
+        assertEquals(
+            true,
+            webGenerationProbeDocumentMatches(
+                expectedRevision = 4,
+                currentRevision = 4,
+                expectedUrl = "https://chatgpt.com/c/123#first",
+                currentUrl = "https://chatgpt.com/c/123#second"
+            )
+        )
+        assertEquals(
+            false,
+            webGenerationProbeDocumentMatches(
+                expectedRevision = 4,
+                currentRevision = 5,
+                expectedUrl = "https://chatgpt.com/c/123",
+                currentUrl = "https://chatgpt.com/c/123"
+            )
+        )
+        assertEquals(
+            false,
+            webGenerationProbeDocumentMatches(
+                expectedRevision = 4,
+                currentRevision = 4,
+                expectedUrl = "https://chatgpt.com/c/123",
+                currentUrl = "https://chatgpt.com/c/456"
+            )
+        )
+    }
+
+    @Test
     fun hidesInactiveProviderWebViewsAtTheViewLevel() {
         assertEquals(View.VISIBLE, providerWebViewVisibility(isCurrentService = true))
         assertEquals(View.GONE, providerWebViewVisibility(isCurrentService = false))
