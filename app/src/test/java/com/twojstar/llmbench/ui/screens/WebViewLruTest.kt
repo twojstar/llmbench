@@ -78,7 +78,34 @@ class WebViewLruTest {
             webChatActivityStatusAfterFreshLruProbe(
                 previous = WebChatActivityStatus.GENERATING,
                 observation = WebChatGenerationObservation.COMPLETED,
-                isSelected = false
+                observedService = WebAiService.CLAUDE,
+                activationTarget = WebAiService.GEMINI
+            )
+        )
+    }
+
+    @Test
+    fun unknownFreshProbePreservesKnownGeneratingStatus() {
+        assertEquals(
+            WebChatActivityStatus.GENERATING,
+            webChatActivityStatusAfterFreshLruProbe(
+                previous = WebChatActivityStatus.GENERATING,
+                observation = WebChatGenerationObservation.UNKNOWN,
+                observedService = WebAiService.CLAUDE,
+                activationTarget = WebAiService.GEMINI
+            )
+        )
+    }
+
+    @Test
+    fun completionOnActivationTargetStaysRead() {
+        assertEquals(
+            WebChatActivityStatus.IDLE,
+            webChatActivityStatusAfterFreshLruProbe(
+                previous = WebChatActivityStatus.GENERATING,
+                observation = WebChatGenerationObservation.COMPLETED,
+                observedService = WebAiService.GEMINI,
+                activationTarget = WebAiService.GEMINI
             )
         )
     }

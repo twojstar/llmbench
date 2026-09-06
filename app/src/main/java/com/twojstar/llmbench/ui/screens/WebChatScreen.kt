@@ -483,7 +483,8 @@ fun WebChatScreen(
                 activityStatuses[observedService] = webChatActivityStatusAfterFreshLruProbe(
                     previous = previous,
                     observation = freshObservation,
-                    isSelected = currentSelectedService == observedService
+                    observedService = observedService,
+                    activationTarget = service
                 )
             }
             finishActivateService(
@@ -1900,13 +1901,18 @@ internal fun webGenerationProbeDocumentMatches(
 internal fun webChatActivityStatusAfterFreshLruProbe(
     previous: WebChatActivityStatus,
     observation: WebChatGenerationObservation,
-    isSelected: Boolean
-): WebChatActivityStatus = nextObservedWebChatActivityStatus(
-    previous = previous,
-    observation = observation,
-    isSelected = isSelected,
-    isLiveService = true
-)
+    observedService: WebAiService,
+    activationTarget: WebAiService
+): WebChatActivityStatus = if (observation == WebChatGenerationObservation.UNKNOWN) {
+    previous
+} else {
+    nextObservedWebChatActivityStatus(
+        previous = previous,
+        observation = observation,
+        isSelected = observedService == activationTarget,
+        isLiveService = true
+    )
+}
 
 internal fun protectedWebServicesForLru(
     knownGenerating: Set<WebAiService>,
