@@ -7,6 +7,17 @@ import kotlin.test.assertTrue
 
 class ChatModelsTest {
     @Test
+    fun favoriteWebChatsMoveToTheTopWithoutDuplication() {
+        val sections = webChatSections(setOf(WebAiService.QWEN, WebAiService.CHATGPT))
+
+        assertEquals(listOf(WebAiService.CHATGPT, WebAiService.QWEN), sections.favorites)
+        assertFalse(WebAiService.CHATGPT in sections.primary)
+        assertFalse(WebAiService.QWEN in sections.additional)
+        assertEquals(WebAiService.entries.size, sections.all.size)
+        assertEquals(WebAiService.entries.toSet(), sections.all.toSet())
+    }
+
+    @Test
     fun webChatGroupsCoverEveryAccountBackedProviderExactlyOnce() {
         assertEquals(
             listOf(

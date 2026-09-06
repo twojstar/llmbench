@@ -84,6 +84,7 @@ OpenRouter and other OpenAI-compatible gateways may return the model actually us
 - [x] Throttle native activity polling for inactive live WebViews while retaining in-page completion latches.
 - [x] Skip periodic native activity probes entirely for web providers without verified tracking selectors.
 - [x] Keep the six mature account-backed chat integrations first in provider navigation while retaining every web provider under More chats.
+- [x] Persist the last selected web chat and favorite chats; starred providers move to a Favorites section in provider pickers.
 - [ ] Continue provider-specific mobile performance tweaks where they are measurable and safely scoped.
 
 ## API/runtime TODO

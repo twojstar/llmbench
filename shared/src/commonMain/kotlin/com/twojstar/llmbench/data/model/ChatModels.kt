@@ -136,6 +136,20 @@ enum class WebAiService(
     }
 }
 
+data class WebChatSections(
+    val favorites: List<WebAiService>,
+    val primary: List<WebAiService>,
+    val additional: List<WebAiService>
+) {
+    val all: List<WebAiService> get() = favorites + primary + additional
+}
+
+fun webChatSections(favorites: Set<WebAiService>): WebChatSections = WebChatSections(
+    favorites = WebAiService.entries.filter(favorites::contains),
+    primary = WebAiService.primaryChats.filterNot(favorites::contains),
+    additional = WebAiService.additionalChats.filterNot(favorites::contains)
+)
+
 @Serializable
 enum class AiProvider(
     val id: String,
