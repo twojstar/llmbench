@@ -90,6 +90,7 @@ private const val WEBVIEW_LOG_TAG = "LlmBenchWeb"
 private const val MAX_LIVE_WEBVIEWS = 2
 private const val WEB_ACTIVITY_POLL_MS = 1_200L
 private const val INACTIVE_WEB_ACTIVITY_POLL_EVERY = 3
+private const val LRU_GENERATION_PROBE_TIMEOUT_MS = 500L
 private const val DIAGNOSTIC_NONE_YET = "None yet"
 
 internal fun studioPromptForWebChat(renderedInstructions: String): String? =
@@ -474,15 +475,30 @@ fun WebChatScreen(
         val requestId = ++livePoolDecisionRequestId
         val observations = mutableMapOf<WebAiService, WebChatGenerationObservation>()
         var remaining = probeTargets.size
+
+        fun finishProbeDecisionIfReady() {
+            if (remaining != 0 || requestId != livePoolDecisionRequestId) return
+            observations.forEach { (observedService, freshObservation) ->
+                val previous = activityStatuses[observedService] ?: WebChatActivityStatus.IDLE
+                activityStatuses[observedService] = webChatActivityStatusAfterFreshLruProbe(
+                    previous = previous,
+                    observation = freshObservation,
+                    isSelected = currentSelectedService == observedService
+                )
+            }
+            finishActivateService(
+                service,
+                protectedWebServicesForLru(knownGenerating, observations)
+            )
+        }
+
         probeTargets.forEach { target ->
             val candidate = target.service
             val webView = target.webView
-            probeProviderGenerationActivity(
-                webView = webView,
-                service = candidate,
-                consumeCompletion = false
-            ) { observation ->
-                if (requestId != livePoolDecisionRequestId) return@probeProviderGenerationActivity
+            var settled = false
+            fun settleProbe(observation: WebChatGenerationObservation) {
+                if (requestId != livePoolDecisionRequestId || settled) return
+                settled = true
                 val sameDocument = webGenerationProbeDocumentMatches(
                     expectedRevision = target.documentRevision,
                     currentRevision = documentRevisions[candidate] ?: 0,
@@ -495,21 +511,19 @@ fun WebChatScreen(
                     WebChatGenerationObservation.UNKNOWN
                 }
                 remaining--
-                if (remaining == 0) {
-                    observations.forEach { (observedService, freshObservation) ->
-                        val previous = activityStatuses[observedService] ?: WebChatActivityStatus.IDLE
-                        activityStatuses[observedService] = webChatActivityStatusAfterFreshLruProbe(
-                            previous = previous,
-                            observation = freshObservation,
-                            isSelected = currentSelectedService == observedService
-                        )
-                    }
-                    finishActivateService(
-                        service,
-                        protectedWebServicesForLru(knownGenerating, observations)
-                    )
-                }
+                finishProbeDecisionIfReady()
             }
+
+            drawerScope.launch {
+                delay(LRU_GENERATION_PROBE_TIMEOUT_MS)
+                settleProbe(WebChatGenerationObservation.UNKNOWN)
+            }
+            probeProviderGenerationActivity(
+                webView = webView,
+                service = candidate,
+                consumeCompletion = false,
+                onResult = ::settleProbe
+            )
         }
     }
 

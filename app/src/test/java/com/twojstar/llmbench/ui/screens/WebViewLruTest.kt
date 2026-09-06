@@ -85,6 +85,7 @@ class WebViewLruTest {
 
     @Test
     fun generationProbeRejectsNavigatedOrReplacedDocument() {
+        val stableChatUrl = "https://chatgpt.com/c/123"
         assertEquals(
             true,
             webGenerationProbeDocumentMatches(
@@ -99,8 +100,8 @@ class WebViewLruTest {
             webGenerationProbeDocumentMatches(
                 expectedRevision = 4,
                 currentRevision = 5,
-                expectedUrl = "https://chatgpt.com/c/123",
-                currentUrl = "https://chatgpt.com/c/123"
+                expectedUrl = stableChatUrl,
+                currentUrl = stableChatUrl
             )
         )
         assertEquals(
@@ -108,7 +109,7 @@ class WebViewLruTest {
             webGenerationProbeDocumentMatches(
                 expectedRevision = 4,
                 currentRevision = 4,
-                expectedUrl = "https://chatgpt.com/c/123",
+                expectedUrl = stableChatUrl,
                 currentUrl = "https://chatgpt.com/c/456"
             )
         )
