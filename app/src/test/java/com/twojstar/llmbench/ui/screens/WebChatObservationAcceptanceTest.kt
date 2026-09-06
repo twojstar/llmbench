@@ -9,14 +9,33 @@ import org.junit.Test
 
 class WebChatObservationAcceptanceTest {
     @Test
-    fun selectedWebChatIsProbedEveryTickWhileInactiveChatIsThrottled() {
+    fun selectedTrackedWebChatIsProbedEveryTickWhileInactiveTrackedChatIsThrottled() {
         repeat(6) { tick ->
-            assertTrue(shouldProbeWebChatActivity(isSelected = true, pollTick = tick))
+            assertTrue(
+                shouldProbeWebChatActivity(
+                    trackingSupported = true,
+                    isSelected = true,
+                    pollTick = tick
+                )
+            )
         }
-        assertTrue(shouldProbeWebChatActivity(isSelected = false, pollTick = 0))
-        assertFalse(shouldProbeWebChatActivity(isSelected = false, pollTick = 1))
-        assertFalse(shouldProbeWebChatActivity(isSelected = false, pollTick = 2))
-        assertTrue(shouldProbeWebChatActivity(isSelected = false, pollTick = 3))
+        assertTrue(shouldProbeWebChatActivity(true, isSelected = false, pollTick = 0))
+        assertFalse(shouldProbeWebChatActivity(true, isSelected = false, pollTick = 1))
+        assertFalse(shouldProbeWebChatActivity(true, isSelected = false, pollTick = 2))
+        assertTrue(shouldProbeWebChatActivity(true, isSelected = false, pollTick = 3))
+    }
+
+    @Test
+    fun unsupportedWebChatIsNeverPeriodicallyProbed() {
+        repeat(6) { tick ->
+            assertFalse(
+                shouldProbeWebChatActivity(
+                    trackingSupported = false,
+                    isSelected = tick % 2 == 0,
+                    pollTick = tick
+                )
+            )
+        }
     }
 
     @Test
