@@ -13,6 +13,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -31,6 +32,8 @@ import com.twojstar.llmbench.ui.screens.*
 import com.twojstar.llmbench.ui.theme.LlmBenchTheme
 import com.twojstar.llmbench.ui.viewmodel.NavigationTab
 import com.twojstar.llmbench.ui.viewmodel.StudioViewModel
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 internal fun profilePlaygroundDestination(): NavigationTab = NavigationTab.PLAYGROUND
 
@@ -251,13 +254,33 @@ private fun IncomingShareProviderDialog(
     onSelect: (WebAiService) -> Unit,
     onDismiss: () -> Unit
 ) {
-    val inspection = remember(payload.text) {
-        payload.text?.let(TextInspector::inspect) ?: TextInspectionResult(emptyList())
+    val safetyKey = remember(payload.text, payload.uriStrings) {
+        listOf(payload.text?.length ?: 0, payload.text?.hashCode() ?: 0, payload.uriStrings.hashCode()).hashCode()
     }
-    var safetyReviewed by remember(payload.text) { mutableStateOf(!inspection.hasFindings) }
-    if (!safetyReviewed) {
+    var safetyReviewed by rememberSaveable(safetyKey) { mutableStateOf(false) }
+    var inspection by remember(payload.text, payload.uriStrings) {
+        mutableStateOf<TextInspectionResult?>(
+            if (payload.text == null) TextInspectionResult(emptyList()) else null
+        )
+    }
+
+    LaunchedEffect(payload.text, payload.uriStrings) {
+        val text = payload.text
+        inspection = if (text == null) {
+            TextInspectionResult(emptyList())
+        } else {
+            withContext(Dispatchers.Default) { TextInspector.inspect(text) }
+        }
+    }
+
+    val currentInspection = inspection
+    if (currentInspection == null) {
+        SharedTextInspectionProgressDialog(onDismiss = onDismiss)
+        return
+    }
+    if (!safetyReviewed && currentInspection.hasFindings) {
         SharedTextSafetyReviewDialog(
-            inspection = inspection,
+            inspection = currentInspection,
             onContinue = { safetyReviewed = true },
             onDismiss = onDismiss
         )
@@ -338,6 +361,27 @@ private fun IncomingShareProviderDialog(
 }
 
 @Composable
+private fun SharedTextInspectionProgressDialog(onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Inspecting shared text") },
+        text = {
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
+                Text(
+                    "Checking hidden Unicode, encoded carriers and prompt-like instructions before routing this text.",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            }
+        },
+        confirmButton = {},
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        }
+    )
+}
+
+@Composable
 private fun SharedTextSafetyReviewDialog(
     inspection: TextInspectionResult,
     onContinue: () -> Unit,
@@ -360,11 +404,11 @@ private fun SharedTextSafetyReviewDialog(
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Text(
-                    "LlmBench found ${inspection.findings.size} suspicious text marker${if (inspection.findings.size == 1) "" else "s"}. Review them before this text can be routed to a provider.",
+                    "LlmBench found ${inspection.detectedCount} suspicious text detection${if (inspection.detectedCount == 1) "" else "s"}. Review the retained details before this text can be routed to a provider.",
                     style = MaterialTheme.typography.bodyMedium
                 )
                 Text(
-                    "High ${inspection.highCount} • Medium ${inspection.mediumCount} • Low ${inspection.lowCount}",
+                    "${if (inspection.truncated) "Retained" else "Severity"}: High ${inspection.highCount} • Medium ${inspection.mediumCount} • Low ${inspection.lowCount}",
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
