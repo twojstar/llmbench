@@ -28,6 +28,9 @@ kotlin {
         commonMain.dependencies {
             implementation(libs.kotlinx.serialization.json)
         }
+        androidMain.dependencies {
+            implementation(libs.jtokkit)
+        }
         commonTest.dependencies {
             implementation(kotlin("test"))
         }
