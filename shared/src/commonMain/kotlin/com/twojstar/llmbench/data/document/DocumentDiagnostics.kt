@@ -70,15 +70,21 @@ object DocumentDiagnostics {
         }
 
         val normalized = TextDocumentCodec.normalizeLineEndings(document.text, normalizeTo)
+        val currentLineEndings = TextDocumentCodec.detectLineEndings(normalized)
         if (normalized == document.text) {
-            return DocumentRepairResult(document = document, applied = emptyList())
+            val refreshed = if (currentLineEndings == document.lineEndings) {
+                document
+            } else {
+                document.copy(lineEndings = currentLineEndings)
+            }
+            return DocumentRepairResult(document = refreshed, applied = emptyList())
         }
 
         return DocumentRepairResult(
             document = TextDocument(
                 text = normalized,
                 hadUtf8Bom = document.hadUtf8Bom,
-                lineEndings = TextDocumentCodec.detectLineEndings(normalized)
+                lineEndings = currentLineEndings
             ),
             applied = listOf(DocumentRepairAction.NORMALIZE_LINE_ENDINGS)
         )
@@ -102,8 +108,10 @@ object DocumentDiagnostics {
                     index++
                 }
                 else -> {
+                    val isSurrogatePair = text[index].isHighSurrogate() &&
+                        index + 1 < text.length && text[index + 1].isLowSurrogate()
                     column++
-                    index++
+                    index += if (isSurrogatePair) 2 else 1
                 }
             }
         }
