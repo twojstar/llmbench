@@ -2,6 +2,7 @@ package com.twojstar.llmbench.data.document
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotSame
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
@@ -41,6 +42,17 @@ class DocumentDiagnosticsTest {
     }
 
     @Test
+    fun countsSupplementaryUnicodeAsOneColumnBeforeNul() {
+        val document = TextDocumentCodec.decodeUtf8("😀\u0000".encodeToByteArray())
+
+        val nul = DocumentDiagnostics.inspect(document)
+            .single { it.kind == DocumentDiagnosticKind.NUL_CHARACTER }
+
+        assertEquals(1, nul.line)
+        assertEquals(2, nul.column)
+    }
+
+    @Test
     fun explicitLineEndingRepairPreservesBomAndUpdatesMetadata() {
         val source = byteArrayOf(0xEF.toByte(), 0xBB.toByte(), 0xBF.toByte()) +
             "before\r\nafter\n".encodeToByteArray()
@@ -65,12 +77,25 @@ class DocumentDiagnosticsTest {
     }
 
     @Test
-    fun requestedNormalizationIsNoOpWhenTextAlreadyMatches() {
+    fun requestedNormalizationIsNoOpWhenTextAndMetadataAlreadyMatch() {
         val document = TextDocumentCodec.decodeUtf8("a\nb\n".encodeToByteArray())
 
         val repaired = DocumentDiagnostics.repair(document, normalizeTo = LineEnding.LF)
 
         assertEquals(emptyList(), repaired.applied)
         assertSame(document, repaired.document)
+    }
+
+    @Test
+    fun requestedNormalizationRefreshesStaleMetadataWithoutClaimingTextRepair() {
+        val original = TextDocumentCodec.decodeUtf8("a\r\nb".encodeToByteArray())
+        val edited = original.copy(text = "a\nb")
+
+        val repaired = DocumentDiagnostics.repair(edited, normalizeTo = LineEnding.LF)
+
+        assertEquals(emptyList(), repaired.applied)
+        assertEquals("a\nb", repaired.document.text)
+        assertEquals(LineEndingStyle.LF, repaired.document.lineEndings.style)
+        assertNotSame(edited, repaired.document)
     }
 }
