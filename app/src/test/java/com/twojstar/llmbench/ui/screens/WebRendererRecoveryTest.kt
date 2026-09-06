@@ -2,9 +2,17 @@ package com.twojstar.llmbench.ui.screens
 
 import com.twojstar.llmbench.data.model.WebAiService
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class WebRendererRecoveryTest {
+    @Test
+    fun onlyInactiveRendererWaivesPriorityWhenNotVisible() {
+        assertFalse(rendererPriorityWaivedWhenNotVisible(isSelected = true))
+        assertTrue(rendererPriorityWaivedWhenNotVisible(isSelected = false))
+    }
+
     @Test
     fun lowMemoryRendererTerminationRecreatesLastUrl() {
         assertEquals(

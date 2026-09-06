@@ -132,6 +132,8 @@ internal fun webRendererRecoveryAction(
     else -> WebRendererRecoveryAction.EVICT_UNTIL_SELECTED
 }
 
+internal fun rendererPriorityWaivedWhenNotVisible(isSelected: Boolean): Boolean = !isSelected
+
 internal fun webServicesForActivation(
     current: List<WebAiService>,
     activationTarget: WebAiService,
@@ -1133,6 +1135,10 @@ fun WebChatScreen(
                         },
                         update = { wv ->
                             wv.visibility = providerWebViewVisibility(isCurrentService)
+                            wv.setRendererPriorityPolicy(
+                                WebView.RENDERER_PRIORITY_IMPORTANT,
+                                rendererPriorityWaivedWhenNotVisible(isCurrentService)
+                            )
                             if (isCurrentService && lifecycleStarted) {
                                 wv.onResume()
                             } else {
@@ -2159,9 +2165,12 @@ private fun createConfiguredWebView(
             ViewGroup.LayoutParams.MATCH_PARENT,
             ViewGroup.LayoutParams.MATCH_PARENT
         )
-        // The selected WebView remains IMPORTANT. Hidden MRU WebViews may drop to
-        // WAIVED under memory pressure; onRenderProcessGone handles recovery.
-        setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, true)
+        // Selected chats stay IMPORTANT even when the whole app is backgrounded.
+        // Only inactive retained WebViews may waive priority when not visible.
+        setRendererPriorityPolicy(
+            WebView.RENDERER_PRIORITY_IMPORTANT,
+            rendererPriorityWaivedWhenNotVisible(isServiceSelected())
+        )
         isClickable = true
         isFocusable = true
         isFocusableInTouchMode = true
