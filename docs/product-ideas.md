@@ -75,7 +75,8 @@ These are Docbench-style capabilities to bring into LlmBench, not changes to Doc
 - Replace fixed narrow message widths on expanded screens with adaptive readable widths: do not stretch text edge-to-edge, but do not keep the current phone-sized bubble cap on tablets either.
 - Prefer Material typography over hard-coded tiny essential labels; keep touch targets and Android font-scaling/accessibility behavior intact.
 - Keep edge-to-edge, IME handling and predictive back coherent across chats, sheets, drawers and list-detail panes.
-- Add Macrobenchmark journeys and Baseline Profiles for cold/warm start, opening a chat, provider switching, long-message-list scrolling, returning from a detail pane and active streaming. Judge smoothness from release builds and frame timing, not debug feel.\n- Re-check the current Android guidance at implementation time: Material 3, Material 3 Adaptive, Compose lazy-list performance and Baseline Profile/Macrobenchmark docs are the source of truth rather than version numbers frozen in this backlog.
+- Add Macrobenchmark journeys and Baseline Profiles for cold/warm start, opening a chat, provider switching, long-message-list scrolling, returning from a detail pane and active streaming. Judge smoothness from release builds and frame timing, not debug feel.
+- Re-check the current Android guidance at implementation time: Material 3, Material 3 Adaptive, Compose lazy-list performance and Baseline Profile/Macrobenchmark docs are the source of truth rather than version numbers frozen in this backlog.
 
 ### UI construction shortlist from the inspected APK batch
 
@@ -98,7 +99,8 @@ These are Docbench-style capabilities to bring into LlmBench, not changes to Doc
 - Add `RemoteInput` Direct Reply per conversation with a unique reply `PendingIntent`. Feed the reply through the same native send pipeline, reflect sending/failure state, then update the same notification instead of canceling it so repeated replies remain possible.
 - For account-backed WebView providers, do not pretend background Direct Reply is reliable. Until a provider has a safe supported transport, capture the reply as a staged draft and deep-link into that exact provider/chat for explicit send rather than automating a hidden WebView.
 - Keep a provider capability matrix for notifications/widgets (`messageHistory`, `completionNotification`, `directReply`, `draftReply`, `deepLink`) so UI only promises actions that actually work.
-- Free-form typing does not belong inside a Glance/RemoteViews widget. A pinned-chat widget should open the composer; true inline text entry belongs to notification Direct Reply where Android provides `RemoteInput`.\n- Re-check current Glance, conversation-notification and Direct Reply guidance at implementation time; these platform surfaces evolve independently from ordinary Compose UI.
+- Free-form typing does not belong inside a Glance/RemoteViews widget. A pinned-chat widget should open the composer; true inline text entry belongs to notification Direct Reply where Android provides `RemoteInput`.
+- Re-check current Glance, conversation-notification and Direct Reply guidance at implementation time; these platform surfaces evolve independently from ordinary Compose UI.
 
 ## UX patterns worth keeping in mind
 
