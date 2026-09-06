@@ -204,9 +204,13 @@ internal fun nextObservedWebChatActivityStatus(
     return if (isLiveService) nextStatus else webChatActivityStatusAfterEviction(nextStatus)
 }
 
-// The page observer latches completion, so inactive live tabs do not need every native poll.
-internal fun shouldProbeWebChatActivity(isSelected: Boolean, pollTick: Int): Boolean =
-    isSelected || pollTick % INACTIVE_WEB_ACTIVITY_POLL_EVERY == 0
+// The page observer latches completion, so inactive tracked tabs do not need every native poll.
+internal fun shouldProbeWebChatActivity(
+    trackingSupported: Boolean,
+    isSelected: Boolean,
+    pollTick: Int
+): Boolean = trackingSupported &&
+    (isSelected || pollTick % INACTIVE_WEB_ACTIVITY_POLL_EVERY == 0)
 
 internal fun shouldApplyPendingDesktopMode(
     observation: WebChatGenerationObservation,
@@ -459,7 +463,12 @@ fun WebChatScreen(
         var pollTick = 0
         while (true) {
             liveServices.forEach { service ->
-                if (shouldProbeWebChatActivity(service == selectedService, pollTick)) {
+                if (shouldProbeWebChatActivity(
+                        trackingSupported = providerGenerationTrackingSupported(service),
+                        isSelected = service == selectedService,
+                        pollTick = pollTick
+                    )
+                ) {
                     probeServiceActivity(service)
                 }
             }
