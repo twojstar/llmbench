@@ -33,7 +33,10 @@ class ProviderWebTweaksTest {
         assertTrue(smooth.script.contains("MutationObserver"))
         assertTrue(smooth.script.contains("image.loading = 'lazy'"))
         assertTrue(smooth.script.contains("window.setTimeout(callback, 100)"))
-        assertTrue(smooth.script.contains("window.addEventListener('resize', schedule"))
+        assertTrue(smooth.script.contains("if (turnBoundaryMayHaveChanged) scheduleTurns()"))
+        assertTrue(smooth.script.contains("window.addEventListener('resize', scheduleSide"))
+        assertTrue(smooth.script.contains("tagTurns();"))
+        assertTrue(smooth.script.contains("tagSide();"))
         assertTrue(smooth.css.contains("animation-iteration-count: 1"))
         assertFalse(
             ProviderWebTweakRegistry.forProvider(WebAiService.CHATGPT)

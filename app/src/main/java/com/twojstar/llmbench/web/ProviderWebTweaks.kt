@@ -92,20 +92,26 @@ internal object ProviderWebTweakRegistry {
                 const TAIL = 2;
                 const isDesktop = () => window.matchMedia('(pointer: fine)').matches && window.innerWidth >= 900;
 
-                const tag = () => {
+                const tagTurns = () => {
                     const turns = Array.from(document.querySelectorAll(TURN_SELECTOR));
                     turns.forEach((turn, index) => {
                         turn.classList.toggle('llmbench-cv-turn', index < turns.length - TAIL);
                     });
+                };
 
+                const tagSide = () => {
+                    const compactSide = !isDesktop();
+                    document.querySelectorAll(SIDE_SELECTOR).forEach((item) => {
+                        item.classList.toggle('llmbench-cv-side', compactSide);
+                    });
+                };
+
+                const tag = () => {
+                    tagTurns();
+                    tagSide();
                     document.querySelectorAll('pre').forEach((code) => {
                         if (!code.closest(OVERLAY_SELECTOR)) code.classList.add('llmbench-cv-code');
                     });
-
-                    document.querySelectorAll(SIDE_SELECTOR).forEach((item) => {
-                        item.classList.toggle('llmbench-cv-side', !isDesktop());
-                    });
-
                     document.querySelectorAll('img:not([data-llmbench-lazy])').forEach((image) => {
                         image.loading = 'lazy';
                         image.decoding = 'async';
@@ -116,13 +122,22 @@ internal object ProviderWebTweakRegistry {
                 const idle = window.requestIdleCallback
                     ? (callback) => window.requestIdleCallback(callback, { timeout: 500 })
                     : (callback) => window.setTimeout(callback, 100);
-                let queued = false;
-                const schedule = () => {
-                    if (queued) return;
-                    queued = true;
+                let turnsQueued = false;
+                const scheduleTurns = () => {
+                    if (turnsQueued) return;
+                    turnsQueued = true;
                     idle(() => {
-                        queued = false;
-                        tag();
+                        turnsQueued = false;
+                        tagTurns();
+                    });
+                };
+                let sideQueued = false;
+                const scheduleSide = () => {
+                    if (sideQueued) return;
+                    sideQueued = true;
+                    idle(() => {
+                        sideQueued = false;
+                        tagSide();
                     });
                 };
 
@@ -155,12 +170,12 @@ internal object ProviderWebTweakRegistry {
                             }
                         });
                     });
-                    if (turnBoundaryMayHaveChanged) schedule();
+                    if (turnBoundaryMayHaveChanged) scheduleTurns();
                 });
                 const start = () => {
                     tag();
                     observer.observe(document.body, { childList: true, subtree: true });
-                    window.addEventListener('resize', schedule, { passive: true });
+                    window.addEventListener('resize', scheduleSide, { passive: true });
                 };
                 window[STATE_KEY] = { tag, observer };
 
