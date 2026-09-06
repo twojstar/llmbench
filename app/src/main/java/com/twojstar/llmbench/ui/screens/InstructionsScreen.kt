@@ -24,9 +24,15 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.twojstar.llmbench.data.tokenizer.LocalTokenCounter
 import com.twojstar.llmbench.ui.theme.*
 import com.twojstar.llmbench.ui.viewmodel.StudioUiState
 import com.twojstar.llmbench.ui.viewmodel.StudioViewModel
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
+
+private const val TOKEN_COUNT_DEBOUNCE_MS = 360L
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -41,8 +47,24 @@ fun InstructionsScreen(
     val lines = remember(renderedText) {
         renderedText.lines().filter { it.isNotBlank() }
     }
-    val estimatedTokens = remember(renderedText) {
-        (renderedText.split(Regex("\\s+")).size * 1.33).toInt()
+    var tokenCount by remember(renderedText) { mutableStateOf<Int?>(null) }
+    var tokenCountFailed by remember(renderedText) { mutableStateOf(false) }
+
+    LaunchedEffect(renderedText) {
+        delay(TOKEN_COUNT_DEBOUNCE_MS)
+        runCatching {
+            withContext(Dispatchers.Default) { LocalTokenCounter.count(renderedText) }
+        }.onSuccess { count ->
+            tokenCount = count
+        }.onFailure {
+            tokenCountFailed = true
+        }
+    }
+
+    val tokenSummary = when {
+        tokenCount != null -> "${tokenCount} tokens · ${LocalTokenCounter.ENCODING_LABEL}"
+        tokenCountFailed -> "tokens unavailable"
+        else -> "counting tokens…"
     }
 
     Scaffold(
@@ -56,7 +78,7 @@ fun InstructionsScreen(
                             fontWeight = FontWeight.Bold
                         )
                         Text(
-                            text = "${lines.size} effective rules • ~${estimatedTokens} tokens",
+                            text = "${lines.size} effective rules • $tokenSummary",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )

@@ -79,6 +79,7 @@ dependencies {
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.okhttp)
     implementation(libs.okhttp.logging)
+    implementation(libs.jtokkit)
 
     testImplementation(libs.junit)
     testImplementation(libs.rhino)
