@@ -21,9 +21,10 @@ data class TextSafetyFinding(
 
 data class TextInspectionResult(
     val findings: List<TextSafetyFinding>,
-    val truncated: Boolean = false
+    val detectedCount: Int = findings.size,
+    val truncated: Boolean = detectedCount > findings.size
 ) {
-    val hasFindings: Boolean get() = findings.isNotEmpty()
+    val hasFindings: Boolean get() = detectedCount > 0
     val highCount: Int get() = findings.count { it.severity == TextFindingSeverity.HIGH }
     val mediumCount: Int get() = findings.count { it.severity == TextFindingSeverity.MEDIUM }
     val lowCount: Int get() = findings.count { it.severity == TextFindingSeverity.LOW }
@@ -47,6 +48,30 @@ object TextInspector {
         val offset: Int,
         val length: Int
     )
+
+    private class FindingCollector {
+        private val high = mutableListOf<RawFinding>()
+        private val medium = mutableListOf<RawFinding>()
+        private val low = mutableListOf<RawFinding>()
+        var detectedCount: Int = 0
+            private set
+
+        fun add(finding: RawFinding) {
+            detectedCount += 1
+            val bucket = when (finding.severity) {
+                TextFindingSeverity.HIGH -> high
+                TextFindingSeverity.MEDIUM -> medium
+                TextFindingSeverity.LOW -> low
+            }
+            if (bucket.size < MAX_FINDINGS) bucket += finding
+        }
+
+        fun retained(): List<RawFinding> = buildList(MAX_FINDINGS) {
+            addAll(high.take(MAX_FINDINGS))
+            if (size < MAX_FINDINGS) addAll(medium.take(MAX_FINDINGS - size))
+            if (size < MAX_FINDINGS) addAll(low.take(MAX_FINDINGS - size))
+        }
+    }
 
     private data class SpecialCharacter(
         val severity: TextFindingSeverity,
@@ -117,34 +142,16 @@ object TextInspector {
 
     fun inspect(text: String): TextInspectionResult {
         if (text.isEmpty()) return TextInspectionResult(emptyList())
-        val findings = mutableListOf<RawFinding>()
-        var truncated = false
+        val collector = FindingCollector()
+        scanCharacters(text, collector::add)
+        scanUnicodeTags(text, collector::add)
+        scanMixedScripts(text, collector::add)
+        scanPromptInjection(text, collector::add)
+        scanEncodedPrompts(text, collector::add)
 
-        fun add(finding: RawFinding) {
-            val duplicate = findings.any {
-                it.kind == finding.kind && it.offset == finding.offset && it.length == finding.length && it.label == finding.label
-            }
-            if (duplicate) return
-            if (findings.size < MAX_FINDINGS) {
-                findings += finding
-                return
-            }
-            truncated = true
-            val worstRank = findings.maxOf(::severityRank)
-            val candidateRank = severityRank(finding)
-            if (candidateRank >= worstRank) return
-            val replacement = findings.indexOfFirst { severityRank(it) == worstRank }
-            if (replacement >= 0) findings[replacement] = finding
-        }
-
-        scanCharacters(text, ::add)
-        scanUnicodeTags(text, ::add)
-        scanMixedScripts(text, ::add)
-        scanPromptInjection(text, ::add)
-        scanEncodedPrompts(text, ::add)
-
+        val retained = collector.retained()
         val lineStarts = makeLineStarts(text)
-        val located = findings
+        val located = retained
             .sortedWith(compareBy<RawFinding> { it.offset }.thenBy(::severityRank))
             .map { finding ->
                 val lineIndex = lineIndexForOffset(lineStarts, finding.offset)
@@ -159,7 +166,11 @@ object TextInspector {
                     column = codePointColumn(text, lineStarts[lineIndex], finding.offset)
                 )
             }
-        return TextInspectionResult(located, truncated)
+        return TextInspectionResult(
+            findings = located,
+            detectedCount = collector.detectedCount,
+            truncated = collector.detectedCount > located.size
+        )
     }
 
     private fun severityRank(finding: RawFinding): Int = when (finding.severity) {
@@ -268,13 +279,13 @@ object TextInspector {
             val start = offset
             val payload = StringBuilder()
             var count = 0
-            var truncated = false
+            var previewTruncated = false
             while (offset < text.length) {
                 val (tagCodePoint, tagWidth) = codePointAt(text, offset)
                 if (!isTagCharacter(tagCodePoint)) break
                 val ascii = tagCodePoint - 0xE0000
                 if (ascii in 0x20..0x7E) {
-                    if (payload.length < MAX_TAG_PREVIEW_CHARS) payload.append(ascii.toChar()) else truncated = true
+                    if (payload.length < MAX_TAG_PREVIEW_CHARS) payload.append(ascii.toChar()) else previewTruncated = true
                 }
                 count += 1
                 offset += tagWidth
@@ -282,7 +293,7 @@ object TextInspector {
             val detail = if (payload.isEmpty()) {
                 "$count invisible Unicode tag characters."
             } else {
-                "Hidden tag payload: ${quotedPreview(payload.toString())}${if (truncated) " (preview truncated)" else ""}"
+                "Hidden tag payload: ${quotedPreview(payload.toString())}${if (previewTruncated) " (preview truncated)" else ""}"
             }
             add(
                 RawFinding(
@@ -482,7 +493,7 @@ object TextInspector {
                     starts += index + if (isCrLf) 2 else 1
                     index += if (isCrLf) 2 else 1
                 }
-                '\n' -> {
+                '\n', '\u2028', '\u2029' -> {
                     starts += index + 1
                     index += 1
                 }
