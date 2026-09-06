@@ -6,6 +6,7 @@ LlmBench is a Kotlin Multiplatform project with Android as the first shipping cl
 
 - If LlmBench consumes `.ai`, use an explicit adapter/import boundary and keep `.ai` canonical upstream.
 - Prefer extending the existing module structure over creating parallel implementations.
+- Product priority: improve account-backed WebView chats first; native/API-key chat is secondary unless the task explicitly targets it.
 
 ## Multiplatform conventions
 
