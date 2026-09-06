@@ -20,6 +20,7 @@ class WebRendererRecoveryTest {
     fun uncertainOrGeneratingObservationKeepsRendererProtected() {
         assertTrue(rendererInactivityConfirmedByObservation(WebChatGenerationObservation.IDLE))
         assertTrue(rendererInactivityConfirmedByObservation(WebChatGenerationObservation.COMPLETED))
+        assertTrue(rendererInactivityConfirmedByObservation(WebChatGenerationObservation.COMPLETED_WHILE_SELECTED))
         assertFalse(rendererInactivityConfirmedByObservation(WebChatGenerationObservation.GENERATING))
         assertFalse(rendererInactivityConfirmedByObservation(WebChatGenerationObservation.UNKNOWN))
     }
