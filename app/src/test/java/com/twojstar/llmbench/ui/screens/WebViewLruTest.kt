@@ -2,6 +2,7 @@ package com.twojstar.llmbench.ui.screens
 
 import android.view.View
 import com.twojstar.llmbench.data.model.WebAiService
+import com.twojstar.llmbench.data.model.WebChatGenerationObservation
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -39,6 +40,34 @@ class WebViewLruTest {
             protectedServices = setOf(WebAiService.CLAUDE)
         )
         assertEquals(listOf(WebAiService.GEMINI, WebAiService.CLAUDE), next)
+    }
+
+    @Test
+    fun freshGenerationProbeProtectsResponseBeforeNativePollCatchesUp() {
+        val protected = protectedWebServicesForLru(
+            knownGenerating = emptySet(),
+            freshObservations = mapOf(
+                WebAiService.CLAUDE to WebChatGenerationObservation.GENERATING,
+                WebAiService.CHATGPT to WebChatGenerationObservation.IDLE
+            )
+        )
+        val next = nextWebViewLru(
+            current = listOf(WebAiService.CHATGPT, WebAiService.CLAUDE),
+            selected = WebAiService.GEMINI,
+            protectedServices = protected
+        )
+        assertEquals(listOf(WebAiService.GEMINI, WebAiService.CLAUDE), next)
+    }
+
+    @Test
+    fun freshIdleProbeClearsStaleGeneratingProtection() {
+        val protected = protectedWebServicesForLru(
+            knownGenerating = setOf(WebAiService.CLAUDE),
+            freshObservations = mapOf(
+                WebAiService.CLAUDE to WebChatGenerationObservation.IDLE
+            )
+        )
+        assertEquals(emptySet<WebAiService>(), protected)
     }
 
     @Test

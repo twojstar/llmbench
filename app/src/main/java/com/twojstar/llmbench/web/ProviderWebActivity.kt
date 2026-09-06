@@ -203,6 +203,7 @@ internal fun providerGenerationTrackingSupported(service: WebAiService): Boolean
 internal fun probeProviderGenerationActivity(
     webView: WebView,
     service: WebAiService,
+    consumeCompletion: Boolean = true,
     onResult: (WebChatGenerationObservation) -> Unit
 ) {
     val pageUrl = webView.url
@@ -211,7 +212,7 @@ internal fun probeProviderGenerationActivity(
         return
     }
 
-    val script = providerGenerationActivityScript(service, consumeCompletion = true)
+    val script = providerGenerationActivityScript(service, consumeCompletion = consumeCompletion)
     if (script == null) {
         onResult(WebChatGenerationObservation.UNKNOWN)
         return

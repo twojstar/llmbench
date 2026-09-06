@@ -343,6 +343,7 @@ fun WebChatScreen(
     val pendingDesktopModes = remember { mutableStateMapOf<WebAiService, Boolean>() }
     val providerFavicons = remember { mutableStateMapOf<WebAiService, Bitmap>() }
     val currentSelectedService by rememberUpdatedState(selectedService)
+    var livePoolDecisionRequestId by remember { mutableIntStateOf(0) }
 
     fun releaseSharedTextClaimFor(webView: WebView) {
         val insertion = pendingSharedTextInsertion.value
@@ -409,8 +410,11 @@ fun WebChatScreen(
         }
     }
 
-    fun activateService(service: WebAiService) {
-        val previousService = selectedService
+    fun finishActivateService(
+        service: WebAiService,
+        protectedServices: Set<WebAiService>
+    ) {
+        val previousService = currentSelectedService
         if (previousService != service) {
             webViewMap[previousService]?.let { webView ->
                 setProviderGenerationTrackerSelected(webView, previousService, isSelected = false)
@@ -429,13 +433,60 @@ fun WebChatScreen(
         activityStatuses[service]?.let { status ->
             activityStatuses[service] = markWebChatActivityRead(status)
         }
-        val generatingServices = activityStatuses
+        updateLiveServices(nextWebViewLru(liveServices, service, protectedServices))
+    }
+
+    fun activateService(service: WebAiService) {
+        val currentServices = liveServices
+        val knownGenerating = activityStatuses
             .filterValues { it == WebChatActivityStatus.GENERATING }
             .keys
-        updateLiveServices(nextWebViewLru(liveServices, service, generatingServices))
+            .toSet()
+        if (service in currentServices || currentServices.size < MAX_LIVE_WEBVIEWS) {
+            livePoolDecisionRequestId++
+            finishActivateService(service, knownGenerating)
+            return
+        }
+
+        val probeTargets = currentServices.mapNotNull { candidate ->
+            val webView = webViewMap[candidate] ?: return@mapNotNull null
+            if (!providerGenerationTrackingSupported(candidate)) return@mapNotNull null
+            candidate to webView
+        }
+        if (probeTargets.isEmpty()) {
+            livePoolDecisionRequestId++
+            finishActivateService(service, knownGenerating)
+            return
+        }
+
+        val requestId = ++livePoolDecisionRequestId
+        val observations = mutableMapOf<WebAiService, WebChatGenerationObservation>()
+        var remaining = probeTargets.size
+        probeTargets.forEach { (candidate, webView) ->
+            probeProviderGenerationActivity(
+                webView = webView,
+                service = candidate,
+                consumeCompletion = false
+            ) { observation ->
+                if (requestId != livePoolDecisionRequestId) return@probeProviderGenerationActivity
+                observations[candidate] = if (webViewMap[candidate] === webView) {
+                    observation
+                } else {
+                    WebChatGenerationObservation.UNKNOWN
+                }
+                remaining--
+                if (remaining == 0) {
+                    finishActivateService(
+                        service,
+                        protectedWebServicesForLru(knownGenerating, observations)
+                    )
+                }
+            }
+        }
     }
 
     fun evictInactiveWebViews() {
+        livePoolDecisionRequestId++
         updateLiveServices(listOf(currentSelectedService))
     }
 
@@ -1795,6 +1846,21 @@ internal fun nextWebViewLru(
     current.filterTo(this) { it != selected && it in protectedServices }
     current.filterTo(this) { it != selected && it !in protectedServices }
 }.distinct().take(MAX_LIVE_WEBVIEWS)
+
+internal fun protectedWebServicesForLru(
+    knownGenerating: Set<WebAiService>,
+    freshObservations: Map<WebAiService, WebChatGenerationObservation>
+): Set<WebAiService> = knownGenerating.toMutableSet().apply {
+    freshObservations.forEach { (service, observation) ->
+        when (observation) {
+            WebChatGenerationObservation.GENERATING -> add(service)
+            WebChatGenerationObservation.IDLE,
+            WebChatGenerationObservation.COMPLETED,
+            WebChatGenerationObservation.COMPLETED_WHILE_SELECTED -> remove(service)
+            WebChatGenerationObservation.UNKNOWN -> Unit
+        }
+    }
+}
 
 private fun releaseWebView(webView: WebView) {
     webView.onPause()
