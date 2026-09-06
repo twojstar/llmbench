@@ -270,7 +270,22 @@ private fun IncomingShareProviderDialog(
                     style = MaterialTheme.typography.bodyMedium
                 )
                 Spacer(Modifier.height(4.dp))
-                WebAiService.entries.forEach { service ->
+                WebAiService.primaryChats.forEach { service ->
+                    TextButton(
+                        onClick = { onSelect(service) },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(service.displayName, modifier = Modifier.fillMaxWidth())
+                    }
+                }
+                HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+                Text(
+                    "More chats",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
+                )
+                WebAiService.additionalChats.forEach { service ->
                     TextButton(
                         onClick = { onSelect(service) },
                         modifier = Modifier.fillMaxWidth()

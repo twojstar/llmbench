@@ -1527,7 +1527,23 @@ private fun WebProviderDrawer(
                 modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 20.dp, bottom = 10.dp)
             )
 
-            WebAiService.entries.forEach { service ->
+            WebAiService.primaryChats.forEach { service ->
+                WebProviderDrawerItem(
+                    service = service,
+                    isSelected = selectedService == service,
+                    activityStatus = activityStatuses[service] ?: WebChatActivityStatus.IDLE,
+                    favicon = providerFavicons[service],
+                    onSelect = { onSelectService(service) }
+                )
+            }
+
+            Text(
+                text = "More chats",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 4.dp)
+            )
+            WebAiService.additionalChats.forEach { service ->
                 WebProviderDrawerItem(
                     service = service,
                     isSelected = selectedService == service,
