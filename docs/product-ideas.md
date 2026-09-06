@@ -13,6 +13,17 @@ The ideas are inspired by observed workflows in other AI/document apps and by to
 - Add file preview plus open externally / share flows where useful.
 - Accept Android text-sharing / `PROCESS_TEXT` style entry points for quickly turning selected text into a prompt or note.
 
+## Local-first ownership and optional cloud
+
+- LlmBench must have no account wall. First launch and normal local use must not require creating an LlmBench identity, accepting cloud storage or enabling sync.
+- Require authentication only where an external provider itself requires it. Signing into ChatGPT/Claude/etc. or adding an API key must not silently enroll the user in a separate LlmBench account.
+- Keep locally owned chats, projects, prompts, files, skills, built-in tools, settings and history usable without LlmBench-hosted infrastructure.
+- Local export, backup and restore are first-class features, not fallback paths. Prefer ordinary portable files/archives with a documented manifest/version so users can keep copies wherever they choose.
+- Do not silently upload app data for safekeeping. Cloud sync, remote backup, cross-device restore and hosted integrations are explicit opt-ins with clear data scope and a way to turn them off again.
+- Do not degrade, delay or nag-gate local features because cloud backup is disabled. If a user chooses local-only storage and loses the device without making a backup, that is an accepted consequence of the choice rather than a reason to force account creation.
+- Any future cloud feature should synchronize local sources of truth rather than replace them. Signing out or discontinuing the service must leave the user's local data usable and exportable.
+- Avoid cloud-only proprietary formats. A user should be able to leave with their data without asking LlmBench for permission.
+
 ## Chat import / export
 
 - Export a conversation to readable `.md`.
