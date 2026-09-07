@@ -50,7 +50,7 @@ import java.io.IOException
 private const val WORKSPACE_ANALYSIS_DEBOUNCE_MS = 360L
 private const val MAX_TOKENIZED_CHARS = 1_000_000
 private const val LARGE_PREVIEW_CHUNK_CHARS = 16 * 1024
-private const val MAX_DIRECT_SHARE_CHARS = 128 * 1024
+private const val MAX_DIRECT_SHARE_BYTES = 128 * 1024
 private val MARKDOWN_IMPORT_MIME_TYPES = arrayOf("text/markdown", "text/plain", "application/octet-stream")
 
 private sealed class PendingDestructiveWorkspaceAction {
@@ -191,7 +191,10 @@ fun MarkdownWorkspaceScreen(
 
     fun shareCurrentMarkdown() {
         if (uiState.text.isEmpty()) return
-        if (uiState.text.length > MAX_DIRECT_SHARE_CHARS) {
+        val exceedsDirectShareLimit =
+            uiState.text.length > MAX_DIRECT_SHARE_BYTES ||
+                uiState.text.encodeToByteArray().size > MAX_DIRECT_SHARE_BYTES
+        if (exceedsDirectShareLimit) {
             scope.launch {
                 snackbarHostState.showSnackbar(
                     "This Markdown draft is too large for direct text sharing. Export it as a file, then share the exported document."
