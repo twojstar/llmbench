@@ -59,6 +59,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 private const val CHAT_MARKDOWN_EXPORT_NAME = "llmbench-chat.md"
+private const val MAX_CHAT_PROMPT_IMPORT_CHARS = 128 * 1024
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -81,6 +82,7 @@ fun ChatScreen(
     var showModelMenu by remember { mutableStateOf(false) }
     var showChatActionsMenu by remember { mutableStateOf(false) }
     var pendingChatMarkdown by remember { mutableStateOf<String?>(null) }
+    var pendingMarkdownPromptReplacement by remember { mutableStateOf<String?>(null) }
     var isPreparingChatMarkdown by remember { mutableStateOf(false) }
 
     SideEffect {
@@ -107,6 +109,22 @@ fun ChatScreen(
             ExternalMarkdownOpenResult.TOO_LARGE -> viewModel.showSnackbar(
                 "Chat export is larger than the 8 MiB Markdown workspace limit."
             )
+        }
+    }
+
+    fun useMarkdownDraftAsPrompt() {
+        val markdown = markdownUiState.text
+        if (markdown.isBlank()) return
+        if (markdown.length > MAX_CHAT_PROMPT_IMPORT_CHARS) {
+            viewModel.showSnackbar(
+                "Markdown draft is too large to place directly in the chat composer. Keep it as a local asset or use a smaller prompt."
+            )
+            return
+        }
+        if (promptInput.isNotBlank() && promptInput != markdown) {
+            pendingMarkdownPromptReplacement = markdown
+        } else {
+            promptInput = markdown
         }
     }
 
@@ -252,6 +270,20 @@ fun ChatScreen(
                                     expanded = showChatActionsMenu,
                                     onDismissRequest = { showChatActionsMenu = false }
                                 ) {
+                                    DropdownMenuItem(
+                                        text = { Text("Use Markdown draft as prompt") },
+                                        leadingIcon = {
+                                            Icon(Icons.Outlined.Description, contentDescription = null)
+                                        },
+                                        enabled = !uiState.isChatGenerating &&
+                                            !markdownUiState.isBusy &&
+                                            markdownUiState.text.isNotBlank(),
+                                        onClick = {
+                                            showChatActionsMenu = false
+                                            useMarkdownDraftAsPrompt()
+                                        },
+                                        modifier = Modifier.testTag("btn_use_markdown_prompt")
+                                    )
                                     DropdownMenuItem(
                                         text = { Text("Open chat as Markdown") },
                                         leadingIcon = {
@@ -588,6 +620,32 @@ fun ChatScreen(
             },
             dismissButton = {
                 TextButton(onClick = { pendingChatMarkdown = null }) { Text("Cancel") }
+            }
+        )
+    }
+
+    pendingMarkdownPromptReplacement?.let { markdown ->
+        AlertDialog(
+            onDismissRequest = { pendingMarkdownPromptReplacement = null },
+            title = { Text("Replace chat prompt?") },
+            text = {
+                Text(
+                    "The composer already contains text. Replace it with the current Markdown draft? Nothing will be sent until you tap Send."
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        promptInput = markdown
+                        pendingMarkdownPromptReplacement = null
+                    },
+                    modifier = Modifier.testTag("btn_confirm_markdown_prompt_replace")
+                ) {
+                    Text("Replace")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingMarkdownPromptReplacement = null }) { Text("Cancel") }
             }
         )
     }
