@@ -1,0 +1,397 @@
+name: One-shot Markdown recents patch
+
+on: # yamllint disable-line rule:truthy
+  push:
+    branches: [gptomek/markdown-recents]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Read Gradle version
+        id: gradle
+        run: .github/scripts/gradle-version.sh
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          gradle-version: ${{ steps.gradle.outputs.version }}
+
+      - name: Generate Gradle wrapper if missing
+        env:
+          GRADLE_VERSION: ${{ steps.gradle.outputs.version }}
+        run: |
+          if [ ! -f gradle/wrapper/gradle-wrapper.jar ]; then
+            gradle wrapper --gradle-version "$GRADLE_VERSION"
+          fi
+
+      - name: Apply asserted Markdown recents patch
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          codec = r'''package com.twojstar.llmbench.data.document
+
+          import java.io.ByteArrayInputStream
+          import java.io.ByteArrayOutputStream
+          import java.io.DataInputStream
+          import java.io.DataOutputStream
+          import java.io.IOException
+
+          internal object MarkdownRecentDocumentsCodec {
+              const val MAX_RECENT_DOCUMENTS = 8
+              private const val MAGIC = 0x4C4D4252
+              private const val VERSION = 1
+              private const val MAX_URI_BYTES = 16 * 1024
+
+              fun moveToFront(
+                  existing: List<String>,
+                  uriString: String,
+                  limit: Int = MAX_RECENT_DOCUMENTS
+              ): List<String> {
+                  require(limit > 0)
+                  val result = ArrayList<String>(limit)
+                  if (uriString.isNotBlank()) result += uriString
+                  for (candidate in existing) {
+                      if (candidate.isBlank() || candidate in result) continue
+                      result += candidate
+                      if (result.size >= limit) break
+                  }
+                  return result
+              }
+
+              fun normalize(
+                  uriStrings: List<String>,
+                  limit: Int = MAX_RECENT_DOCUMENTS
+              ): List<String> {
+                  require(limit > 0)
+                  val result = ArrayList<String>(limit)
+                  for (candidate in uriStrings) {
+                      if (candidate.isBlank() || candidate in result) continue
+                      result += candidate
+                      if (result.size >= limit) break
+                  }
+                  return result
+              }
+
+              fun encode(uriStrings: List<String>): ByteArray {
+                  val normalized = normalize(uriStrings)
+                  val output = ByteArrayOutputStream()
+                  DataOutputStream(output).use { data ->
+                      data.writeInt(MAGIC)
+                      data.writeInt(VERSION)
+                      data.writeInt(normalized.size)
+                      normalized.forEach { value ->
+                          val bytes = value.encodeToByteArray()
+                          if (bytes.size > MAX_URI_BYTES) throw IOException("Recent document URI is too large.")
+                          data.writeInt(bytes.size)
+                          data.write(bytes)
+                      }
+                  }
+                  return output.toByteArray()
+              }
+
+              fun decode(bytes: ByteArray): List<String> = try {
+                  DataInputStream(ByteArrayInputStream(bytes)).use { input ->
+                      if (input.readInt() != MAGIC || input.readInt() != VERSION) return emptyList()
+                      val count = input.readInt()
+                      if (count !in 0..MAX_RECENT_DOCUMENTS) return emptyList()
+                      val values = buildList(count) {
+                          repeat(count) {
+                              val size = input.readInt()
+                              if (size !in 1..MAX_URI_BYTES) return emptyList()
+                              val value = ByteArray(size)
+                              input.readFully(value)
+                              add(value.decodeToString(throwOnInvalidSequence = true))
+                          }
+                      }
+                      if (input.available() != 0) return emptyList()
+                      normalize(values)
+                  }
+              } catch (_: IOException) {
+                  emptyList()
+              } catch (_: IllegalArgumentException) {
+                  emptyList()
+              }
+          }
+          '''
+
+          store = r'''package com.twojstar.llmbench.data.document
+
+          import android.content.Context
+          import android.content.Intent
+          import android.net.Uri
+          import android.util.AtomicFile
+          import kotlinx.coroutines.Dispatchers
+          import kotlinx.coroutines.sync.Mutex
+          import kotlinx.coroutines.sync.withLock
+          import kotlinx.coroutines.withContext
+          import java.io.File
+          import java.io.FileOutputStream
+          import java.io.IOException
+
+          internal data class RecentMarkdownDocument(
+              val uriString: String,
+              val displayName: String
+          ) {
+              val uri: Uri
+                  get() = Uri.parse(uriString)
+          }
+
+          internal class MarkdownRecentDocumentsStore(context: Context) {
+              private val appContext = context.applicationContext
+              private val resolver = appContext.contentResolver
+              private val atomicFile = AtomicFile(File(appContext.noBackupFilesDir, FILE_NAME))
+              private val mutex = Mutex()
+
+              fun retainReadPermission(uri: Uri): Boolean {
+                  if (uri.scheme != "content") return false
+                  runCatching {
+                      resolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                  }
+                  return persistedReadUriStrings().contains(uri.toString())
+              }
+
+              suspend fun load(): List<RecentMarkdownDocument> = mutex.withLock {
+                  withContext(Dispatchers.IO) { loadUnlocked() }
+              }
+
+              suspend fun record(uri: Uri): List<RecentMarkdownDocument> = mutex.withLock {
+                  withContext(Dispatchers.IO) {
+                      val persisted = persistedReadUriStrings()
+                      val uriString = uri.toString()
+                      val current = pruneToPersisted(readUriStrings(), persisted)
+                      val next = if (uriString in persisted) {
+                          MarkdownRecentDocumentsCodec.moveToFront(current, uriString)
+                      } else {
+                          current
+                      }
+                      if (next != readUriStrings()) writeUriStrings(next)
+                      resolveDocuments(next)
+                  }
+              }
+
+              suspend fun forget(document: RecentMarkdownDocument): List<RecentMarkdownDocument> = mutex.withLock {
+                  withContext(Dispatchers.IO) {
+                      val current = readUriStrings()
+                      val next = current.filterNot { it == document.uriString }
+                      if (next != current) writeUriStrings(next)
+                      runCatching {
+                          resolver.releasePersistableUriPermission(
+                              document.uri,
+                              Intent.FLAG_GRANT_READ_URI_PERMISSION
+                          )
+                      }
+                      loadUnlocked()
+                  }
+              }
+
+              private fun loadUnlocked(): List<RecentMarkdownDocument> {
+                  val saved = readUriStrings()
+                  val retained = pruneToPersisted(saved, persistedReadUriStrings())
+                  if (retained != saved) writeUriStrings(retained)
+                  return resolveDocuments(retained)
+              }
+
+              private fun pruneToPersisted(
+                  uriStrings: List<String>,
+                  persisted: Set<String>
+              ): List<String> = MarkdownRecentDocumentsCodec.normalize(uriStrings.filter { it in persisted })
+
+              private fun resolveDocuments(uriStrings: List<String>): List<RecentMarkdownDocument> =
+                  uriStrings.map { uriString ->
+                      val uri = Uri.parse(uriString)
+                      RecentMarkdownDocument(
+                          uriString = uriString,
+                          displayName = MarkdownDocumentFileAccess.displayName(appContext, uri)
+                      )
+                  }
+
+              private fun persistedReadUriStrings(): Set<String> = runCatching {
+                  resolver.persistedUriPermissions
+                      .asSequence()
+                      .filter { it.isReadPermission }
+                      .map { it.uri.toString() }
+                      .toSet()
+              }.getOrDefault(emptySet())
+
+              private fun readUriStrings(): List<String> {
+                  if (!atomicFile.baseFile.isFile) return emptyList()
+                  val bytes = try {
+                      atomicFile.readFully()
+                  } catch (_: IOException) {
+                      return emptyList()
+                  }
+                  return MarkdownRecentDocumentsCodec.decode(bytes)
+              }
+
+              private fun writeUriStrings(uriStrings: List<String>) {
+                  atomicFile.baseFile.parentFile?.mkdirs()
+                  val bytes = MarkdownRecentDocumentsCodec.encode(uriStrings)
+                  var output: FileOutputStream? = atomicFile.startWrite()
+                  try {
+                      val stream = requireNotNull(output)
+                      stream.write(bytes)
+                      stream.flush()
+                      atomicFile.finishWrite(stream)
+                      output = null
+                  } catch (error: IOException) {
+                      output?.let(atomicFile::failWrite)
+                      throw error
+                  }
+              }
+
+              private companion object {
+                  const val FILE_NAME = "markdown-recent-documents-v1.bin"
+              }
+          }
+          '''
+
+          tests = r'''package com.twojstar.llmbench.data.document
+
+          import kotlin.test.Test
+          import kotlin.test.assertEquals
+          import kotlin.test.assertTrue
+
+          class MarkdownRecentDocumentsCodecTest {
+              @Test
+              fun moveToFrontDeduplicatesAndPromotesExistingUri() {
+                  val result = MarkdownRecentDocumentsCodec.moveToFront(
+                      listOf("content://one", "content://two", "content://three"),
+                      "content://two"
+                  )
+
+                  assertEquals(listOf("content://two", "content://one", "content://three"), result)
+              }
+
+              @Test
+              fun moveToFrontCapsTheRecentList() {
+                  val existing = (1..12).map { "content://doc/$it" }
+
+                  val result = MarkdownRecentDocumentsCodec.moveToFront(existing, "content://new")
+
+                  assertEquals(MarkdownRecentDocumentsCodec.MAX_RECENT_DOCUMENTS, result.size)
+                  assertEquals("content://new", result.first())
+                  assertTrue("content://doc/8" !in result)
+              }
+
+              @Test
+              fun codecRoundTripsUriStringsWithoutDelimiterAssumptions() {
+                  val values = listOf(
+                      "content://provider/document/a%2Fb",
+                      "content://provider/document/name?query=a%20b&x=1",
+                      "content://provider/document/unicode-%E2%98%85"
+                  )
+
+                  assertEquals(values, MarkdownRecentDocumentsCodec.decode(MarkdownRecentDocumentsCodec.encode(values)))
+              }
+
+              @Test
+              fun decodeRejectsMalformedPayload() {
+                  assertEquals(emptyList(), MarkdownRecentDocumentsCodec.decode(byteArrayOf(1, 2, 3, 4)))
+              }
+          }
+          '''
+
+          files = {
+              Path("app/src/main/java/com/twojstar/llmbench/data/document/MarkdownRecentDocumentsCodec.kt"): codec,
+              Path("app/src/main/java/com/twojstar/llmbench/data/document/MarkdownRecentDocumentsStore.kt"): store,
+              Path("app/src/test/java/com/twojstar/llmbench/data/document/MarkdownRecentDocumentsCodecTest.kt"): tests,
+          }
+          for path, content in files.items():
+              if path.exists():
+                  raise SystemExit(f"Refusing to overwrite existing {path}")
+              path.parent.mkdir(parents=True, exist_ok=True)
+              path.write_text(content)
+
+          screen_path = Path("app/src/main/java/com/twojstar/llmbench/ui/screens/MarkdownWorkspaceScreen.kt")
+          screen = screen_path.read_text()
+
+          replacements = [
+              (
+                  "import com.twojstar.llmbench.data.document.MarkdownDocumentFileAccess\n",
+                  "import com.twojstar.llmbench.data.document.MarkdownDocumentFileAccess\n"
+                  "import com.twojstar.llmbench.data.document.MarkdownRecentDocumentsStore\n"
+                  "import com.twojstar.llmbench.data.document.RecentMarkdownDocument\n"
+              ),
+              (
+                  '''private enum class PendingDestructiveWorkspaceAction {\n    NEW,\n    IMPORT\n}\n''',
+                  '''private sealed class PendingDestructiveWorkspaceAction {\n    data object New : PendingDestructiveWorkspaceAction()\n    data object Import : PendingDestructiveWorkspaceAction()\n    data class Recent(val document: RecentMarkdownDocument) : PendingDestructiveWorkspaceAction()\n}\n'''
+              ),
+              (
+                  '''    val snackbarHostState = remember { SnackbarHostState() }\n    var pendingDestructiveAction by remember { mutableStateOf<PendingDestructiveWorkspaceAction?>(null) }\n    val analysis by rememberMarkdownWorkspaceAnalysis(\n''',
+                  '''    val snackbarHostState = remember { SnackbarHostState() }\n    val recentStore = remember(context) { MarkdownRecentDocumentsStore(context.applicationContext) }\n    var recentDocuments by remember { mutableStateOf<List<RecentMarkdownDocument>>(emptyList()) }\n    var showRecents by remember { mutableStateOf(false) }\n    var pendingDestructiveAction by remember { mutableStateOf<PendingDestructiveWorkspaceAction?>(null) }\n    val analysis by rememberMarkdownWorkspaceAnalysis(\n'''
+              ),
+              (
+                  '''    val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->\n        if (uri == null) {\n            workspaceViewModel.cancelImport()\n        } else {\n            scope.launch {\n                importWorkspaceDocument(context, uri, workspaceViewModel, snackbarHostState)\n            }\n        }\n    }\n''',
+                  '''    LaunchedEffect(recentStore) {\n        recentDocuments = runCatching { recentStore.load() }.getOrDefault(emptyList())\n    }\n\n    val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->\n        if (uri == null) {\n            workspaceViewModel.cancelImport()\n        } else {\n            scope.launch {\n                val importedName = importWorkspaceDocument(context, uri, workspaceViewModel, snackbarHostState)\n                if (importedName != null) {\n                    val retained = recentStore.retainReadPermission(uri)\n                    if (retained) {\n                        recentDocuments = runCatching { recentStore.record(uri) }.getOrElse { recentDocuments }\n                    }\n                    snackbarHostState.showSnackbar(\n                        if (retained) {\n                            "Imported $importedName and added it to Recents; original file stays untouched."\n                        } else {\n                            "Imported $importedName; this provider did not grant persistent access, so it will not stay in Recents."\n                        }\n                    )\n                }\n            }\n        }\n    }\n'''
+              ),
+              (
+                  '''    fun requestAction(action: PendingDestructiveWorkspaceAction) {\n        if (uiState.isBusy) return\n        if (uiState.isDirty) pendingDestructiveAction = action\n        else performDestructiveAction(action, workspaceViewModel, ::launchImportPicker)\n    }\n''',
+                  '''    fun openRecentDocument(document: RecentMarkdownDocument) {\n        if (!workspaceViewModel.beginImport()) return\n        scope.launch {\n            val importedName = importWorkspaceDocument(context, document.uri, workspaceViewModel, snackbarHostState)\n            if (importedName != null) {\n                recentDocuments = runCatching { recentStore.record(document.uri) }.getOrElse { recentDocuments }\n                snackbarHostState.showSnackbar("Opened $importedName from Recents; original file stays untouched.")\n            } else {\n                recentDocuments = runCatching { recentStore.load() }.getOrElse { recentDocuments }\n            }\n        }\n    }\n\n    fun requestAction(action: PendingDestructiveWorkspaceAction) {\n        if (uiState.isBusy) return\n        if (uiState.isDirty) pendingDestructiveAction = action\n        else performDestructiveAction(action, workspaceViewModel, ::launchImportPicker, ::openRecentDocument)\n    }\n'''
+              ),
+              (
+                  '''                performDestructiveAction(action, workspaceViewModel, ::launchImportPicker)\n''',
+                  '''                performDestructiveAction(action, workspaceViewModel, ::launchImportPicker, ::openRecentDocument)\n'''
+              ),
+              (
+                  '''    Scaffold(\n''',
+                  '''    if (showRecents) {\n        RecentMarkdownDocumentsSheet(\n            documents = recentDocuments,\n            onOpen = { document ->\n                showRecents = false\n                requestAction(PendingDestructiveWorkspaceAction.Recent(document))\n            },\n            onForget = { document ->\n                scope.launch {\n                    recentDocuments = runCatching { recentStore.forget(document) }.getOrElse { recentDocuments }\n                }\n            },\n            onDismiss = { showRecents = false }\n        )\n    }\n\n    Scaffold(\n'''
+              ),
+              (
+                  '''                onNew = { requestAction(PendingDestructiveWorkspaceAction.NEW) },\n                onImport = { requestAction(PendingDestructiveWorkspaceAction.IMPORT) },\n                onExport = { exportLauncher.launch(uiState.displayName.ensureMarkdownExtension()) }\n''',
+                  '''                onNew = { requestAction(PendingDestructiveWorkspaceAction.New) },\n                onImport = { requestAction(PendingDestructiveWorkspaceAction.Import) },\n                onRecent = { showRecents = true },\n                onExport = { exportLauncher.launch(uiState.displayName.ensureMarkdownExtension()) }\n'''
+              ),
+              (
+                  '''    onNew: () -> Unit,\n    onImport: () -> Unit,\n    onExport: () -> Unit\n''',
+                  '''    onNew: () -> Unit,\n    onImport: () -> Unit,\n    onRecent: () -> Unit,\n    onExport: () -> Unit\n'''
+              ),
+              (
+                  '''            IconButton(onClick = onImport, enabled = !uiState.isBusy, modifier = Modifier.testTag("markdown_import")) {\n                Icon(Icons.Default.FolderOpen, contentDescription = "Import Markdown document")\n            }\n            IconButton(onClick = onExport, enabled = !uiState.isBusy, modifier = Modifier.testTag("markdown_export")) {\n''',
+                  '''            IconButton(onClick = onImport, enabled = !uiState.isBusy, modifier = Modifier.testTag("markdown_import")) {\n                Icon(Icons.Default.FolderOpen, contentDescription = "Import Markdown document")\n            }\n            IconButton(onClick = onRecent, enabled = !uiState.isBusy, modifier = Modifier.testTag("markdown_recents")) {\n                Icon(Icons.Default.History, contentDescription = "Recent Markdown documents")\n            }\n            IconButton(onClick = onExport, enabled = !uiState.isBusy, modifier = Modifier.testTag("markdown_export")) {\n'''
+              ),
+              (
+                  '''private suspend fun importWorkspaceDocument(\n    context: Context,\n    uri: Uri,\n    viewModel: MarkdownWorkspaceViewModel,\n    snackbarHostState: SnackbarHostState\n) {\n    val result = runCatching { MarkdownDocumentFileAccess.import(context, uri) }\n    result.fold(\n        onSuccess = { opened ->\n            if (viewModel.completeImport(opened.displayName, opened.document)) {\n                snackbarHostState.showSnackbar("Imported ${opened.displayName}; original file will not be overwritten.")\n            }\n        },\n        onFailure = { error ->\n            viewModel.cancelImport()\n            if (error is CancellationException) throw error\n            snackbarHostState.showSnackbar(importFailureMessage(error))\n        }\n    )\n}\n''',
+                  '''private suspend fun importWorkspaceDocument(\n    context: Context,\n    uri: Uri,\n    viewModel: MarkdownWorkspaceViewModel,\n    snackbarHostState: SnackbarHostState\n): String? {\n    val result = runCatching { MarkdownDocumentFileAccess.import(context, uri) }\n    return result.fold(\n        onSuccess = { opened ->\n            opened.displayName.takeIf { viewModel.completeImport(opened.displayName, opened.document) }\n        },\n        onFailure = { error ->\n            viewModel.cancelImport()\n            if (error is CancellationException) throw error\n            snackbarHostState.showSnackbar(importFailureMessage(error))\n            null\n        }\n    )\n}\n'''
+              ),
+              (
+                  '''private fun performDestructiveAction(\n    action: PendingDestructiveWorkspaceAction,\n    viewModel: MarkdownWorkspaceViewModel,\n    importPicker: () -> Unit\n) {\n    when (action) {\n        PendingDestructiveWorkspaceAction.NEW -> viewModel.newDocument()\n        PendingDestructiveWorkspaceAction.IMPORT -> importPicker()\n    }\n}\n''',
+                  '''private fun performDestructiveAction(\n    action: PendingDestructiveWorkspaceAction,\n    viewModel: MarkdownWorkspaceViewModel,\n    importPicker: () -> Unit,\n    openRecent: (RecentMarkdownDocument) -> Unit\n) {\n    when (action) {\n        PendingDestructiveWorkspaceAction.New -> viewModel.newDocument()\n        PendingDestructiveWorkspaceAction.Import -> importPicker()\n        is PendingDestructiveWorkspaceAction.Recent -> openRecent(action.document)\n    }\n}\n\n@OptIn(ExperimentalMaterial3Api::class)\n@Composable\nprivate fun RecentMarkdownDocumentsSheet(\n    documents: List<RecentMarkdownDocument>,\n    onOpen: (RecentMarkdownDocument) -> Unit,\n    onForget: (RecentMarkdownDocument) -> Unit,\n    onDismiss: () -> Unit\n) {\n    ModalBottomSheet(onDismissRequest = onDismiss) {\n        Column(\n            modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp),\n            verticalArrangement = Arrangement.spacedBy(8.dp)\n        ) {\n            Text("Recent Markdown", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)\n            Text(\n                "Shortcuts to the original documents. LlmBench keeps read access when Android allows it; file contents are not copied into the Recents list.",\n                style = MaterialTheme.typography.bodySmall,\n                color = MaterialTheme.colorScheme.onSurfaceVariant\n            )\n            if (documents.isEmpty()) {\n                Text("No persistent document shortcuts yet.", modifier = Modifier.padding(vertical = 20.dp))\n            } else {\n                documents.forEach { document ->\n                    Row(modifier = Modifier.fillMaxWidth()) {\n                        TextButton(onClick = { onOpen(document) }, modifier = Modifier.weight(1f)) {\n                            Icon(Icons.Default.Description, contentDescription = null)\n                            Spacer(Modifier.width(8.dp))\n                            Text(document.displayName, modifier = Modifier.fillMaxWidth())\n                        }\n                        IconButton(onClick = { onForget(document) }) {\n                            Icon(Icons.Default.Close, contentDescription = "Forget ${document.displayName}")\n                        }\n                    }\n                }\n            }\n            Spacer(Modifier.height(20.dp))\n        }\n    }\n}\n'''
+              ),
+          ]
+
+          for old, new in replacements:
+              count = screen.count(old)
+              if count != 1:
+                  raise SystemExit(f"Expected one screen anchor, found {count}: {old[:80]!r}")
+              screen = screen.replace(old, new)
+
+          screen_path.write_text(screen)
+          PY
+
+      - name: Verify Markdown recents
+        run: ./gradlew :app:testDebugUnitTest :app:lintDebug :shared:desktopTest --stacktrace
+
+      - name: Commit patch and remove one-shot workflow
+        run: |
+          git config user.name "gptomek[bot]"
+          git config user.email "314538226+gptomek[bot]@users.noreply.github.com"
+          git add app/src/main/java/com/twojstar/llmbench/data/document/MarkdownRecentDocumentsCodec.kt
+          git add app/src/main/java/com/twojstar/llmbench/data/document/MarkdownRecentDocumentsStore.kt
+          git add app/src/main/java/com/twojstar/llmbench/ui/screens/MarkdownWorkspaceScreen.kt
+          git add app/src/test/java/com/twojstar/llmbench/data/document/MarkdownRecentDocumentsCodecTest.kt
+          git rm .github/workflows/one-shot-markdown-recents.yml
+          git commit -m "feat: add recent Markdown document shortcuts"
+          git push origin HEAD:gptomek/markdown-recents
