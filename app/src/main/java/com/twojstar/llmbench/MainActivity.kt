@@ -34,6 +34,7 @@ import com.twojstar.llmbench.ui.theme.LlmBenchTheme
 import com.twojstar.llmbench.ui.viewmodel.ExternalMarkdownOpenResult
 import com.twojstar.llmbench.ui.viewmodel.MarkdownWorkspaceViewModel
 import com.twojstar.llmbench.ui.viewmodel.NavigationTab
+import com.twojstar.llmbench.ui.viewmodel.StudioUiState
 import com.twojstar.llmbench.ui.viewmodel.StudioViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -60,59 +61,13 @@ class MainActivity : ComponentActivity() {
         setContent {
             LlmBenchTheme {
                 val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-                val markdownUiState by markdownWorkspaceViewModel.uiState.collectAsStateWithLifecycle()
                 val snackbarHostState = remember { SnackbarHostState() }
-                var confirmMarkdownReplace by rememberSaveable { mutableStateOf(false) }
 
-                LaunchedEffect(uiState.incomingShare) {
-                    confirmMarkdownReplace = false
-                }
-
-                fun openIncomingTextInMarkdown(payload: IncomingSharePayload, allowDiscardDirty: Boolean) {
-                    val text = payload.text ?: return
-                    when (
-                        markdownWorkspaceViewModel.openExternalText(
-                            text = text,
-                            allowDiscardDirty = allowDiscardDirty
-                        )
-                    ) {
-                        ExternalMarkdownOpenResult.OPENED -> {
-                            confirmMarkdownReplace = false
-                            viewModel.dismissIncomingShare()
-                            viewModel.selectTab(NavigationTab.YAML)
-                        }
-                        ExternalMarkdownOpenResult.NEEDS_DISCARD -> confirmMarkdownReplace = true
-                        ExternalMarkdownOpenResult.BUSY -> viewModel.showSnackbar(
-                            "Markdown workspace is still restoring or busy. Try again when it is ready."
-                        )
-                        ExternalMarkdownOpenResult.TOO_LARGE -> viewModel.showSnackbar(
-                            "Shared text is larger than the 8 MiB Markdown workspace limit."
-                        )
-                    }
-                }
-
-                uiState.incomingShare?.let { payload ->
-                    if (confirmMarkdownReplace && payload.text != null) {
-                        ReplaceMarkdownDraftDialog(
-                            currentName = markdownUiState.displayName,
-                            onDiscard = { openIncomingTextInMarkdown(payload, allowDiscardDirty = true) },
-                            onDismiss = { confirmMarkdownReplace = false }
-                        )
-                    } else {
-                        IncomingShareProviderDialog(
-                            payload = payload,
-                            favoriteServices = uiState.favoriteWebServices,
-                            onOpenMarkdown = if (payload.text != null && payload.attachmentCount == 0) {
-                                { openIncomingTextInMarkdown(payload, allowDiscardDirty = false) }
-                            } else {
-                                null
-                            },
-                            markdownEnabled = !markdownUiState.isBusy,
-                            onSelect = viewModel::routeIncomingShareToWeb,
-                            onDismiss = viewModel::dismissIncomingShare
-                        )
-                    }
-                }
+                IncomingShareRoutingDialogs(
+                    uiState = uiState,
+                    viewModel = viewModel,
+                    markdownWorkspaceViewModel = markdownWorkspaceViewModel
+                )
 
                 LaunchedEffect(uiState.snackbarMessage) {
                     uiState.snackbarMessage?.let { msg ->
@@ -298,6 +253,66 @@ class MainActivity : ComponentActivity() {
         const val KEY_SHARE_URIS = "llmbench.share.uris"
         const val SHARE_STAGE_INCOMING = "incoming"
         const val SHARE_STAGE_PENDING = "pending"
+    }
+}
+
+@Composable
+private fun IncomingShareRoutingDialogs(
+    uiState: StudioUiState,
+    viewModel: StudioViewModel,
+    markdownWorkspaceViewModel: MarkdownWorkspaceViewModel
+) {
+    val markdownUiState by markdownWorkspaceViewModel.uiState.collectAsStateWithLifecycle()
+    var confirmMarkdownReplace by rememberSaveable { mutableStateOf(false) }
+
+    LaunchedEffect(uiState.incomingShare) {
+        confirmMarkdownReplace = false
+    }
+
+    fun openIncomingTextInMarkdown(payload: IncomingSharePayload, allowDiscardDirty: Boolean) {
+        val text = payload.text ?: return
+        when (
+            markdownWorkspaceViewModel.openExternalText(
+                text = text,
+                allowDiscardDirty = allowDiscardDirty
+            )
+        ) {
+            ExternalMarkdownOpenResult.OPENED -> {
+                confirmMarkdownReplace = false
+                viewModel.dismissIncomingShare()
+                viewModel.selectTab(NavigationTab.YAML)
+            }
+            ExternalMarkdownOpenResult.NEEDS_DISCARD -> confirmMarkdownReplace = true
+            ExternalMarkdownOpenResult.BUSY -> viewModel.showSnackbar(
+                "Markdown workspace is still restoring or busy. Try again when it is ready."
+            )
+            ExternalMarkdownOpenResult.TOO_LARGE -> viewModel.showSnackbar(
+                "Shared text is larger than the 8 MiB Markdown workspace limit."
+            )
+        }
+    }
+
+    uiState.incomingShare?.let { payload ->
+        if (confirmMarkdownReplace && payload.text != null) {
+            ReplaceMarkdownDraftDialog(
+                currentName = markdownUiState.displayName,
+                onDiscard = { openIncomingTextInMarkdown(payload, allowDiscardDirty = true) },
+                onDismiss = { confirmMarkdownReplace = false }
+            )
+        } else {
+            IncomingShareProviderDialog(
+                payload = payload,
+                favoriteServices = uiState.favoriteWebServices,
+                onOpenMarkdown = if (payload.text != null && payload.attachmentCount == 0) {
+                    { openIncomingTextInMarkdown(payload, allowDiscardDirty = false) }
+                } else {
+                    null
+                },
+                markdownEnabled = !markdownUiState.isBusy,
+                onSelect = viewModel::routeIncomingShareToWeb,
+                onDismiss = viewModel::dismissIncomingShare
+            )
+        }
     }
 }
 
