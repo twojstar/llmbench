@@ -13,17 +13,19 @@ class MarkdownRecentDocumentsCodecTest {
     private companion object {
         const val URI_ONE = "content://one"
         const val URI_TWO = "content://two"
+        const val URI_THREE = "content://three"
+        const val URI_NEW = "content://new"
         const val LEGACY_MAGIC = 0x4C4D4252
     }
 
     @Test
     fun promoteDeduplicatesAndPromotesExistingUri() {
         val result = MarkdownRecentDocumentsCodec.promote(
-            listOf(entry(URI_ONE), entry(URI_TWO), entry("content://three")),
+            listOf(entry(URI_ONE), entry(URI_TWO), entry(URI_THREE)),
             URI_TWO
         )
 
-        assertEquals(listOf(entry(URI_TWO), entry(URI_ONE), entry("content://three")), result)
+        assertEquals(listOf(entry(URI_TWO), entry(URI_ONE), entry(URI_THREE)), result)
     }
 
     @Test
@@ -31,10 +33,10 @@ class MarkdownRecentDocumentsCodecTest {
         val existing = (1..MarkdownRecentDocumentsCodec.MAX_RECENT_DOCUMENTS)
             .map { entry("content://doc/$it") }
 
-        val result = MarkdownRecentDocumentsCodec.promote(existing, "content://new")
+        val result = MarkdownRecentDocumentsCodec.promote(existing, URI_NEW)
 
         assertEquals(MarkdownRecentDocumentsCodec.MAX_RECENT_DOCUMENTS, result.size)
-        assertEquals("content://new", result.first().uriString)
+        assertEquals(URI_NEW, result.first().uriString)
         assertEquals(
             listOf("content://doc/${MarkdownRecentDocumentsCodec.MAX_RECENT_DOCUMENTS}"),
             MarkdownRecentDocumentsCodec.evictedFrom(existing, result)
@@ -46,11 +48,11 @@ class MarkdownRecentDocumentsCodecTest {
         val existing = listOf(entry("content://pinned", isPinned = true)) +
             (1 until MarkdownRecentDocumentsCodec.MAX_RECENT_DOCUMENTS).map { entry("content://doc/$it") }
 
-        val result = MarkdownRecentDocumentsCodec.promote(existing, "content://new")
+        val result = MarkdownRecentDocumentsCodec.promote(existing, URI_NEW)
 
         assertEquals("content://pinned", result.first().uriString)
         assertTrue(result.first().isPinned)
-        assertEquals("content://new", result[1].uriString)
+        assertEquals(URI_NEW, result[1].uriString)
         assertFalse(result.any { it.uriString == "content://doc/7" })
     }
 
@@ -59,18 +61,37 @@ class MarkdownRecentDocumentsCodecTest {
         val existing = (1..MarkdownRecentDocumentsCodec.MAX_RECENT_DOCUMENTS)
             .map { entry("content://pinned/$it", isPinned = true) }
 
-        assertEquals(existing, MarkdownRecentDocumentsCodec.promote(existing, "content://new"))
+        assertEquals(existing, MarkdownRecentDocumentsCodec.promote(existing, URI_NEW))
     }
 
     @Test
     fun setPinnedMovesShortcutIntoPinnedGroup() {
-        val existing = listOf(entry(URI_ONE), entry(URI_TWO), entry("content://three"))
+        val existing = listOf(entry(URI_ONE), entry(URI_TWO), entry(URI_THREE))
 
         val result = MarkdownRecentDocumentsCodec.setPinned(existing, URI_TWO, isPinned = true)
 
         assertEquals(URI_TWO, result.first().uriString)
         assertTrue(result.first().isPinned)
-        assertEquals(listOf(URI_ONE, "content://three"), result.drop(1).map { it.uriString })
+        assertEquals(listOf(URI_ONE, URI_THREE), result.drop(1).map { it.uriString })
+    }
+
+    @Test
+    fun staleRapidPinTapsReconcileAsSeparateToggles() {
+        val snapshotPinned = false
+        val requestedPinned = true
+        val afterFirstTap = reconcilePinnedToggle(
+            storedPinned = false,
+            snapshotPinned = snapshotPinned,
+            requestedPinned = requestedPinned
+        )
+        val afterSecondTap = reconcilePinnedToggle(
+            storedPinned = afterFirstTap,
+            snapshotPinned = snapshotPinned,
+            requestedPinned = requestedPinned
+        )
+
+        assertTrue(afterFirstTap)
+        assertFalse(afterSecondTap)
     }
 
     @Test
