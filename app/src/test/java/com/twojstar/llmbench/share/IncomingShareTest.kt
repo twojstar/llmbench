@@ -22,9 +22,10 @@ class IncomingShareTest {
     }
 
     @Test
-    fun normalizesTextAndKeepsOnlyDistinctContentUris() {
+    fun preservesTextWhitespaceAndKeepsOnlyDistinctContentUris() {
+        val spacedText = "  $SHARED_TEXT  "
         val payload = normalizeIncomingSharePayload(
-            text = "  $SHARED_TEXT  ",
+            text = spacedText,
             uriStrings = listOf(
                 CONTENT_URI,
                 " $CONTENT_URI ",
@@ -35,7 +36,7 @@ class IncomingShareTest {
         )
 
         requireNotNull(payload)
-        assertEquals(SHARED_TEXT, payload.text)
+        assertEquals(spacedText, payload.text)
         assertEquals(
             listOf(CONTENT_URI),
             payload.uriStrings
