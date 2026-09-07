@@ -42,6 +42,11 @@ internal object MarkdownRecentDocumentsCodec {
         return result
     }
 
+    fun evictedFrom(previous: List<String>, next: List<String>): List<String> {
+        val retained = next.toHashSet()
+        return normalize(previous).filterNot(retained::contains)
+    }
+
     fun encode(uriStrings: List<String>): ByteArray {
         val normalized = normalize(uriStrings)
         val output = ByteArrayOutputStream()
@@ -77,8 +82,6 @@ internal object MarkdownRecentDocumentsCodec {
             normalize(values)
         }
     } catch (_: IOException) {
-        emptyList()
-    } catch (_: IllegalArgumentException) {
         emptyList()
     }
 }

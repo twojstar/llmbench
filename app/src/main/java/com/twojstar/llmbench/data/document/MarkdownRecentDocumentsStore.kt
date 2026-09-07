@@ -9,6 +9,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.io.FileNotFoundException
 import java.io.FileOutputStream
 import java.io.IOException
 
@@ -20,18 +21,32 @@ internal data class RecentMarkdownDocument(
         get() = Uri.parse(uriString)
 }
 
+internal fun shouldForgetRecentDocumentAfterOpenFailure(error: Throwable): Boolean =
+    error is FileNotFoundException || error is SecurityException
+
 internal class MarkdownRecentDocumentsStore(context: Context) {
     private val appContext = context.applicationContext
     private val resolver = appContext.contentResolver
     private val atomicFile = AtomicFile(File(appContext.noBackupFilesDir, FILE_NAME))
     private val mutex = Mutex()
 
+    fun hasReadPermission(uri: Uri): Boolean =
+        uri.scheme == CONTENT_SCHEME && persistedReadUriStrings().contains(uri.toString())
+
     fun retainReadPermission(uri: Uri): Boolean {
-        if (uri.scheme != "content") return false
+        if (uri.scheme != CONTENT_SCHEME) return false
+        if (hasReadPermission(uri)) return true
         runCatching {
             resolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
-        return persistedReadUriStrings().contains(uri.toString())
+        return hasReadPermission(uri)
+    }
+
+    fun releaseReadPermission(uri: Uri) {
+        if (uri.scheme != CONTENT_SCHEME) return
+        runCatching {
+            resolver.releasePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
     }
 
     suspend fun load(): List<RecentMarkdownDocument> = mutex.withLock {
@@ -42,13 +57,16 @@ internal class MarkdownRecentDocumentsStore(context: Context) {
         withContext(Dispatchers.IO) {
             val persisted = persistedReadUriStrings()
             val uriString = uri.toString()
-            val current = pruneToPersisted(readUriStrings(), persisted)
+            val saved = readUriStrings()
+            val current = pruneToPersisted(saved, persisted)
             val next = if (uriString in persisted) {
                 MarkdownRecentDocumentsCodec.moveToFront(current, uriString)
             } else {
                 current
             }
-            if (next != readUriStrings()) writeUriStrings(next)
+            if (next != saved) writeUriStrings(next)
+            MarkdownRecentDocumentsCodec.evictedFrom(current, next)
+                .forEach { releaseReadPermission(Uri.parse(it)) }
             resolveDocuments(next)
         }
     }
@@ -58,15 +76,16 @@ internal class MarkdownRecentDocumentsStore(context: Context) {
             val current = readUriStrings()
             val next = current.filterNot { it == document.uriString }
             if (next != current) writeUriStrings(next)
-            runCatching {
-                resolver.releasePersistableUriPermission(
-                    document.uri,
-                    Intent.FLAG_GRANT_READ_URI_PERMISSION
-                )
-            }
+            releaseReadPermission(document.uri)
             loadUnlocked()
         }
     }
+
+    suspend fun forgetIfUnavailable(
+        document: RecentMarkdownDocument,
+        error: Throwable
+    ): List<RecentMarkdownDocument>? =
+        if (shouldForgetRecentDocumentAfterOpenFailure(error)) forget(document) else null
 
     private fun loadUnlocked(): List<RecentMarkdownDocument> {
         val saved = readUriStrings()
@@ -124,6 +143,7 @@ internal class MarkdownRecentDocumentsStore(context: Context) {
     }
 
     private companion object {
+        const val CONTENT_SCHEME = "content"
         const val FILE_NAME = "markdown-recent-documents-v1.bin"
     }
 }
