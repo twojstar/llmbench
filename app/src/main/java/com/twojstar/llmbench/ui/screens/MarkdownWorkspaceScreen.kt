@@ -1,0 +1,491 @@
+package com.twojstar.llmbench.ui.screens
+
+import android.content.ActivityNotFoundException
+import android.content.Context
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.twojstar.llmbench.data.document.DocumentDiagnostic
+import com.twojstar.llmbench.data.document.DocumentDiagnosticKind
+import com.twojstar.llmbench.data.document.DocumentDiagnostics
+import com.twojstar.llmbench.data.document.LineEnding
+import com.twojstar.llmbench.data.document.LineEndingCounts
+import com.twojstar.llmbench.data.document.MarkdownDocumentFileAccess
+import com.twojstar.llmbench.data.document.TextDocument
+import com.twojstar.llmbench.data.document.TextDocumentCodec
+import com.twojstar.llmbench.data.security.TextInspectionResult
+import com.twojstar.llmbench.data.security.TextInspector
+import com.twojstar.llmbench.data.tokenizer.LocalTokenCounter
+import com.twojstar.llmbench.ui.viewmodel.MAX_EDITABLE_MARKDOWN_CHARS
+import com.twojstar.llmbench.ui.viewmodel.MarkdownExportSnapshot
+import com.twojstar.llmbench.ui.viewmodel.MarkdownWorkspaceUiState
+import com.twojstar.llmbench.ui.viewmodel.MarkdownWorkspaceViewModel
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.IOException
+
+private const val WORKSPACE_ANALYSIS_DEBOUNCE_MS = 360L
+private const val MAX_TOKENIZED_CHARS = 1_000_000
+private const val LARGE_PREVIEW_CHUNK_CHARS = 16 * 1024
+private val MARKDOWN_IMPORT_MIME_TYPES = arrayOf("text/markdown", "text/plain", "application/octet-stream")
+
+private enum class PendingDestructiveWorkspaceAction {
+    NEW,
+    IMPORT
+}
+
+private data class MarkdownWorkspaceAnalysis(
+    val lineEndings: LineEndingCounts,
+    val diagnostics: List<DocumentDiagnostic>,
+    val safety: TextInspectionResult,
+    val tokenCount: Int?
+)
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun MarkdownWorkspaceScreen(
+    workspaceViewModel: MarkdownWorkspaceViewModel,
+    modifier: Modifier = Modifier
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val uiState by workspaceViewModel.uiState.collectAsStateWithLifecycle()
+    val snackbarHostState = remember { SnackbarHostState() }
+    var pendingDestructiveAction by remember { mutableStateOf<PendingDestructiveWorkspaceAction?>(null) }
+    val analysis by rememberMarkdownWorkspaceAnalysis(
+        text = uiState.text,
+        hadUtf8Bom = uiState.hadUtf8Bom,
+        revision = uiState.revision
+    )
+
+    val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri == null) {
+            workspaceViewModel.cancelImport()
+        } else {
+            scope.launch {
+                importWorkspaceDocument(context, uri, workspaceViewModel, snackbarHostState)
+            }
+        }
+    }
+    val exportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("text/markdown")
+    ) { uri ->
+        if (uri != null) {
+            val snapshot = workspaceViewModel.beginExport()
+            if (snapshot != null) {
+                scope.launch {
+                    exportWorkspaceDocument(
+                        context = context,
+                        uri = uri,
+                        fallbackName = snapshot.displayName.ensureMarkdownExtension(),
+                        snapshot = snapshot,
+                        viewModel = workspaceViewModel,
+                        snackbarHostState = snackbarHostState
+                    )
+                }
+            }
+        }
+    }
+
+    fun launchImportPicker() {
+        if (!workspaceViewModel.beginImport()) return
+        try {
+            importLauncher.launch(MARKDOWN_IMPORT_MIME_TYPES)
+        } catch (_: ActivityNotFoundException) {
+            workspaceViewModel.cancelImport()
+            scope.launch { snackbarHostState.showSnackbar("No document picker is available.") }
+        }
+    }
+
+    fun requestAction(action: PendingDestructiveWorkspaceAction) {
+        if (uiState.isBusy) return
+        if (uiState.isDirty) pendingDestructiveAction = action
+        else performDestructiveAction(action, workspaceViewModel, ::launchImportPicker)
+    }
+
+    pendingDestructiveAction?.let { action ->
+        DiscardWorkspaceChangesDialog(
+            onDismiss = { pendingDestructiveAction = null },
+            onDiscard = {
+                pendingDestructiveAction = null
+                performDestructiveAction(action, workspaceViewModel, ::launchImportPicker)
+            }
+        )
+    }
+
+    Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
+        topBar = {
+            MarkdownWorkspaceTopBar(
+                uiState = uiState,
+                onNew = { requestAction(PendingDestructiveWorkspaceAction.NEW) },
+                onImport = { requestAction(PendingDestructiveWorkspaceAction.IMPORT) },
+                onExport = { exportLauncher.launch(uiState.displayName.ensureMarkdownExtension()) }
+            )
+        },
+        modifier = modifier
+    ) { innerPadding ->
+        MarkdownWorkspaceBody(
+            uiState = uiState,
+            analysis = analysis,
+            onTextChange = { text ->
+                val changed = workspaceViewModel.updateText(text)
+                if (!changed && text != uiState.text && !uiState.isEditorLocked) {
+                    scope.launch {
+                        snackbarHostState.showSnackbar(
+                            "Interactive Markdown editing is limited to $MAX_EDITABLE_MARKDOWN_CHARS characters; larger imports remain read-only and exportable."
+                        )
+                    }
+                }
+            },
+            onNormalize = { workspaceViewModel.normalizeLineEndings(it) },
+            modifier = Modifier.fillMaxSize().padding(innerPadding)
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun MarkdownWorkspaceTopBar(
+    uiState: MarkdownWorkspaceUiState,
+    onNew: () -> Unit,
+    onImport: () -> Unit,
+    onExport: () -> Unit
+) {
+    TopAppBar(
+        title = {
+            Column {
+                Text(
+                    text = uiState.displayName + if (uiState.isDirty) " *" else "",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    text = when {
+                        uiState.isRecoveryLoading -> "Restoring local draft…"
+                        uiState.isImporting -> "Importing into local workspace…"
+                        uiState.isExporting -> "Exporting local draft…"
+                        uiState.isLargeDocumentReadOnly -> "Large local draft · read-only preview · export remains available"
+                        else -> "Local autosaved draft · external files stay untouched"
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        },
+        actions = {
+            IconButton(onClick = onNew, enabled = !uiState.isBusy, modifier = Modifier.testTag("markdown_new")) {
+                Icon(Icons.Default.NoteAdd, contentDescription = "New Markdown draft")
+            }
+            IconButton(onClick = onImport, enabled = !uiState.isBusy, modifier = Modifier.testTag("markdown_import")) {
+                Icon(Icons.Default.FolderOpen, contentDescription = "Import Markdown document")
+            }
+            IconButton(onClick = onExport, enabled = !uiState.isBusy, modifier = Modifier.testTag("markdown_export")) {
+                Icon(Icons.Default.SaveAs, contentDescription = "Export Markdown document")
+            }
+        }
+    )
+}
+
+@Composable
+private fun MarkdownWorkspaceBody(
+    uiState: MarkdownWorkspaceUiState,
+    analysis: MarkdownWorkspaceAnalysis?,
+    onTextChange: (String) -> Unit,
+    onNormalize: (LineEnding) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        WorkspaceMetadataRow(
+            hadUtf8Bom = uiState.hadUtf8Bom,
+            isDirty = uiState.isDirty,
+            isLargeReadOnly = uiState.isLargeDocumentReadOnly,
+            analysis = analysis
+        )
+        WorkspaceDiagnostics(
+            analysis = analysis,
+            canNormalize = !uiState.isEditorLocked,
+            onNormalize = onNormalize
+        )
+        if (uiState.isLargeDocumentReadOnly) {
+            LargeMarkdownPreview(uiState.text, Modifier.fillMaxWidth().weight(1f))
+        } else {
+            OutlinedTextField(
+                value = uiState.text,
+                onValueChange = onTextChange,
+                enabled = !uiState.isEditorLocked,
+                modifier = Modifier.fillMaxWidth().weight(1f).testTag("markdown_editor"),
+                textStyle = LocalTextStyle.current.copy(fontFamily = FontFamily.Monospace),
+                label = { Text("Markdown") },
+                placeholder = { Text("# Start writing…") }
+            )
+        }
+    }
+}
+
+@Composable
+private fun LargeMarkdownPreview(text: String, modifier: Modifier = Modifier) {
+    val chunks = remember(text) { previewChunkRanges(text) }
+    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(
+            "Large document preview is chunked for performance. The exact text stays unchanged for recovery and export.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        LazyColumn(modifier = Modifier.fillMaxWidth().weight(1f).testTag("markdown_large_preview")) {
+            items(chunks, key = { it.first }) { range ->
+                SelectionContainer {
+                    Text(
+                        text = text.substring(range.first, range.last + 1),
+                        fontFamily = FontFamily.Monospace,
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                }
+            }
+        }
+    }
+}
+
+private fun previewChunkRanges(text: String): List<IntRange> = buildList {
+    var start = 0
+    while (start < text.length) {
+        var endExclusive = minOf(start + LARGE_PREVIEW_CHUNK_CHARS, text.length)
+        if (
+            endExclusive < text.length &&
+            endExclusive > start &&
+            text[endExclusive - 1].isHighSurrogate() &&
+            text[endExclusive].isLowSurrogate()
+        ) {
+            endExclusive--
+        }
+        add(start until endExclusive)
+        start = endExclusive
+    }
+}
+
+@Composable
+private fun rememberMarkdownWorkspaceAnalysis(
+    text: String,
+    hadUtf8Bom: Boolean,
+    revision: Long
+): State<MarkdownWorkspaceAnalysis?> = produceState(
+    initialValue = null,
+    key1 = revision,
+    key2 = hadUtf8Bom
+) {
+    delay(WORKSPACE_ANALYSIS_DEBOUNCE_MS)
+    value = withContext(Dispatchers.Default) {
+        val lineEndings = TextDocumentCodec.detectLineEndings(text)
+        val document = TextDocument(text, hadUtf8Bom, lineEndings)
+        MarkdownWorkspaceAnalysis(
+            lineEndings = lineEndings,
+            diagnostics = DocumentDiagnostics.inspect(document),
+            safety = TextInspector.inspect(text),
+            tokenCount = text.takeIf { it.length <= MAX_TOKENIZED_CHARS }?.let(LocalTokenCounter::count)
+        )
+    }
+}
+
+private suspend fun importWorkspaceDocument(
+    context: Context,
+    uri: Uri,
+    viewModel: MarkdownWorkspaceViewModel,
+    snackbarHostState: SnackbarHostState
+) {
+    val result = runCatching { MarkdownDocumentFileAccess.import(context, uri) }
+    result.fold(
+        onSuccess = { opened ->
+            if (viewModel.completeImport(opened.displayName, opened.document)) {
+                snackbarHostState.showSnackbar("Imported ${opened.displayName}; original file will not be overwritten.")
+            }
+        },
+        onFailure = { error ->
+            viewModel.cancelImport()
+            if (error is CancellationException) throw error
+            snackbarHostState.showSnackbar(importFailureMessage(error))
+        }
+    )
+}
+
+private suspend fun exportWorkspaceDocument(
+    context: Context,
+    uri: Uri,
+    fallbackName: String,
+    snapshot: MarkdownExportSnapshot,
+    viewModel: MarkdownWorkspaceViewModel,
+    snackbarHostState: SnackbarHostState
+) {
+    val result = runCatching {
+        MarkdownDocumentFileAccess.export(context, uri, snapshot.document)
+        MarkdownDocumentFileAccess.displayName(context, uri, fallbackName)
+    }
+    result.fold(
+        onSuccess = { actualName ->
+            val stillCurrent = viewModel.completeExport(snapshot, actualName)
+            if (stillCurrent) {
+                snackbarHostState.showSnackbar("Exported $actualName")
+            } else {
+                snackbarHostState.showSnackbar("Exported an earlier snapshot to $actualName; newer edits remain local.")
+            }
+        },
+        onFailure = { error ->
+            viewModel.failExport(snapshot)
+            if (error is CancellationException) throw error
+            snackbarHostState.showSnackbar(exportFailureMessage(error))
+        }
+    )
+}
+
+private fun importFailureMessage(error: Throwable): String = when (error) {
+    is IOException -> error.message ?: "Could not import document."
+    is SecurityException -> error.message ?: "Document access was denied."
+    else -> "Could not import document."
+}
+
+private fun exportFailureMessage(error: Throwable): String = when (error) {
+    is IOException -> error.message ?: "Export failed. Choose another destination."
+    is SecurityException -> error.message ?: "Write access was denied. Choose another destination."
+    else -> "Export failed. Choose another destination."
+}
+
+private fun performDestructiveAction(
+    action: PendingDestructiveWorkspaceAction,
+    viewModel: MarkdownWorkspaceViewModel,
+    importPicker: () -> Unit
+) {
+    when (action) {
+        PendingDestructiveWorkspaceAction.NEW -> viewModel.newDocument()
+        PendingDestructiveWorkspaceAction.IMPORT -> importPicker()
+    }
+}
+
+@Composable
+private fun DiscardWorkspaceChangesDialog(
+    onDismiss: () -> Unit,
+    onDiscard: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Discard unsaved changes?") },
+        text = { Text("The current local draft has edits that have not been exported.") },
+        confirmButton = { TextButton(onClick = onDiscard) { Text("Discard") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
+    )
+}
+
+@Composable
+private fun WorkspaceMetadataRow(
+    hadUtf8Bom: Boolean,
+    isDirty: Boolean,
+    isLargeReadOnly: Boolean,
+    analysis: MarkdownWorkspaceAnalysis?
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        MetadataChip(if (hadUtf8Bom) "UTF-8 BOM" else "UTF-8")
+        MetadataChip(analysis?.lineEndings?.style?.name ?: "EOL …")
+        MetadataChip(
+            when {
+                analysis == null -> "tokens …"
+                analysis.tokenCount != null -> "${analysis.tokenCount} tokens · ${LocalTokenCounter.ENCODING_LABEL}"
+                else -> "token count skipped · large file"
+            }
+        )
+        MetadataChip(if (isDirty) "Modified since export" else "Exported/imported state")
+        if (isLargeReadOnly) MetadataChip("Read-only large preview")
+        MetadataChip("Local recovery")
+    }
+}
+
+@Composable
+private fun MetadataChip(label: String) {
+    AssistChip(onClick = {}, enabled = false, label = { Text(label) })
+}
+
+@Composable
+private fun WorkspaceDiagnostics(
+    analysis: MarkdownWorkspaceAnalysis?,
+    canNormalize: Boolean,
+    onNormalize: (LineEnding) -> Unit
+) {
+    if (analysis == null) {
+        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+        return
+    }
+    val mixed = analysis.diagnostics.firstOrNull { it.kind == DocumentDiagnosticKind.MIXED_LINE_ENDINGS }
+    val nul = analysis.diagnostics.firstOrNull { it.kind == DocumentDiagnosticKind.NUL_CHARACTER }
+    val safety = analysis.safety
+    if (mixed == null && nul == null && !safety.hasFindings) return
+
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Document checks", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+            mixed?.let {
+                Text(it.message, style = MaterialTheme.typography.bodySmall)
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    TextButton(onClick = { onNormalize(LineEnding.LF) }, enabled = canNormalize) { Text("Normalize LF") }
+                    TextButton(onClick = { onNormalize(LineEnding.CRLF) }, enabled = canNormalize) { Text("CRLF") }
+                    TextButton(onClick = { onNormalize(LineEnding.CR) }, enabled = canNormalize) { Text("CR") }
+                }
+            }
+            nul?.let { NulDiagnostic(it) }
+            if (safety.hasFindings) TextInspectorSummary(safety)
+        }
+    }
+}
+
+@Composable
+private fun NulDiagnostic(diagnostic: DocumentDiagnostic) {
+    Text(
+        "${diagnostic.message} (${diagnostic.line}:${diagnostic.column})",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.error
+    )
+}
+
+@Composable
+private fun TextInspectorSummary(safety: TextInspectionResult) {
+    Text(
+        "Text Inspector: ${safety.detectedCount} finding(s), ${safety.highCount} high / " +
+            "${safety.mediumCount} medium / ${safety.lowCount} low.",
+        style = MaterialTheme.typography.bodySmall
+    )
+    safety.findings.take(4).forEach { finding ->
+        Text(
+            "${finding.severity} · ${finding.line}:${finding.column} · ${finding.label}",
+            style = MaterialTheme.typography.bodySmall,
+            fontFamily = FontFamily.Monospace
+        )
+    }
+    if (safety.findings.size > 4 || safety.truncated) {
+        Text("More findings are available in the inspector result.", style = MaterialTheme.typography.labelSmall)
+    }
+}
+
+private fun String.ensureMarkdownExtension(): String =
+    if (endsWith(".md", ignoreCase = true) || endsWith(".markdown", ignoreCase = true)) this else "$this.md"

@@ -13,6 +13,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -22,12 +23,26 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.twojstar.llmbench.data.document.MarkdownWorkspaceRecoveryStore
 import com.twojstar.llmbench.data.engine.YamlParser
-import com.twojstar.llmbench.ui.theme.*
+import com.twojstar.llmbench.ui.theme.AccentEmerald
+import com.twojstar.llmbench.ui.theme.AccentRose
+import com.twojstar.llmbench.ui.viewmodel.MarkdownWorkspaceViewModel
 import com.twojstar.llmbench.ui.viewmodel.StudioUiState
 import com.twojstar.llmbench.ui.viewmodel.StudioViewModel
 
-@OptIn(ExperimentalMaterial3Api::class)
+private enum class YamlDocumentTab(
+    val label: String,
+    val fileLabel: String,
+    val languageLabel: String
+) {
+    COMPOSED("Composed Profile", "profile.yaml (Effective Composed Output)", "YAML"),
+    OVERLAY("Active Overlay", "profile.overlay.yaml (Private Downstream Layer)", "YAML"),
+    SCHEMA("Schema", "style-profile.schema.json", "JSON")
+}
+
 @Composable
 fun YamlEditorScreen(
     viewModel: StudioViewModel,
@@ -35,15 +50,247 @@ fun YamlEditorScreen(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    var selectedYamlTab by remember { mutableStateOf(0) } // 0: Composed Profile, 1: Active Overlay, 2: Schema Info
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var selectedDocumentTool by rememberSaveable { mutableIntStateOf(0) }
+    var selectedYamlTabIndex by rememberSaveable { mutableIntStateOf(0) }
+    val markdownWorkspaceViewModel: MarkdownWorkspaceViewModel = viewModel()
+    val recoveryStore = remember(context.applicationContext) {
+        MarkdownWorkspaceRecoveryStore(context.noBackupFilesDir)
+    }
 
-    val yamlText = when (selectedYamlTab) {
-        0 -> uiState.yamlRepresentation
-        1 -> uiState.selectedOverlay?.let { YamlParser.dumpOverlay(it) } ?: "# No active overlay selected.\n# Current view is using Base Default Profile."
-        else -> """
-# style-profile.schema.json (Schema Version 0.2)
+    SideEffect {
+        markdownWorkspaceViewModel.attachRecoveryStore(recoveryStore)
+        markdownWorkspaceViewModel.attachLifecycle(lifecycleOwner)
+    }
+
+    Column(modifier = modifier.fillMaxSize()) {
+        TabRow(selectedTabIndex = selectedDocumentTool, modifier = Modifier.fillMaxWidth()) {
+            Tab(
+                selected = selectedDocumentTool == 0,
+                onClick = { selectedDocumentTool = 0 },
+                text = { Text("YAML profile") },
+                icon = { Icon(Icons.Default.Code, contentDescription = null) }
+            )
+            Tab(
+                selected = selectedDocumentTool == 1,
+                onClick = { selectedDocumentTool = 1 },
+                text = { Text("Markdown") },
+                icon = { Icon(Icons.Default.Description, contentDescription = null) },
+                modifier = Modifier.testTag("documents_markdown_tab")
+            )
+        }
+
+        Box(modifier = Modifier.weight(1f)) {
+            if (selectedDocumentTool == 0) {
+                YamlProfileLayersScreen(
+                    viewModel = viewModel,
+                    uiState = uiState,
+                    selectedTabIndex = selectedYamlTabIndex,
+                    onSelectedTab = { selectedYamlTabIndex = it }
+                )
+            } else {
+                MarkdownWorkspaceScreen(workspaceViewModel = markdownWorkspaceViewModel)
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun YamlProfileLayersScreen(
+    viewModel: StudioViewModel,
+    uiState: StudioUiState,
+    selectedTabIndex: Int,
+    onSelectedTab: (Int) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val context = LocalContext.current
+    val selectedTab = YamlDocumentTab.entries[selectedTabIndex]
+    val yamlText = yamlDocumentText(selectedTab, uiState)
+
+    Scaffold(
+        topBar = {
+            YamlProfileTopBar(
+                onCopy = {
+                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                    clipboard.setPrimaryClip(ClipData.newPlainText("Profile YAML", yamlText))
+                    viewModel.showSnackbar("Copied YAML to clipboard!")
+                }
+            )
+        },
+        modifier = modifier
+    ) { innerPadding ->
+        LazyColumn(
+            contentPadding = PaddingValues(
+                start = 16.dp,
+                end = 16.dp,
+                top = innerPadding.calculateTopPadding(),
+                bottom = innerPadding.calculateBottomPadding() + 80.dp
+            ),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier.fillMaxSize()
+        ) {
+            item { YamlValidationCard(uiState) }
+            item {
+                YamlLayerTabs(
+                    selectedIndex = selectedTabIndex,
+                    onSelected = onSelectedTab
+                )
+            }
+            item { YamlDocumentCard(selectedTab, yamlText) }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun YamlProfileTopBar(onCopy: () -> Unit) {
+    TopAppBar(
+        title = {
+            Column {
+                Text("YAML & Profile Layers", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                Text(
+                    "Recursive composition engine with schema v0.2",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        },
+        actions = {
+            IconButton(onClick = onCopy, modifier = Modifier.testTag("btn_copy_yaml")) {
+                Icon(
+                    imageVector = Icons.Default.ContentCopy,
+                    contentDescription = "Copy YAML",
+                    tint = MaterialTheme.colorScheme.primary
+                )
+            }
+        },
+        colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background)
+    )
+}
+
+@Composable
+private fun YamlValidationCard(uiState: StudioUiState) {
+    val isValid = uiState.validationResult.isValid
+    val accent = if (isValid) AccentEmerald else AccentRose
+    Card(
+        shape = RoundedCornerShape(14.dp),
+        colors = CardDefaults.cardColors(containerColor = accent.copy(alpha = 0.15f)),
+        border = androidx.compose.foundation.BorderStroke(1.dp, accent.copy(alpha = 0.4f)),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Icon(
+                imageVector = if (isValid) Icons.Default.CheckCircle else Icons.Default.Warning,
+                contentDescription = null,
+                tint = accent,
+                modifier = Modifier.size(24.dp)
+            )
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = if (isValid) "Schema Validation Passed" else "Validation Error Found",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = accent
+                )
+                Text(
+                    text = if (isValid) {
+                        "Profile strictly conforms to schema/style-profile.schema.json"
+                    } else {
+                        uiState.validationResult.errors.joinToString(", ")
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun YamlLayerTabs(selectedIndex: Int, onSelected: (Int) -> Unit) {
+    TabRow(
+        selectedTabIndex = selectedIndex,
+        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+        contentColor = MaterialTheme.colorScheme.primary,
+        modifier = Modifier.clip(RoundedCornerShape(12.dp))
+    ) {
+        YamlDocumentTab.entries.forEachIndexed { index, tab ->
+            Tab(
+                selected = selectedIndex == index,
+                onClick = { onSelected(index) },
+                text = { Text(tab.label, fontSize = 12.sp, fontWeight = FontWeight.SemiBold) }
+            )
+        }
+    }
+}
+
+@Composable
+private fun YamlDocumentCard(tab: YamlDocumentTab, yamlText: String) {
+    Card(
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(2.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(modifier = Modifier.padding(14.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = tab.fileLabel,
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Surface(shape = RoundedCornerShape(6.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
+                    Text(
+                        text = tab.languageLabel,
+                        style = MaterialTheme.typography.labelSmall,
+                        fontSize = 10.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                    )
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(MaterialTheme.colorScheme.background)
+                    .horizontalScroll(rememberScrollState())
+                    .padding(12.dp)
+            ) {
+                Text(
+                    text = yamlText,
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 12.sp,
+                    lineHeight = 18.sp,
+                    color = MaterialTheme.colorScheme.onBackground
+                )
+            }
+        }
+    }
+}
+
+private fun yamlDocumentText(tab: YamlDocumentTab, uiState: StudioUiState): String = when (tab) {
+    YamlDocumentTab.COMPOSED -> uiState.yamlRepresentation
+    YamlDocumentTab.OVERLAY -> uiState.selectedOverlay?.let(YamlParser::dumpOverlay)
+        ?: "# No active overlay selected.\n# Current view is using Base Default Profile."
+    YamlDocumentTab.SCHEMA -> STYLE_PROFILE_SCHEMA
+}
+
+private val STYLE_PROFILE_SCHEMA = """
 {
   "${'$'}schema": "https://json-schema.org/draft/2020-12/schema",
+  "${'$'}comment": "style-profile.schema.json (Schema Version 0.2)",
   "title": "StyleProfile",
   "type": "object",
   "required": ["schemaVersion", "id", "locale", "personality", "collaboration"],
@@ -60,189 +307,4 @@ fun YamlEditorScreen(
     }
   }
 }
-        """.trimIndent()
-    }
-
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = {
-                    Column {
-                        Text(
-                            text = "YAML & Profile Layers",
-                            style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Text(
-                            text = "Recursive composition engine with schema v0.2",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                },
-                actions = {
-                    IconButton(
-                        onClick = {
-                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                            clipboard.setPrimaryClip(ClipData.newPlainText("Profile YAML", yamlText))
-                            viewModel.showSnackbar("Copied YAML to clipboard!")
-                        },
-                        modifier = Modifier.testTag("btn_copy_yaml")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.ContentCopy,
-                            contentDescription = "Copy YAML",
-                            tint = MaterialTheme.colorScheme.primary
-                        )
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.background
-                )
-            )
-        },
-        modifier = modifier
-    ) { innerPadding ->
-        LazyColumn(
-            contentPadding = PaddingValues(
-                start = 16.dp,
-                end = 16.dp,
-                top = innerPadding.calculateTopPadding(),
-                bottom = innerPadding.calculateBottomPadding() + 80.dp
-            ),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-            modifier = Modifier.fillMaxSize()
-        ) {
-            // Validation Status Header
-            item {
-                Card(
-                    shape = RoundedCornerShape(14.dp),
-                    colors = CardDefaults.cardColors(
-                        containerColor = if (uiState.validationResult.isValid) AccentEmerald.copy(alpha = 0.15f) else AccentRose.copy(alpha = 0.15f)
-                    ),
-                    border = androidx.compose.foundation.BorderStroke(
-                        1.dp,
-                        if (uiState.validationResult.isValid) AccentEmerald.copy(alpha = 0.4f) else AccentRose.copy(alpha = 0.4f)
-                    ),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        Icon(
-                            imageVector = if (uiState.validationResult.isValid) Icons.Default.CheckCircle else Icons.Default.Warning,
-                            contentDescription = null,
-                            tint = if (uiState.validationResult.isValid) AccentEmerald else AccentRose,
-                            modifier = Modifier.size(24.dp)
-                        )
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = if (uiState.validationResult.isValid) "Schema Validation Passed" else "Validation Error Found",
-                                style = MaterialTheme.typography.titleSmall,
-                                fontWeight = FontWeight.Bold,
-                                color = if (uiState.validationResult.isValid) AccentEmerald else AccentRose
-                            )
-                            Text(
-                                text = if (uiState.validationResult.isValid) "Profile strictly conforms to schema/style-profile.schema.json" else uiState.validationResult.errors.joinToString(", "),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                        }
-                    }
-                }
-            }
-
-            // Layer tabs
-            item {
-                TabRow(
-                    selectedTabIndex = selectedYamlTab,
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                    contentColor = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.clip(RoundedCornerShape(12.dp))
-                ) {
-                    Tab(
-                        selected = selectedYamlTab == 0,
-                        onClick = { selectedYamlTab = 0 },
-                        text = { Text("Composed Profile", fontSize = 12.sp, fontWeight = FontWeight.SemiBold) }
-                    )
-                    Tab(
-                        selected = selectedYamlTab == 1,
-                        onClick = { selectedYamlTab = 1 },
-                        text = { Text("Active Overlay", fontSize = 12.sp, fontWeight = FontWeight.SemiBold) }
-                    )
-                    Tab(
-                        selected = selectedYamlTab == 2,
-                        onClick = { selectedYamlTab = 2 },
-                        text = { Text("Schema", fontSize = 12.sp, fontWeight = FontWeight.SemiBold) }
-                    )
-                }
-            }
-
-            // Monospace YAML viewer card
-            item {
-                Card(
-                    shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.surface
-                    ),
-                    elevation = CardDefaults.cardElevation(2.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(modifier = Modifier.padding(14.dp)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = when (selectedYamlTab) {
-                                    0 -> "profile.yaml (Effective Composed Output)"
-                                    1 -> "profile.overlay.yaml (Private Downstream Layer)"
-                                    else -> "style-profile.schema.json"
-                                },
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                            Surface(
-                                shape = RoundedCornerShape(6.dp),
-                                color = MaterialTheme.colorScheme.surfaceVariant
-                            ) {
-                                Text(
-                                    text = if (selectedYamlTab == 2) "JSON" else "YAML",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    fontSize = 10.sp,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                )
-                            }
-                        }
-
-                        Spacer(Modifier.height(8.dp))
-
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(MaterialTheme.colorScheme.background)
-                                .horizontalScroll(rememberScrollState())
-                                .padding(12.dp)
-                        ) {
-                            Text(
-                                text = yamlText,
-                                fontFamily = FontFamily.Monospace,
-                                fontSize = 12.sp,
-                                lineHeight = 18.sp,
-                                color = MaterialTheme.colorScheme.onBackground
-                            )
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
+""".trimIndent()
