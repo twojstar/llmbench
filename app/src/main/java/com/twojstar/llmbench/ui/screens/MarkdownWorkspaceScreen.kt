@@ -28,6 +28,8 @@ import com.twojstar.llmbench.data.document.DocumentDiagnostics
 import com.twojstar.llmbench.data.document.LineEnding
 import com.twojstar.llmbench.data.document.LineEndingCounts
 import com.twojstar.llmbench.data.document.MarkdownDocumentFileAccess
+import com.twojstar.llmbench.data.document.MarkdownRecentDocumentsStore
+import com.twojstar.llmbench.data.document.RecentMarkdownDocument
 import com.twojstar.llmbench.data.document.TextDocument
 import com.twojstar.llmbench.data.document.TextDocumentCodec
 import com.twojstar.llmbench.data.security.TextInspectionResult
@@ -49,9 +51,10 @@ private const val MAX_TOKENIZED_CHARS = 1_000_000
 private const val LARGE_PREVIEW_CHUNK_CHARS = 16 * 1024
 private val MARKDOWN_IMPORT_MIME_TYPES = arrayOf("text/markdown", "text/plain", "application/octet-stream")
 
-private enum class PendingDestructiveWorkspaceAction {
-    NEW,
-    IMPORT
+private sealed class PendingDestructiveWorkspaceAction {
+    data object New : PendingDestructiveWorkspaceAction()
+    data object Import : PendingDestructiveWorkspaceAction()
+    data class Recent(val document: RecentMarkdownDocument) : PendingDestructiveWorkspaceAction()
 }
 
 private data class MarkdownWorkspaceAnalysis(
@@ -71,6 +74,9 @@ fun MarkdownWorkspaceScreen(
     val scope = rememberCoroutineScope()
     val uiState by workspaceViewModel.uiState.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
+    val recentStore = remember(context) { MarkdownRecentDocumentsStore(context.applicationContext) }
+    var recentDocuments by remember { mutableStateOf<List<RecentMarkdownDocument>>(emptyList()) }
+    var showRecents by remember { mutableStateOf(false) }
     var pendingDestructiveAction by remember { mutableStateOf<PendingDestructiveWorkspaceAction?>(null) }
     val analysis by rememberMarkdownWorkspaceAnalysis(
         text = uiState.text,
@@ -78,12 +84,38 @@ fun MarkdownWorkspaceScreen(
         revision = uiState.revision
     )
 
+    LaunchedEffect(recentStore) {
+        recentDocuments = runCatching { recentStore.load() }.getOrDefault(emptyList())
+    }
+
     val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri == null) {
             workspaceViewModel.cancelImport()
         } else {
             scope.launch {
-                importWorkspaceDocument(context, uri, workspaceViewModel, snackbarHostState)
+                val importedName = importWorkspaceDocument(context, uri, workspaceViewModel, snackbarHostState)
+                if (importedName != null) {
+                    val wasRetained = recentStore.hasReadPermission(uri)
+                    val retained = recentStore.retainReadPermission(uri)
+                    val recordAttempt = if (retained) runCatching { recentStore.record(uri) } else null
+                    when {
+                        recordAttempt?.isSuccess == true -> {
+                            recentDocuments = recordAttempt.getOrThrow()
+                            snackbarHostState.showSnackbar(
+                                "Imported $importedName and added it to Recents; original file stays untouched."
+                            )
+                        }
+                        retained -> {
+                            if (!wasRetained) recentStore.releaseReadPermission(uri)
+                            snackbarHostState.showSnackbar(
+                                "Imported $importedName; the Recents shortcut could not be saved."
+                            )
+                        }
+                        else -> snackbarHostState.showSnackbar(
+                            "Imported $importedName; this provider did not grant persistent access, so it will not stay in Recents."
+                        )
+                    }
+                }
             }
         }
     }
@@ -117,10 +149,34 @@ fun MarkdownWorkspaceScreen(
         }
     }
 
+    fun openRecentDocument(document: RecentMarkdownDocument) {
+        if (!workspaceViewModel.beginImport()) return
+        scope.launch {
+            var openFailure: Throwable? = null
+            val importedName = importWorkspaceDocument(
+                context = context,
+                uri = document.uri,
+                viewModel = workspaceViewModel,
+                snackbarHostState = snackbarHostState,
+                onFailure = { openFailure = it }
+            )
+            if (importedName != null) {
+                recentDocuments = runCatching { recentStore.record(document.uri) }.getOrElse { recentDocuments }
+                snackbarHostState.showSnackbar("Opened $importedName from Recents; original file stays untouched.")
+            } else {
+                val pruned = openFailure?.let { error ->
+                    runCatching { recentStore.forgetIfUnavailable(document, error) }.getOrNull()
+                }
+                recentDocuments = pruned
+                    ?: runCatching { recentStore.load() }.getOrElse { recentDocuments }
+            }
+        }
+    }
+
     fun requestAction(action: PendingDestructiveWorkspaceAction) {
         if (uiState.isBusy) return
         if (uiState.isDirty) pendingDestructiveAction = action
-        else performDestructiveAction(action, workspaceViewModel, ::launchImportPicker)
+        else performDestructiveAction(action, workspaceViewModel, ::launchImportPicker, ::openRecentDocument)
     }
 
     pendingDestructiveAction?.let { action ->
@@ -128,8 +184,24 @@ fun MarkdownWorkspaceScreen(
             onDismiss = { pendingDestructiveAction = null },
             onDiscard = {
                 pendingDestructiveAction = null
-                performDestructiveAction(action, workspaceViewModel, ::launchImportPicker)
+                performDestructiveAction(action, workspaceViewModel, ::launchImportPicker, ::openRecentDocument)
             }
+        )
+    }
+
+    if (showRecents) {
+        RecentMarkdownDocumentsSheet(
+            documents = recentDocuments,
+            onOpen = { document ->
+                showRecents = false
+                requestAction(PendingDestructiveWorkspaceAction.Recent(document))
+            },
+            onForget = { document ->
+                scope.launch {
+                    recentDocuments = runCatching { recentStore.forget(document) }.getOrElse { recentDocuments }
+                }
+            },
+            onDismiss = { showRecents = false }
         )
     }
 
@@ -138,8 +210,14 @@ fun MarkdownWorkspaceScreen(
         topBar = {
             MarkdownWorkspaceTopBar(
                 uiState = uiState,
-                onNew = { requestAction(PendingDestructiveWorkspaceAction.NEW) },
-                onImport = { requestAction(PendingDestructiveWorkspaceAction.IMPORT) },
+                onNew = { requestAction(PendingDestructiveWorkspaceAction.New) },
+                onImport = { requestAction(PendingDestructiveWorkspaceAction.Import) },
+                onRecent = {
+                    scope.launch {
+                        recentDocuments = runCatching { recentStore.load() }.getOrElse { recentDocuments }
+                        showRecents = true
+                    }
+                },
                 onExport = { exportLauncher.launch(uiState.displayName.ensureMarkdownExtension()) }
             )
         },
@@ -170,6 +248,7 @@ private fun MarkdownWorkspaceTopBar(
     uiState: MarkdownWorkspaceUiState,
     onNew: () -> Unit,
     onImport: () -> Unit,
+    onRecent: () -> Unit,
     onExport: () -> Unit
 ) {
     TopAppBar(
@@ -199,6 +278,9 @@ private fun MarkdownWorkspaceTopBar(
             }
             IconButton(onClick = onImport, enabled = !uiState.isBusy, modifier = Modifier.testTag("markdown_import")) {
                 Icon(Icons.Default.FolderOpen, contentDescription = "Import Markdown document")
+            }
+            IconButton(onClick = onRecent, enabled = !uiState.isBusy, modifier = Modifier.testTag("markdown_recents")) {
+                Icon(Icons.Default.History, contentDescription = "Recent Markdown documents")
             }
             IconButton(onClick = onExport, enabled = !uiState.isBusy, modifier = Modifier.testTag("markdown_export")) {
                 Icon(Icons.Default.SaveAs, contentDescription = "Export Markdown document")
@@ -313,19 +395,20 @@ private suspend fun importWorkspaceDocument(
     context: Context,
     uri: Uri,
     viewModel: MarkdownWorkspaceViewModel,
-    snackbarHostState: SnackbarHostState
-) {
+    snackbarHostState: SnackbarHostState,
+    onFailure: (Throwable) -> Unit = {}
+): String? {
     val result = runCatching { MarkdownDocumentFileAccess.import(context, uri) }
-    result.fold(
+    return result.fold(
         onSuccess = { opened ->
-            if (viewModel.completeImport(opened.displayName, opened.document)) {
-                snackbarHostState.showSnackbar("Imported ${opened.displayName}; original file will not be overwritten.")
-            }
+            opened.displayName.takeIf { viewModel.completeImport(opened.displayName, opened.document) }
         },
         onFailure = { error ->
             viewModel.cancelImport()
             if (error is CancellationException) throw error
+            onFailure(error)
             snackbarHostState.showSnackbar(importFailureMessage(error))
+            null
         }
     )
 }
@@ -374,11 +457,58 @@ private fun exportFailureMessage(error: Throwable): String = when (error) {
 private fun performDestructiveAction(
     action: PendingDestructiveWorkspaceAction,
     viewModel: MarkdownWorkspaceViewModel,
-    importPicker: () -> Unit
+    importPicker: () -> Unit,
+    openRecent: (RecentMarkdownDocument) -> Unit
 ) {
     when (action) {
-        PendingDestructiveWorkspaceAction.NEW -> viewModel.newDocument()
-        PendingDestructiveWorkspaceAction.IMPORT -> importPicker()
+        PendingDestructiveWorkspaceAction.New -> viewModel.newDocument()
+        PendingDestructiveWorkspaceAction.Import -> importPicker()
+        is PendingDestructiveWorkspaceAction.Recent -> openRecent(action.document)
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun RecentMarkdownDocumentsSheet(
+    documents: List<RecentMarkdownDocument>,
+    onOpen: (RecentMarkdownDocument) -> Unit,
+    onForget: (RecentMarkdownDocument) -> Unit,
+    onDismiss: () -> Unit
+) {
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text("Recent Markdown", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+            Text(
+                "Shortcuts to the original documents. LlmBench keeps read access when Android allows it; file contents are not copied into the Recents list.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            if (documents.isEmpty()) {
+                Text("No persistent document shortcuts yet.", modifier = Modifier.padding(vertical = 20.dp))
+            } else {
+                LazyColumn(
+                    modifier = Modifier.fillMaxWidth().heightIn(max = 320.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    items(documents, key = { it.uriString }) { document ->
+                        Row(modifier = Modifier.fillMaxWidth()) {
+                            TextButton(onClick = { onOpen(document) }, modifier = Modifier.weight(1f)) {
+                                Icon(Icons.Default.Description, contentDescription = null)
+                                Spacer(Modifier.width(8.dp))
+                                Text(document.displayName, modifier = Modifier.fillMaxWidth())
+                            }
+                            IconButton(onClick = { onForget(document) }) {
+                                Icon(Icons.Default.Close, contentDescription = "Forget ${document.displayName}")
+                            }
+                        }
+                    }
+                }
+            }
+            Spacer(Modifier.height(20.dp))
+        }
     }
 }
 
