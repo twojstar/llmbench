@@ -3,8 +3,61 @@ package com.twojstar.llmbench.data.model
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 
 class ConversationHistoryTest {
+    @Test
+    fun completedAssistantResponseClassificationIsPortable() {
+        val response = ModelChatMessage(
+            id = "response",
+            sender = CHAT_ROLE_ASSISTANT,
+            provider = AiProvider.CHATGPT,
+            text = "Useful answer"
+        )
+
+        assertTrue(response.isCompletedAssistantResponse())
+    }
+
+    @Test
+    fun incompleteOrNonResponseMessagesAreNotCompletedAssistantResponses() {
+        val partial = ModelChatMessage(
+            id = "partial",
+            sender = CHAT_ROLE_ASSISTANT,
+            provider = AiProvider.CHATGPT,
+            text = "Half an answer",
+            isPartial = true
+        )
+        val error = ModelChatMessage(
+            id = "error",
+            sender = CHAT_ROLE_ASSISTANT,
+            provider = AiProvider.CHATGPT,
+            text = "Provider failed",
+            isError = true
+        )
+        val onboarding = ModelChatMessage(
+            id = "welcome",
+            sender = CHAT_ROLE_ASSISTANT,
+            provider = AiProvider.ALL,
+            text = "Welcome"
+        )
+        val user = ModelChatMessage(
+            id = "user",
+            sender = CHAT_ROLE_USER,
+            provider = AiProvider.CHATGPT,
+            text = "Prompt"
+        )
+        val blank = ModelChatMessage(
+            id = "blank",
+            sender = CHAT_ROLE_ASSISTANT,
+            provider = AiProvider.CHATGPT,
+            text = "   "
+        )
+
+        listOf(partial, error, onboarding, user, blank).forEach { message ->
+            assertFalse(message.isCompletedAssistantResponse())
+        }
+    }
+
     @Test
     fun keepsOnlyCurrentProviderLiveAssistantTurns() {
         val prompt = "follow up"
@@ -116,6 +169,7 @@ class ConversationHistoryTest {
 
         assertEquals(listOf(prompt), turns.map { it.text })
     }
+
     @Test
     fun partialAssistantResponsesAreNotReplayed() {
         val history = listOf(
@@ -138,5 +192,4 @@ class ConversationHistoryTest {
 
         assertEquals(listOf(ProviderTextTurn(CHAT_ROLE_USER, "next")), turns)
     }
-
 }
