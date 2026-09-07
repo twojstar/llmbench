@@ -15,7 +15,8 @@ import java.io.IOException
 
 internal data class RecentMarkdownDocument(
     val uriString: String,
-    val displayName: String
+    val displayName: String,
+    val isPinned: Boolean
 ) {
     val uri: Uri
         get() = Uri.parse(uriString)
@@ -57,25 +58,41 @@ internal class MarkdownRecentDocumentsStore(context: Context) {
         withContext(Dispatchers.IO) {
             val persisted = persistedReadUriStrings()
             val uriString = uri.toString()
-            val saved = readUriStrings()
+            val saved = readEntries()
             val current = pruneToPersisted(saved, persisted)
             val next = if (uriString in persisted) {
-                MarkdownRecentDocumentsCodec.moveToFront(current, uriString)
+                MarkdownRecentDocumentsCodec.promote(current, uriString)
             } else {
                 current
             }
-            if (next != saved) writeUriStrings(next)
+            if (next != saved) writeEntries(next)
             MarkdownRecentDocumentsCodec.evictedFrom(current, next)
                 .forEach { releaseReadPermission(Uri.parse(it)) }
+            if (uriString in persisted && next.none { it.uriString == uriString }) {
+                releaseReadPermission(uri)
+            }
+            resolveDocuments(next)
+        }
+    }
+
+    suspend fun setPinned(
+        document: RecentMarkdownDocument,
+        isPinned: Boolean
+    ): List<RecentMarkdownDocument> = mutex.withLock {
+        withContext(Dispatchers.IO) {
+            val saved = readEntries()
+            val current = pruneToPersisted(saved, persistedReadUriStrings())
+            val next = MarkdownRecentDocumentsCodec.setPinned(current, document.uriString, isPinned)
+            if (next != saved) writeEntries(next)
             resolveDocuments(next)
         }
     }
 
     suspend fun forget(document: RecentMarkdownDocument): List<RecentMarkdownDocument> = mutex.withLock {
         withContext(Dispatchers.IO) {
-            val current = readUriStrings()
-            val next = current.filterNot { it == document.uriString }
-            if (next != current) writeUriStrings(next)
+            val current = readEntries()
+            val next = current.filterNot { it.uriString == document.uriString }
+            if (next != current) writeEntries(next)
             releaseReadPermission(document.uri)
             loadUnlocked()
         }
@@ -88,23 +105,25 @@ internal class MarkdownRecentDocumentsStore(context: Context) {
         if (shouldForgetRecentDocumentAfterOpenFailure(error)) forget(document) else null
 
     private fun loadUnlocked(): List<RecentMarkdownDocument> {
-        val saved = readUriStrings()
+        val saved = readEntries()
         val retained = pruneToPersisted(saved, persistedReadUriStrings())
-        if (retained != saved) writeUriStrings(retained)
+        if (retained != saved) writeEntries(retained)
         return resolveDocuments(retained)
     }
 
     private fun pruneToPersisted(
-        uriStrings: List<String>,
+        entries: List<MarkdownRecentDocumentEntry>,
         persisted: Set<String>
-    ): List<String> = MarkdownRecentDocumentsCodec.normalize(uriStrings.filter { it in persisted })
+    ): List<MarkdownRecentDocumentEntry> =
+        MarkdownRecentDocumentsCodec.normalize(entries.filter { it.uriString in persisted })
 
-    private fun resolveDocuments(uriStrings: List<String>): List<RecentMarkdownDocument> =
-        uriStrings.map { uriString ->
-            val uri = Uri.parse(uriString)
+    private fun resolveDocuments(entries: List<MarkdownRecentDocumentEntry>): List<RecentMarkdownDocument> =
+        entries.map { entry ->
+            val uri = Uri.parse(entry.uriString)
             RecentMarkdownDocument(
-                uriString = uriString,
-                displayName = MarkdownDocumentFileAccess.displayName(appContext, uri)
+                uriString = entry.uriString,
+                displayName = MarkdownDocumentFileAccess.displayName(appContext, uri),
+                isPinned = entry.isPinned
             )
         }
 
@@ -116,7 +135,7 @@ internal class MarkdownRecentDocumentsStore(context: Context) {
             .toSet()
     }.getOrDefault(emptySet())
 
-    private fun readUriStrings(): List<String> {
+    private fun readEntries(): List<MarkdownRecentDocumentEntry> {
         if (!atomicFile.baseFile.isFile) return emptyList()
         val bytes = try {
             atomicFile.readFully()
@@ -126,9 +145,9 @@ internal class MarkdownRecentDocumentsStore(context: Context) {
         return MarkdownRecentDocumentsCodec.decode(bytes)
     }
 
-    private fun writeUriStrings(uriStrings: List<String>) {
+    private fun writeEntries(entries: List<MarkdownRecentDocumentEntry>) {
         atomicFile.baseFile.parentFile?.mkdirs()
-        val bytes = MarkdownRecentDocumentsCodec.encode(uriStrings)
+        val bytes = MarkdownRecentDocumentsCodec.encode(entries)
         var output: FileOutputStream? = atomicFile.startWrite()
         try {
             val stream = requireNotNull(output)
