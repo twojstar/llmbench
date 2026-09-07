@@ -95,17 +95,26 @@ fun MarkdownWorkspaceScreen(
             scope.launch {
                 val importedName = importWorkspaceDocument(context, uri, workspaceViewModel, snackbarHostState)
                 if (importedName != null) {
+                    val wasRetained = recentStore.hasReadPermission(uri)
                     val retained = recentStore.retainReadPermission(uri)
-                    if (retained) {
-                        recentDocuments = runCatching { recentStore.record(uri) }.getOrElse { recentDocuments }
-                    }
-                    snackbarHostState.showSnackbar(
-                        if (retained) {
-                            "Imported $importedName and added it to Recents; original file stays untouched."
-                        } else {
-                            "Imported $importedName; this provider did not grant persistent access, so it will not stay in Recents."
+                    val recordAttempt = if (retained) runCatching { recentStore.record(uri) } else null
+                    when {
+                        recordAttempt?.isSuccess == true -> {
+                            recentDocuments = recordAttempt.getOrThrow()
+                            snackbarHostState.showSnackbar(
+                                "Imported $importedName and added it to Recents; original file stays untouched."
+                            )
                         }
-                    )
+                        retained -> {
+                            if (!wasRetained) recentStore.releaseReadPermission(uri)
+                            snackbarHostState.showSnackbar(
+                                "Imported $importedName; the Recents shortcut could not be saved."
+                            )
+                        }
+                        else -> snackbarHostState.showSnackbar(
+                            "Imported $importedName; this provider did not grant persistent access, so it will not stay in Recents."
+                        )
+                    }
                 }
             }
         }
@@ -143,12 +152,23 @@ fun MarkdownWorkspaceScreen(
     fun openRecentDocument(document: RecentMarkdownDocument) {
         if (!workspaceViewModel.beginImport()) return
         scope.launch {
-            val importedName = importWorkspaceDocument(context, document.uri, workspaceViewModel, snackbarHostState)
+            var openFailure: Throwable? = null
+            val importedName = importWorkspaceDocument(
+                context = context,
+                uri = document.uri,
+                viewModel = workspaceViewModel,
+                snackbarHostState = snackbarHostState,
+                onFailure = { openFailure = it }
+            )
             if (importedName != null) {
                 recentDocuments = runCatching { recentStore.record(document.uri) }.getOrElse { recentDocuments }
                 snackbarHostState.showSnackbar("Opened $importedName from Recents; original file stays untouched.")
             } else {
-                recentDocuments = runCatching { recentStore.load() }.getOrElse { recentDocuments }
+                val pruned = openFailure?.let { error ->
+                    runCatching { recentStore.forgetIfUnavailable(document, error) }.getOrNull()
+                }
+                recentDocuments = pruned
+                    ?: runCatching { recentStore.load() }.getOrElse { recentDocuments }
             }
         }
     }
@@ -192,7 +212,12 @@ fun MarkdownWorkspaceScreen(
                 uiState = uiState,
                 onNew = { requestAction(PendingDestructiveWorkspaceAction.New) },
                 onImport = { requestAction(PendingDestructiveWorkspaceAction.Import) },
-                onRecent = { showRecents = true },
+                onRecent = {
+                    scope.launch {
+                        recentDocuments = runCatching { recentStore.load() }.getOrElse { recentDocuments }
+                        showRecents = true
+                    }
+                },
                 onExport = { exportLauncher.launch(uiState.displayName.ensureMarkdownExtension()) }
             )
         },
@@ -370,7 +395,8 @@ private suspend fun importWorkspaceDocument(
     context: Context,
     uri: Uri,
     viewModel: MarkdownWorkspaceViewModel,
-    snackbarHostState: SnackbarHostState
+    snackbarHostState: SnackbarHostState,
+    onFailure: (Throwable) -> Unit = {}
 ): String? {
     val result = runCatching { MarkdownDocumentFileAccess.import(context, uri) }
     return result.fold(
@@ -380,6 +406,7 @@ private suspend fun importWorkspaceDocument(
         onFailure = { error ->
             viewModel.cancelImport()
             if (error is CancellationException) throw error
+            onFailure(error)
             snackbarHostState.showSnackbar(importFailureMessage(error))
             null
         }
