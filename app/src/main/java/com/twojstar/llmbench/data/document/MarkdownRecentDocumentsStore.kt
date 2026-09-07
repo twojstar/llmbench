@@ -68,9 +68,6 @@ internal class MarkdownRecentDocumentsStore(context: Context) {
             if (next != saved) writeEntries(next)
             MarkdownRecentDocumentsCodec.evictedFrom(current, next)
                 .forEach { releaseReadPermission(Uri.parse(it)) }
-            if (uriString in persisted && next.none { it.uriString == uriString }) {
-                releaseReadPermission(uri)
-            }
             resolveDocuments(next)
         }
     }
