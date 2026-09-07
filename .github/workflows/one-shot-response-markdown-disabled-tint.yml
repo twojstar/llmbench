@@ -32,19 +32,12 @@ jobs:
 
           path = Path('app/src/main/java/com/twojstar/llmbench/ui/screens/ChatScreen.kt')
           text = path.read_text()
-          old = '''                            Icon(
-                                imageVector = Icons.Outlined.Description,
-                                contentDescription = "Open response as Markdown",
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(15.dp)
-                            )'''
-          new = '''                            Icon(
-                                imageVector = Icons.Outlined.Description,
-                                contentDescription = "Open response as Markdown",
-                                modifier = Modifier.size(15.dp)
-                            )'''
-          if text.count(old) != 1:
-              raise SystemExit(f'expected exactly one response Markdown icon block, found {text.count(old)}')
+          old = '''contentDescription = "Open response as Markdown",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,'''
+          new = '''contentDescription = "Open response as Markdown",'''
+          count = text.count(old)
+          if count != 1:
+              raise SystemExit(f'expected exactly one response Markdown tint pair, found {count}')
           path.write_text(text.replace(old, new, 1))
           PY
 
