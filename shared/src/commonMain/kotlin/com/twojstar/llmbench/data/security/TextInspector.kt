@@ -136,10 +136,10 @@ object TextInspector {
     }
 
     private val injectionPatterns = listOf(
-        Regex("\\b(?:ignore|disregard|forget)\\b.{0,90}\\b(?:previous|prior|above|system|developer)\\b.{0,60}\\b(?:instruction|instructions|prompt|message|messages)\\b", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL)),
-        Regex("\\b(?:reveal|print|show|output|expose|dump)\\b.{0,60}\\b(?:system|developer)\\s+(?:prompt|message|instructions?)\\b", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL)),
-        Regex("\\b(?:do not|don't)\\s+(?:tell|show|inform)\\s+(?:the\\s+)?user\\b", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL)),
-        Regex("(?:^|[^\\p{L}])(?:zignoruj|ignoruj|pomiń|zapomnij)(?:$|[^\\p{L}]).{0,90}\\b(?:poprzednie|wcześniejsze|powyższe|systemowe|deweloperskie)\\b.{0,60}\\b(?:instrukcje|polecenia|prompt|wiadomości)\\b", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
+        Regex("\\b(?:ignore|disregard|forget)\\b[\\s\\S]{0,90}\\b(?:previous|prior|above|system|developer)\\b[\\s\\S]{0,60}\\b(?:instruction|instructions|prompt|message|messages)\\b", setOf(RegexOption.IGNORE_CASE)),
+        Regex("\\b(?:reveal|print|show|output|expose|dump)\\b[\\s\\S]{0,60}\\b(?:system|developer)\\s+(?:prompt|message|instructions?)\\b", setOf(RegexOption.IGNORE_CASE)),
+        Regex("\\b(?:do not|don't)\\s+(?:tell|show|inform)\\s+(?:the\\s+)?user\\b", setOf(RegexOption.IGNORE_CASE)),
+        Regex("(?:^|[^\\p{L}])(?:zignoruj|ignoruj|pomiń|zapomnij)(?:$|[^\\p{L}])[\\s\\S]{0,90}\\b(?:poprzednie|wcześniejsze|powyższe|systemowe|deweloperskie)\\b[\\s\\S]{0,60}\\b(?:instrukcje|polecenia|prompt|wiadomości)\\b", setOf(RegexOption.IGNORE_CASE))
     )
 
     fun inspect(text: String): TextInspectionResult {
