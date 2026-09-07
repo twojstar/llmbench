@@ -50,7 +50,7 @@ internal class MarkdownRecentDocumentsStore(context: Context) {
     }
 
     fun releaseReadPermission(uri: Uri) {
-        if (uri.scheme != CONTENT_SCHEME) return
+        if (uri.scheme != CONTENT_SCHEME || !hasReadPermission(uri)) return
         runCatching {
             resolver.releasePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
@@ -74,6 +74,9 @@ internal class MarkdownRecentDocumentsStore(context: Context) {
             if (next != saved) writeEntries(next)
             MarkdownRecentDocumentsCodec.evictedFrom(current, next)
                 .forEach { releaseReadPermission(Uri.parse(it)) }
+            if (uriString in persisted && next.none { it.uriString == uriString }) {
+                releaseReadPermission(uri)
+            }
             resolveDocuments(next)
         }
     }
