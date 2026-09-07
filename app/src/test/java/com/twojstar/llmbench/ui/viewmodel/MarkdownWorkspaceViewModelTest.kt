@@ -14,6 +14,7 @@ import org.junit.Test
 class MarkdownWorkspaceViewModelTest {
     private companion object {
         const val PROMPT_NAME = "prompt.md"
+        const val EXTERNAL_TEXT = "shared text"
     }
 
     @Test
@@ -127,16 +128,16 @@ class MarkdownWorkspaceViewModelTest {
 
         assertEquals(
             ExternalMarkdownOpenResult.NEEDS_DISCARD,
-            viewModel.openExternalText("shared text")
+            viewModel.openExternalText(EXTERNAL_TEXT)
         )
         assertEquals("keep this draft", viewModel.uiState.value.text)
 
         assertEquals(
             ExternalMarkdownOpenResult.OPENED,
-            viewModel.openExternalText("shared text", allowDiscardDirty = true)
+            viewModel.openExternalText(EXTERNAL_TEXT, allowDiscardDirty = true)
         )
         val state = viewModel.uiState.value
-        assertEquals("shared text", state.text)
+        assertEquals(EXTERNAL_TEXT, state.text)
         assertEquals("shared-text.md", state.displayName)
         assertTrue(state.isDirty)
         assertTrue(state.openMarkdownRequestId > 0L)
