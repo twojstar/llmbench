@@ -36,8 +36,12 @@ fun renderChatMarkdown(messages: List<ModelChatMessage>): String? {
 private fun ModelChatMessage.markdownHeading(): String = when (sender) {
     CHAT_ROLE_USER -> "You"
     CHAT_ROLE_ASSISTANT -> buildList {
-        add(provider?.shortName?.safeHeadingMetadata().takeUnless(String?::isNullOrBlank) ?: "Assistant")
-        modelName?.safeHeadingMetadata()?.takeIf(String::isNotBlank)?.let(::add)
+        val providerName = provider?.shortName
+            ?.safeHeadingMetadata()
+            ?.takeIf { it.isNotBlank() }
+            ?: "Assistant"
+        add(providerName)
+        modelName?.safeHeadingMetadata()?.takeIf { it.isNotBlank() }?.let(::add)
         if (isError) add("error")
         if (isSimulated) add("simulated")
         if (isPartial) add("partial")
