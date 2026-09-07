@@ -72,14 +72,14 @@ internal class MarkdownRecentDocumentsStore(context: Context) {
         }
     }
 
-    suspend fun setPinned(
-        document: RecentMarkdownDocument,
-        isPinned: Boolean
-    ): List<RecentMarkdownDocument> = mutex.withLock {
+    suspend fun togglePinned(document: RecentMarkdownDocument): List<RecentMarkdownDocument> = mutex.withLock {
         withContext(Dispatchers.IO) {
             val saved = readEntries()
             val current = pruneToPersisted(saved, persistedReadUriStrings())
-            val next = MarkdownRecentDocumentsCodec.setPinned(current, document.uriString, isPinned)
+            val stored = current.firstOrNull { it.uriString == document.uriString }
+            val next = stored?.let { entry ->
+                MarkdownRecentDocumentsCodec.setPinned(current, entry.uriString, !entry.isPinned)
+            } ?: current
             if (next != saved) writeEntries(next)
             resolveDocuments(next)
         }
