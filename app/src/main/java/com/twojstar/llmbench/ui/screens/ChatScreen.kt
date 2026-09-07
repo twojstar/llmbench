@@ -45,6 +45,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.twojstar.llmbench.data.document.MarkdownDocumentFileAccess
 import com.twojstar.llmbench.data.document.MarkdownWorkspaceRecoveryStore
 import com.twojstar.llmbench.data.model.AiProvider
+import com.twojstar.llmbench.data.model.CHAT_ROLE_ASSISTANT
 import com.twojstar.llmbench.data.model.CHAT_ROLE_USER
 import com.twojstar.llmbench.data.model.ModelChatMessage
 import com.twojstar.llmbench.data.model.renderChatMarkdown
@@ -76,6 +77,7 @@ internal fun canOpenResponseAsMarkdown(
         !isWorkspaceBusy &&
         !message.isPartial &&
         !message.isError &&
+        message.sender == CHAT_ROLE_ASSISTANT &&
         message.provider != null &&
         message.provider != AiProvider.ALL &&
         message.text.isNotBlank()
