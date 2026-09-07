@@ -872,7 +872,6 @@ fun ChatMessageItem(
                             Icon(
                                 imageVector = Icons.Outlined.Description,
                                 contentDescription = "Open response as Markdown",
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.size(15.dp)
                             )
                         }
