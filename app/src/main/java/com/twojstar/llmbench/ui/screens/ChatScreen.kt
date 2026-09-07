@@ -58,7 +58,7 @@ private const val CHAT_MARKDOWN_EXPORT_NAME = "llmbench-chat.md"
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-// skipcq: KT-R1006 - Existing screen composition complexity is outside this streaming/cancellation change.
+// skipcq: KT-R1006 - Existing screen composition complexity is outside this targeted export change.
 fun ChatScreen(
     viewModel: StudioViewModel,
     uiState: StudioUiState,
@@ -74,6 +74,7 @@ fun ChatScreen(
     }
     var promptInput by remember { mutableStateOf("") }
     var showModelMenu by remember { mutableStateOf(false) }
+    var showChatActionsMenu by remember { mutableStateOf(false) }
     var pendingChatMarkdown by remember { mutableStateOf<String?>(null) }
 
     SideEffect {
@@ -228,32 +229,47 @@ fun ChatScreen(
                                 }
                             }
 
-                            IconButton(
-                                onClick = {
-                                    renderChatMarkdown(uiState.chatMessages)?.let { markdown ->
-                                        openChatAsMarkdown(markdown, allowDiscardDirty = false)
-                                    }
-                                },
-                                enabled = canOpenChatAsMarkdown && !markdownUiState.isBusy,
-                                modifier = Modifier.testTag("btn_open_chat_markdown")
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Outlined.Description,
-                                    contentDescription = "Open chat as Markdown",
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-
-                            // Clear history button
-                            IconButton(
-                                onClick = { viewModel.clearChatHistory() },
-                                modifier = Modifier.testTag("btn_clear_chat_history")
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Outlined.DeleteSweep,
-                                    contentDescription = "Clear History",
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
+                            Box {
+                                IconButton(
+                                    onClick = { showChatActionsMenu = true },
+                                    modifier = Modifier.testTag("btn_chat_more_actions")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.MoreVert,
+                                        contentDescription = "More chat actions",
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                DropdownMenu(
+                                    expanded = showChatActionsMenu,
+                                    onDismissRequest = { showChatActionsMenu = false }
+                                ) {
+                                    DropdownMenuItem(
+                                        text = { Text("Open chat as Markdown") },
+                                        leadingIcon = {
+                                            Icon(Icons.Outlined.Description, contentDescription = null)
+                                        },
+                                        enabled = canOpenChatAsMarkdown && !markdownUiState.isBusy,
+                                        onClick = {
+                                            showChatActionsMenu = false
+                                            renderChatMarkdown(uiState.chatMessages)?.let { markdown ->
+                                                openChatAsMarkdown(markdown, allowDiscardDirty = false)
+                                            }
+                                        },
+                                        modifier = Modifier.testTag("btn_open_chat_markdown")
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text("Clear history") },
+                                        leadingIcon = {
+                                            Icon(Icons.Outlined.DeleteSweep, contentDescription = null)
+                                        },
+                                        onClick = {
+                                            showChatActionsMenu = false
+                                            viewModel.clearChatHistory()
+                                        },
+                                        modifier = Modifier.testTag("btn_clear_chat_history")
+                                    )
+                                }
                             }
                         }
                     }
