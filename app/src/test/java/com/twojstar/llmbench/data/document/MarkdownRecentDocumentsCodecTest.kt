@@ -4,33 +4,37 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.io.ByteArrayOutputStream
+import java.io.DataOutputStream
 import java.io.FileNotFoundException
 import java.io.IOException
 
 class MarkdownRecentDocumentsCodecTest {
     private companion object {
+        const val URI_ONE = "content://one"
         const val URI_TWO = "content://two"
+        const val LEGACY_MAGIC = 0x4C4D4252
     }
 
     @Test
-    fun moveToFrontDeduplicatesAndPromotesExistingUri() {
-        val result = MarkdownRecentDocumentsCodec.moveToFront(
-            listOf("content://one", URI_TWO, "content://three"),
+    fun promoteDeduplicatesAndPromotesExistingUri() {
+        val result = MarkdownRecentDocumentsCodec.promote(
+            listOf(entry(URI_ONE), entry(URI_TWO), entry("content://three")),
             URI_TWO
         )
 
-        assertEquals(listOf(URI_TWO, "content://one", "content://three"), result)
+        assertEquals(listOf(entry(URI_TWO), entry(URI_ONE), entry("content://three")), result)
     }
 
     @Test
-    fun moveToFrontCapsTheRecentListAndReportsEviction() {
+    fun promoteCapsTheRecentListAndReportsEviction() {
         val existing = (1..MarkdownRecentDocumentsCodec.MAX_RECENT_DOCUMENTS)
-            .map { "content://doc/$it" }
+            .map { entry("content://doc/$it") }
 
-        val result = MarkdownRecentDocumentsCodec.moveToFront(existing, "content://new")
+        val result = MarkdownRecentDocumentsCodec.promote(existing, "content://new")
 
         assertEquals(MarkdownRecentDocumentsCodec.MAX_RECENT_DOCUMENTS, result.size)
-        assertEquals("content://new", result.first())
+        assertEquals("content://new", result.first().uriString)
         assertEquals(
             listOf("content://doc/${MarkdownRecentDocumentsCodec.MAX_RECENT_DOCUMENTS}"),
             MarkdownRecentDocumentsCodec.evictedFrom(existing, result)
@@ -38,14 +42,53 @@ class MarkdownRecentDocumentsCodecTest {
     }
 
     @Test
-    fun codecRoundTripsUriStringsWithoutDelimiterAssumptions() {
+    fun pinnedShortcutsStayAheadAndSurviveRecentEviction() {
+        val existing = listOf(entry("content://pinned", isPinned = true)) +
+            (1 until MarkdownRecentDocumentsCodec.MAX_RECENT_DOCUMENTS).map { entry("content://doc/$it") }
+
+        val result = MarkdownRecentDocumentsCodec.promote(existing, "content://new")
+
+        assertEquals("content://pinned", result.first().uriString)
+        assertTrue(result.first().isPinned)
+        assertEquals("content://new", result[1].uriString)
+        assertFalse(result.any { it.uriString == "content://doc/7" })
+    }
+
+    @Test
+    fun allPinnedShortcutsRejectAnotherRecentEntry() {
+        val existing = (1..MarkdownRecentDocumentsCodec.MAX_RECENT_DOCUMENTS)
+            .map { entry("content://pinned/$it", isPinned = true) }
+
+        assertEquals(existing, MarkdownRecentDocumentsCodec.promote(existing, "content://new"))
+    }
+
+    @Test
+    fun setPinnedMovesShortcutIntoPinnedGroup() {
+        val existing = listOf(entry(URI_ONE), entry(URI_TWO), entry("content://three"))
+
+        val result = MarkdownRecentDocumentsCodec.setPinned(existing, URI_TWO, isPinned = true)
+
+        assertEquals(URI_TWO, result.first().uriString)
+        assertTrue(result.first().isPinned)
+        assertEquals(listOf(URI_ONE, "content://three"), result.drop(1).map { it.uriString })
+    }
+
+    @Test
+    fun codecRoundTripsPinnedStateWithoutDelimiterAssumptions() {
         val values = listOf(
-            "content://provider/document/a%2Fb",
-            "content://provider/document/name?query=a%20b&x=1",
-            "content://provider/document/unicode-%E2%98%85"
+            entry("content://provider/document/a%2Fb", isPinned = true),
+            entry("content://provider/document/name?query=a%20b&x=1"),
+            entry("content://provider/document/unicode-%E2%98%85")
         )
 
         assertEquals(values, MarkdownRecentDocumentsCodec.decode(MarkdownRecentDocumentsCodec.encode(values)))
+    }
+
+    @Test
+    fun legacyCodecEntriesMigrateAsUnpinned() {
+        val values = listOf(URI_ONE, URI_TWO)
+
+        assertEquals(values.map(::entry), MarkdownRecentDocumentsCodec.decode(legacyPayload(values)))
     }
 
     @Test
@@ -58,5 +101,23 @@ class MarkdownRecentDocumentsCodecTest {
         assertTrue(shouldForgetRecentDocumentAfterOpenFailure(FileNotFoundException()))
         assertTrue(shouldForgetRecentDocumentAfterOpenFailure(SecurityException()))
         assertFalse(shouldForgetRecentDocumentAfterOpenFailure(IOException("temporary provider failure")))
+    }
+
+    private fun entry(uriString: String, isPinned: Boolean = false) =
+        MarkdownRecentDocumentEntry(uriString = uriString, isPinned = isPinned)
+
+    private fun legacyPayload(values: List<String>): ByteArray {
+        val output = ByteArrayOutputStream()
+        DataOutputStream(output).use { data ->
+            data.writeInt(LEGACY_MAGIC)
+            data.writeInt(1)
+            data.writeInt(values.size)
+            values.forEach { value ->
+                val bytes = value.encodeToByteArray()
+                data.writeInt(bytes.size)
+                data.write(bytes)
+            }
+        }
+        return output.toByteArray()
     }
 }
