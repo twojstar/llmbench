@@ -76,6 +76,8 @@ internal fun canOpenResponseAsMarkdown(
         !isWorkspaceBusy &&
         !message.isPartial &&
         !message.isError &&
+        message.provider != null &&
+        message.provider != AiProvider.ALL &&
         message.text.isNotBlank()
 
 @OptIn(ExperimentalMaterial3Api::class)
