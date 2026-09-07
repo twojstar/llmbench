@@ -14,6 +14,7 @@ import org.junit.Test
 class MarkdownWorkspaceViewModelTest {
     private companion object {
         const val PROMPT_NAME = "prompt.md"
+        const val EXTERNAL_TEXT = "shared text"
     }
 
     @Test
@@ -118,6 +119,49 @@ class MarkdownWorkspaceViewModelTest {
         assertFalse(state.isImporting)
         assertEquals("new\r\ntext", state.text)
         assertEquals(PROMPT_NAME, state.displayName)
+    }
+
+    @Test
+    fun externalTextRequiresExplicitDiscardOfDirtyDraft() {
+        val viewModel = MarkdownWorkspaceViewModel()
+        viewModel.updateText("keep this draft")
+
+        assertEquals(
+            ExternalMarkdownOpenResult.NEEDS_DISCARD,
+            viewModel.openExternalText(EXTERNAL_TEXT)
+        )
+        assertEquals("keep this draft", viewModel.uiState.value.text)
+
+        assertEquals(
+            ExternalMarkdownOpenResult.OPENED,
+            viewModel.openExternalText(EXTERNAL_TEXT, allowDiscardDirty = true)
+        )
+        val state = viewModel.uiState.value
+        assertEquals(EXTERNAL_TEXT, state.text)
+        assertEquals("shared-text.md", state.displayName)
+        assertTrue(state.isDirty)
+        assertTrue(state.openMarkdownRequestId > 0L)
+    }
+
+    @Test
+    fun externalTextOpenRequestIsConsumedOnlyOnce() {
+        val viewModel = MarkdownWorkspaceViewModel()
+        assertEquals(ExternalMarkdownOpenResult.OPENED, viewModel.openExternalText("selected text"))
+        val requestId = viewModel.uiState.value.openMarkdownRequestId
+
+        assertTrue(viewModel.consumeOpenMarkdownRequest(requestId))
+        assertFalse(viewModel.consumeOpenMarkdownRequest(requestId))
+        assertEquals(0L, viewModel.uiState.value.openMarkdownRequestId)
+    }
+
+    @Test
+    fun oversizedExternalTextIsRejectedWithoutChangingTheDraft() {
+        val viewModel = MarkdownWorkspaceViewModel()
+        val oversized = "a".repeat(MarkdownDocumentFileAccess.MAX_DOCUMENT_BYTES + 1)
+
+        assertEquals(ExternalMarkdownOpenResult.TOO_LARGE, viewModel.openExternalText(oversized))
+        assertEquals("", viewModel.uiState.value.text)
+        assertFalse(viewModel.uiState.value.isDirty)
     }
 
     @Test

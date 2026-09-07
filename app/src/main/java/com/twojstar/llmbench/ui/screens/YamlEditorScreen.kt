@@ -24,6 +24,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.twojstar.llmbench.data.document.MarkdownWorkspaceRecoveryStore
 import com.twojstar.llmbench.data.engine.YamlParser
@@ -54,6 +55,7 @@ fun YamlEditorScreen(
     var selectedDocumentTool by rememberSaveable { mutableIntStateOf(0) }
     var selectedYamlTabIndex by rememberSaveable { mutableIntStateOf(0) }
     val markdownWorkspaceViewModel: MarkdownWorkspaceViewModel = viewModel()
+    val markdownUiState by markdownWorkspaceViewModel.uiState.collectAsStateWithLifecycle()
     val recoveryStore = remember(context.applicationContext) {
         MarkdownWorkspaceRecoveryStore(context.noBackupFilesDir)
     }
@@ -61,6 +63,13 @@ fun YamlEditorScreen(
     SideEffect {
         markdownWorkspaceViewModel.attachRecoveryStore(recoveryStore)
         markdownWorkspaceViewModel.attachLifecycle(lifecycleOwner)
+    }
+
+    LaunchedEffect(markdownUiState.openMarkdownRequestId) {
+        val requestId = markdownUiState.openMarkdownRequestId
+        if (requestId > 0L && markdownWorkspaceViewModel.consumeOpenMarkdownRequest(requestId)) {
+            selectedDocumentTool = 1
+        }
     }
 
     Column(modifier = modifier.fillMaxSize()) {

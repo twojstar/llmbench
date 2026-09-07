@@ -40,7 +40,7 @@ internal fun normalizeIncomingSharePayload(
     text: String?,
     uriStrings: List<String>
 ): IncomingSharePayload? {
-    val normalizedText = text?.trim()?.takeIf(String::isNotEmpty)
+    val normalizedText = text?.takeIf(String::isNotBlank)
     val normalizedUris = uriStrings.asSequence()
         .map(String::trim)
         .filter(String::isNotEmpty)

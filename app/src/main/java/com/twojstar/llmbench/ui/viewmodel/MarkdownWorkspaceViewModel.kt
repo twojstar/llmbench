@@ -26,6 +26,7 @@ import kotlinx.coroutines.withContext
 import java.io.IOException
 
 private const val DEFAULT_MARKDOWN_NAME = "untitled.md"
+private const val SHARED_MARKDOWN_NAME = "shared-text.md"
 private const val RECOVERY_DEBOUNCE_MS = 650L
 internal const val MAX_EDITABLE_MARKDOWN_CHARS = 1_000_000
 
@@ -37,7 +38,8 @@ data class MarkdownWorkspaceUiState(
     val revision: Long = 0L,
     val isExporting: Boolean = false,
     val isImporting: Boolean = false,
-    val isRecoveryLoading: Boolean = false
+    val isRecoveryLoading: Boolean = false,
+    val openMarkdownRequestId: Long = 0L
 ) {
     val isBusy: Boolean
         get() = isRecoveryLoading || isExporting || isImporting
@@ -56,6 +58,13 @@ data class MarkdownExportSnapshot(
     val displayName: String
 )
 
+enum class ExternalMarkdownOpenResult {
+    OPENED,
+    NEEDS_DISCARD,
+    BUSY,
+    TOO_LARGE
+}
+
 class MarkdownWorkspaceViewModel : ViewModel() {
     private val _uiState = MutableStateFlow(MarkdownWorkspaceUiState())
     val uiState: StateFlow<MarkdownWorkspaceUiState> = _uiState.asStateFlow()
@@ -66,6 +75,7 @@ class MarkdownWorkspaceViewModel : ViewModel() {
     private var lifecycleOwner: LifecycleOwner? = null
     private var nextExportOperationId = 1L
     private var activeExportOperationId: Long? = null
+    private var nextOpenMarkdownRequestId = 1L
 
     private val recoveryLifecycleObserver = object : DefaultLifecycleObserver {
         override fun onStop(owner: LifecycleOwner) {
@@ -162,6 +172,43 @@ class MarkdownWorkspaceViewModel : ViewModel() {
         }
         if (changed) scheduleRecovery(delayMs = 0L)
         return changed
+    }
+
+    fun openExternalText(
+        text: String,
+        displayName: String = SHARED_MARKDOWN_NAME,
+        allowDiscardDirty: Boolean = false
+    ): ExternalMarkdownOpenResult {
+        if (text.encodeToByteArray().size > MarkdownDocumentFileAccess.MAX_DOCUMENT_BYTES) {
+            return ExternalMarkdownOpenResult.TOO_LARGE
+        }
+
+        val result = synchronized(this) {
+            val state = _uiState.value
+            when {
+                state.isBusy -> ExternalMarkdownOpenResult.BUSY
+                state.isDirty && !allowDiscardDirty -> ExternalMarkdownOpenResult.NEEDS_DISCARD
+                else -> {
+                    _uiState.value = MarkdownWorkspaceUiState(
+                        text = text,
+                        displayName = MarkdownDocumentFileAccess.normalizeDisplayName(displayName),
+                        isDirty = true,
+                        revision = state.revision + 1,
+                        openMarkdownRequestId = nextOpenMarkdownRequestId++
+                    )
+                    ExternalMarkdownOpenResult.OPENED
+                }
+            }
+        }
+        if (result == ExternalMarkdownOpenResult.OPENED) scheduleRecovery(delayMs = 0L)
+        return result
+    }
+
+    fun consumeOpenMarkdownRequest(requestId: Long): Boolean = synchronized(this) {
+        val state = _uiState.value
+        if (requestId <= 0L || state.openMarkdownRequestId != requestId) return@synchronized false
+        _uiState.value = state.copy(openMarkdownRequestId = 0L)
+        true
     }
 
     fun updateText(text: String): Boolean {
@@ -298,6 +345,7 @@ class MarkdownWorkspaceViewModel : ViewModel() {
             revision == 0L &&
             !isExporting &&
             !isImporting &&
+            openMarkdownRequestId == 0L &&
             (includeLoading || !isRecoveryLoading)
 
     private fun recoveredState(snapshot: MarkdownWorkspaceRecoverySnapshot): MarkdownWorkspaceUiState =
