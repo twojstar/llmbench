@@ -2,6 +2,7 @@ package com.twojstar.llmbench.ui.screens
 
 import android.content.ActivityNotFoundException
 import android.content.Context
+import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -49,6 +50,7 @@ import java.io.IOException
 private const val WORKSPACE_ANALYSIS_DEBOUNCE_MS = 360L
 private const val MAX_TOKENIZED_CHARS = 1_000_000
 private const val LARGE_PREVIEW_CHUNK_CHARS = 16 * 1024
+private const val MAX_DIRECT_SHARE_BYTES = 128 * 1024
 private val MARKDOWN_IMPORT_MIME_TYPES = arrayOf("text/markdown", "text/plain", "application/octet-stream")
 
 private sealed class PendingDestructiveWorkspaceAction {
@@ -187,6 +189,26 @@ fun MarkdownWorkspaceScreen(
         else performDestructiveAction(action, workspaceViewModel, ::launchImportPicker, ::openRecentDocument)
     }
 
+    fun shareCurrentMarkdown() {
+        if (uiState.text.isEmpty()) return
+        val exceedsDirectShareLimit =
+            uiState.text.length > MAX_DIRECT_SHARE_BYTES ||
+                uiState.text.encodeToByteArray().size > MAX_DIRECT_SHARE_BYTES
+        if (exceedsDirectShareLimit) {
+            scope.launch {
+                snackbarHostState.showSnackbar(
+                    "This Markdown draft is too large for direct text sharing. Export it as a file, then share the exported document."
+                )
+            }
+            return
+        }
+        try {
+            shareMarkdownText(context, uiState.text, uiState.displayName.ensureMarkdownExtension())
+        } catch (_: ActivityNotFoundException) {
+            scope.launch { snackbarHostState.showSnackbar("No app is available to share Markdown text.") }
+        }
+    }
+
     pendingDestructiveAction?.let { action ->
         DiscardWorkspaceChangesDialog(
             onDismiss = { pendingDestructiveAction = null },
@@ -233,7 +255,8 @@ fun MarkdownWorkspaceScreen(
                         showRecents = true
                     }
                 },
-                onExport = { exportLauncher.launch(uiState.displayName.ensureMarkdownExtension()) }
+                onExport = { exportLauncher.launch(uiState.displayName.ensureMarkdownExtension()) },
+                onShare = ::shareCurrentMarkdown
             )
         },
         modifier = modifier
@@ -264,8 +287,11 @@ private fun MarkdownWorkspaceTopBar(
     onNew: () -> Unit,
     onImport: () -> Unit,
     onRecent: () -> Unit,
-    onExport: () -> Unit
+    onExport: () -> Unit,
+    onShare: () -> Unit
 ) {
+    var showMoreActions by remember { mutableStateOf(false) }
+
     TopAppBar(
         title = {
             Column {
@@ -294,11 +320,48 @@ private fun MarkdownWorkspaceTopBar(
             IconButton(onClick = onImport, enabled = !uiState.isBusy, modifier = Modifier.testTag("markdown_import")) {
                 Icon(Icons.Default.FolderOpen, contentDescription = "Import Markdown document")
             }
-            IconButton(onClick = onRecent, enabled = !uiState.isBusy, modifier = Modifier.testTag("markdown_recents")) {
-                Icon(Icons.Default.History, contentDescription = "Recent Markdown documents")
-            }
-            IconButton(onClick = onExport, enabled = !uiState.isBusy, modifier = Modifier.testTag("markdown_export")) {
-                Icon(Icons.Default.SaveAs, contentDescription = "Export Markdown document")
+            Box {
+                IconButton(
+                    onClick = { showMoreActions = true },
+                    modifier = Modifier.testTag("markdown_more")
+                ) {
+                    Icon(Icons.Default.MoreVert, contentDescription = "More Markdown actions")
+                }
+                DropdownMenu(
+                    expanded = showMoreActions,
+                    onDismissRequest = { showMoreActions = false }
+                ) {
+                    DropdownMenuItem(
+                        text = { Text("Recent documents") },
+                        leadingIcon = { Icon(Icons.Default.History, contentDescription = null) },
+                        enabled = !uiState.isBusy,
+                        onClick = {
+                            showMoreActions = false
+                            onRecent()
+                        },
+                        modifier = Modifier.testTag("markdown_recents")
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Export Markdown") },
+                        leadingIcon = { Icon(Icons.Default.SaveAs, contentDescription = null) },
+                        enabled = !uiState.isBusy,
+                        onClick = {
+                            showMoreActions = false
+                            onExport()
+                        },
+                        modifier = Modifier.testTag("markdown_export")
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Share as text") },
+                        leadingIcon = { Icon(Icons.Default.Share, contentDescription = null) },
+                        enabled = !uiState.isBusy && uiState.text.isNotEmpty(),
+                        onClick = {
+                            showMoreActions = false
+                            onShare()
+                        },
+                        modifier = Modifier.testTag("markdown_share")
+                    )
+                }
             }
         }
     )
@@ -455,6 +518,15 @@ private suspend fun exportWorkspaceDocument(
             snackbarHostState.showSnackbar(exportFailureMessage(error))
         }
     )
+}
+
+private fun shareMarkdownText(context: Context, text: String, displayName: String) {
+    val shareIntent = Intent(Intent.ACTION_SEND).apply {
+        type = "text/plain"
+        putExtra(Intent.EXTRA_TEXT, text)
+        putExtra(Intent.EXTRA_TITLE, displayName)
+    }
+    context.startActivity(Intent.createChooser(shareIntent, "Share Markdown"))
 }
 
 private fun importFailureMessage(error: Throwable): String = when (error) {
