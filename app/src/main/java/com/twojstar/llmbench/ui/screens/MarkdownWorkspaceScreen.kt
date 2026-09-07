@@ -489,15 +489,20 @@ private fun RecentMarkdownDocumentsSheet(
             if (documents.isEmpty()) {
                 Text("No persistent document shortcuts yet.", modifier = Modifier.padding(vertical = 20.dp))
             } else {
-                documents.forEach { document ->
-                    Row(modifier = Modifier.fillMaxWidth()) {
-                        TextButton(onClick = { onOpen(document) }, modifier = Modifier.weight(1f)) {
-                            Icon(Icons.Default.Description, contentDescription = null)
-                            Spacer(Modifier.width(8.dp))
-                            Text(document.displayName, modifier = Modifier.fillMaxWidth())
-                        }
-                        IconButton(onClick = { onForget(document) }) {
-                            Icon(Icons.Default.Close, contentDescription = "Forget ${document.displayName}")
+                LazyColumn(
+                    modifier = Modifier.fillMaxWidth().heightIn(max = 320.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    items(documents, key = { it.uriString }) { document ->
+                        Row(modifier = Modifier.fillMaxWidth()) {
+                            TextButton(onClick = { onOpen(document) }, modifier = Modifier.weight(1f)) {
+                                Icon(Icons.Default.Description, contentDescription = null)
+                                Spacer(Modifier.width(8.dp))
+                                Text(document.displayName, modifier = Modifier.fillMaxWidth())
+                            }
+                            IconButton(onClick = { onForget(document) }) {
+                                Icon(Icons.Default.Close, contentDescription = "Forget ${document.displayName}")
+                            }
                         }
                     }
                 }
