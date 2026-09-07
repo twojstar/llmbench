@@ -111,8 +111,9 @@ internal object MarkdownRecentDocumentsCodec {
     }
 
     private fun decodeLegacy(input: DataInputStream): List<MarkdownRecentDocumentEntry> {
-        val entries = buildList(readCount(input)) {
-            repeat(capacity) {
+        val count = readCount(input)
+        val entries = buildList(count) {
+            repeat(count) {
                 add(MarkdownRecentDocumentEntry(readUri(input)))
             }
         }
@@ -121,12 +122,14 @@ internal object MarkdownRecentDocumentsCodec {
     }
 
     private fun decodeCurrent(input: DataInputStream): List<MarkdownRecentDocumentEntry> {
-        val entries = buildList(readCount(input)) {
-            repeat(capacity) {
+        val count = readCount(input)
+        val entries = buildList(count) {
+            repeat(count) {
+                val isPinned = input.readBoolean()
                 add(
                     MarkdownRecentDocumentEntry(
                         uriString = readUri(input),
-                        isPinned = input.readBoolean()
+                        isPinned = isPinned
                     )
                 )
             }
