@@ -590,6 +590,7 @@ fun ChatScreen(
             ) { message ->
                 ChatMessageItem(
                     message = message,
+                    canOpenMarkdown = !message.isPartial || !uiState.isChatGenerating,
                     onCopyText = { text ->
                         val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                         val clip = ClipData.newPlainText("AI Message", text)
@@ -685,6 +686,7 @@ fun ChatScreen(
 @Composable
 fun ChatMessageItem(
     message: ModelChatMessage,
+    canOpenMarkdown: Boolean,
     onCopyText: (String) -> Unit,
     onOpenMarkdown: (ModelChatMessage) -> Unit,
     onRetryPrompt: (String) -> Unit
@@ -843,7 +845,7 @@ fun ChatMessageItem(
                     ) {
                         IconButton(
                             onClick = { onOpenMarkdown(message) },
-                            enabled = message.text.isNotBlank() && !message.isError,
+                            enabled = canOpenMarkdown && message.text.isNotBlank() && !message.isError,
                             modifier = Modifier
                                 .size(28.dp)
                                 .testTag("btn_open_response_markdown_${message.id}")
