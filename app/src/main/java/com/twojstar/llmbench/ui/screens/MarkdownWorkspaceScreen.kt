@@ -98,11 +98,19 @@ fun MarkdownWorkspaceScreen(
                     val wasRetained = recentStore.hasReadPermission(uri)
                     val retained = recentStore.retainReadPermission(uri)
                     val recordAttempt = if (retained) runCatching { recentStore.record(uri) } else null
+                    val recorded = recordAttempt?.getOrNull()
                     when {
-                        recordAttempt?.isSuccess == true -> {
-                            recentDocuments = recordAttempt.getOrThrow()
+                        recorded != null && recorded.any { it.uriString == uri.toString() } -> {
+                            recentDocuments = recorded
                             snackbarHostState.showSnackbar(
                                 "Imported $importedName and added it to Recents; original file stays untouched."
+                            )
+                        }
+                        recorded != null -> {
+                            recentDocuments = recorded
+                            if (!wasRetained) recentStore.releaseReadPermission(uri)
+                            snackbarHostState.showSnackbar(
+                                "Imported $importedName; it was not added to Recents because every shortcut slot is pinned."
                             )
                         }
                         retained -> {
@@ -195,6 +203,13 @@ fun MarkdownWorkspaceScreen(
             onOpen = { document ->
                 showRecents = false
                 requestAction(PendingDestructiveWorkspaceAction.Recent(document))
+            },
+            onTogglePin = { document ->
+                scope.launch {
+                    runCatching { recentStore.setPinned(document, !document.isPinned) }
+                        .onSuccess { recentDocuments = it }
+                        .onFailure { snackbarHostState.showSnackbar("Could not update the Markdown shortcut pin.") }
+                }
             },
             onForget = { document ->
                 scope.launch {
@@ -472,6 +487,7 @@ private fun performDestructiveAction(
 private fun RecentMarkdownDocumentsSheet(
     documents: List<RecentMarkdownDocument>,
     onOpen: (RecentMarkdownDocument) -> Unit,
+    onTogglePin: (RecentMarkdownDocument) -> Unit,
     onForget: (RecentMarkdownDocument) -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -482,7 +498,7 @@ private fun RecentMarkdownDocumentsSheet(
         ) {
             Text("Recent Markdown", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
             Text(
-                "Shortcuts to the original documents. LlmBench keeps read access when Android allows it; file contents are not copied into the Recents list.",
+                "Shortcuts to the original documents. Pinned shortcuts stay at the top and are protected from normal recent-file eviction; file contents are not copied into this list.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -499,6 +515,16 @@ private fun RecentMarkdownDocumentsSheet(
                                 Icon(Icons.Default.Description, contentDescription = null)
                                 Spacer(Modifier.width(8.dp))
                                 Text(document.displayName, modifier = Modifier.fillMaxWidth())
+                            }
+                            IconButton(onClick = { onTogglePin(document) }) {
+                                Icon(
+                                    imageVector = if (document.isPinned) Icons.Default.Star else Icons.Default.StarBorder,
+                                    contentDescription = if (document.isPinned) {
+                                        "Unpin ${document.displayName}"
+                                    } else {
+                                        "Pin ${document.displayName}"
+                                    }
+                                )
                             }
                             IconButton(onClick = { onForget(document) }) {
                                 Icon(Icons.Default.Close, contentDescription = "Forget ${document.displayName}")
