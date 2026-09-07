@@ -20,6 +20,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.twojstar.llmbench.data.document.MarkdownWorkspaceRecoveryStore
 import com.twojstar.llmbench.data.model.WebAiService
 import com.twojstar.llmbench.data.model.webChatSections
 import com.twojstar.llmbench.data.security.TextInspectionResult
@@ -30,6 +31,8 @@ import com.twojstar.llmbench.share.extractIncomingSharePayload
 import com.twojstar.llmbench.share.normalizeIncomingSharePayload
 import com.twojstar.llmbench.ui.screens.*
 import com.twojstar.llmbench.ui.theme.LlmBenchTheme
+import com.twojstar.llmbench.ui.viewmodel.ExternalMarkdownOpenResult
+import com.twojstar.llmbench.ui.viewmodel.MarkdownWorkspaceViewModel
 import com.twojstar.llmbench.ui.viewmodel.NavigationTab
 import com.twojstar.llmbench.ui.viewmodel.StudioViewModel
 import kotlinx.coroutines.Dispatchers
@@ -42,11 +45,14 @@ internal fun showPrimaryBottomNavigation(tab: NavigationTab): Boolean = tab != N
 class MainActivity : ComponentActivity() {
 
     private val viewModel: StudioViewModel by viewModels()
+    private val markdownWorkspaceViewModel: MarkdownWorkspaceViewModel by viewModels()
     private var retainedShareIntentHandled = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        markdownWorkspaceViewModel.attachRecoveryStore(MarkdownWorkspaceRecoveryStore(noBackupFilesDir))
+        markdownWorkspaceViewModel.attachLifecycle(this)
         retainedShareIntentHandled = savedInstanceState?.getBoolean(KEY_SHARE_INTENT_HANDLED) == true
         restoreShareState(savedInstanceState)
         if (!retainedShareIntentHandled) handleIncomingShareIntent(intent)
@@ -54,15 +60,58 @@ class MainActivity : ComponentActivity() {
         setContent {
             LlmBenchTheme {
                 val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+                val markdownUiState by markdownWorkspaceViewModel.uiState.collectAsStateWithLifecycle()
                 val snackbarHostState = remember { SnackbarHostState() }
+                var confirmMarkdownReplace by rememberSaveable { mutableStateOf(false) }
+
+                LaunchedEffect(uiState.incomingShare) {
+                    confirmMarkdownReplace = false
+                }
+
+                fun openIncomingTextInMarkdown(payload: IncomingSharePayload, allowDiscardDirty: Boolean) {
+                    val text = payload.text ?: return
+                    when (
+                        markdownWorkspaceViewModel.openExternalText(
+                            text = text,
+                            allowDiscardDirty = allowDiscardDirty
+                        )
+                    ) {
+                        ExternalMarkdownOpenResult.OPENED -> {
+                            confirmMarkdownReplace = false
+                            viewModel.dismissIncomingShare()
+                            viewModel.selectTab(NavigationTab.YAML)
+                        }
+                        ExternalMarkdownOpenResult.NEEDS_DISCARD -> confirmMarkdownReplace = true
+                        ExternalMarkdownOpenResult.BUSY -> viewModel.showSnackbar(
+                            "Markdown workspace is still restoring or busy. Try again when it is ready."
+                        )
+                        ExternalMarkdownOpenResult.TOO_LARGE -> viewModel.showSnackbar(
+                            "Shared text is larger than the 8 MiB Markdown workspace limit."
+                        )
+                    }
+                }
 
                 uiState.incomingShare?.let { payload ->
-                    IncomingShareProviderDialog(
-                        payload = payload,
-                        favoriteServices = uiState.favoriteWebServices,
-                        onSelect = viewModel::routeIncomingShareToWeb,
-                        onDismiss = viewModel::dismissIncomingShare
-                    )
+                    if (confirmMarkdownReplace && payload.text != null) {
+                        ReplaceMarkdownDraftDialog(
+                            currentName = markdownUiState.displayName,
+                            onDiscard = { openIncomingTextInMarkdown(payload, allowDiscardDirty = true) },
+                            onDismiss = { confirmMarkdownReplace = false }
+                        )
+                    } else {
+                        IncomingShareProviderDialog(
+                            payload = payload,
+                            favoriteServices = uiState.favoriteWebServices,
+                            onOpenMarkdown = if (payload.text != null && payload.attachmentCount == 0) {
+                                { openIncomingTextInMarkdown(payload, allowDiscardDirty = false) }
+                            } else {
+                                null
+                            },
+                            markdownEnabled = !markdownUiState.isBusy,
+                            onSelect = viewModel::routeIncomingShareToWeb,
+                            onDismiss = viewModel::dismissIncomingShare
+                        )
+                    }
                 }
 
                 LaunchedEffect(uiState.snackbarMessage) {
@@ -187,11 +236,16 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun handleIncomingShareIntent(intent: Intent) {
-        val isShareIntent = intent.action == Intent.ACTION_SEND ||
-            intent.action == Intent.ACTION_SEND_MULTIPLE
-        if (!isShareIntent) return
+        val payload = when (intent.action) {
+            Intent.ACTION_SEND, Intent.ACTION_SEND_MULTIPLE -> extractIncomingSharePayload(intent)
+            Intent.ACTION_PROCESS_TEXT -> normalizeIncomingSharePayload(
+                text = intent.getCharSequenceExtra(Intent.EXTRA_PROCESS_TEXT)?.toString(),
+                uriStrings = emptyList()
+            )
+            else -> null
+        } ?: return
         retainedShareIntentHandled = true
-        extractIncomingSharePayload(intent)?.let(viewModel::receiveIncomingShare)
+        viewModel.receiveIncomingShare(payload)
     }
 
     private fun saveShareState(outState: Bundle) {
@@ -251,6 +305,8 @@ class MainActivity : ComponentActivity() {
 private fun IncomingShareProviderDialog(
     payload: IncomingSharePayload,
     favoriteServices: Set<WebAiService>,
+    onOpenMarkdown: (() -> Unit)?,
+    markdownEnabled: Boolean,
     onSelect: (WebAiService) -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -305,10 +361,28 @@ private fun IncomingShareProviderDialog(
                 verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 Text(
-                    "Choose a web provider for $summary.",
+                    "Choose a destination for $summary.",
                     style = MaterialTheme.typography.bodyMedium
                 )
                 Spacer(Modifier.height(4.dp))
+                onOpenMarkdown?.let {
+                    Text(
+                        "Local",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
+                    )
+                    TextButton(
+                        onClick = it,
+                        enabled = markdownEnabled,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.Description, contentDescription = null)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Markdown workspace", modifier = Modifier.fillMaxWidth())
+                    }
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+                }
                 if (sections.favorites.isNotEmpty()) {
                     Text(
                         "Favorites",
@@ -351,6 +425,29 @@ private fun IncomingShareProviderDialog(
             }
         },
         confirmButton = {},
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        }
+    )
+}
+
+@Composable
+private fun ReplaceMarkdownDraftDialog(
+    currentName: String,
+    onDiscard: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Replace unsaved Markdown draft?") },
+        text = {
+            Text(
+                "$currentName has edits that have not been exported. Discard them and open the shared text as a new local Markdown draft?"
+            )
+        },
+        confirmButton = {
+            Button(onClick = onDiscard) { Text("Discard and open") }
+        },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("Cancel") }
         }
@@ -401,7 +498,7 @@ private fun SharedTextSafetyReviewDialog(
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Text(
-                    "LlmBench found ${inspection.detectedCount} suspicious text detection${if (inspection.detectedCount == 1) "" else "s"}. Review the retained details before this text can be routed to a provider.",
+                    "LlmBench found ${inspection.detectedCount} suspicious text detection${if (inspection.detectedCount == 1) "" else "s"}. Review the retained details before this text is used locally or routed to a provider.",
                     style = MaterialTheme.typography.bodyMedium
                 )
                 Text(
@@ -440,7 +537,7 @@ private fun SharedTextSafetyReviewDialog(
             }
         },
         confirmButton = {
-            Button(onClick = onContinue) { Text("Continue to providers") }
+            Button(onClick = onContinue) { Text("Continue") }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("Cancel") }
