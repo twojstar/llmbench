@@ -67,6 +67,17 @@ private data class PendingMarkdownAsset(
     val sourceDescription: String
 )
 
+internal fun canOpenResponseAsMarkdown(
+    message: ModelChatMessage,
+    isPreparingChatMarkdown: Boolean,
+    isWorkspaceBusy: Boolean
+): Boolean =
+    !isPreparingChatMarkdown &&
+        !isWorkspaceBusy &&
+        !message.isPartial &&
+        !message.isError &&
+        message.text.isNotBlank()
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 // skipcq: KT-R1006 - Existing screen composition complexity is outside this targeted export change.
@@ -590,11 +601,11 @@ fun ChatScreen(
             ) { message ->
                 ChatMessageItem(
                     message = message,
-                    canOpenMarkdown =
-                        !isPreparingChatMarkdown &&
-                            (!message.isPartial || !uiState.isChatGenerating) &&
-                            message.text.isNotBlank() &&
-                            !message.isError,
+                    canOpenMarkdown = canOpenResponseAsMarkdown(
+                        message = message,
+                        isPreparingChatMarkdown = isPreparingChatMarkdown,
+                        isWorkspaceBusy = markdownUiState.isBusy
+                    ),
                     onCopyText = { text ->
                         val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                         val clip = ClipData.newPlainText("AI Message", text)
