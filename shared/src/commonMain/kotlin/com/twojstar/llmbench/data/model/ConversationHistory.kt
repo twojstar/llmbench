@@ -12,6 +12,14 @@ data class ProviderTextTurn(
     val text: String
 )
 
+fun ModelChatMessage.isCompletedAssistantResponse(): Boolean =
+    sender == CHAT_ROLE_ASSISTANT &&
+        provider != null &&
+        provider != AiProvider.ALL &&
+        !isPartial &&
+        !isError &&
+        text.isNotBlank()
+
 private fun ModelChatMessage.isReplayableAssistantFor(provider: AiProvider): Boolean =
     sender == CHAT_ROLE_ASSISTANT &&
         this.provider == provider &&

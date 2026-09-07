@@ -48,6 +48,7 @@ import com.twojstar.llmbench.data.model.AiProvider
 import com.twojstar.llmbench.data.model.CHAT_ROLE_USER
 import com.twojstar.llmbench.data.model.ModelChatMessage
 import com.twojstar.llmbench.data.model.renderChatMarkdown
+import com.twojstar.llmbench.data.model.isCompletedAssistantResponse
 import com.twojstar.llmbench.ui.theme.*
 import com.twojstar.llmbench.ui.viewmodel.ExternalMarkdownOpenResult
 import com.twojstar.llmbench.ui.viewmodel.MarkdownWorkspaceViewModel
@@ -60,6 +61,21 @@ import kotlinx.coroutines.withContext
 
 private const val CHAT_MARKDOWN_EXPORT_NAME = "llmbench-chat.md"
 private const val MAX_CHAT_PROMPT_IMPORT_CHARS = 128 * 1024
+
+private data class PendingMarkdownAsset(
+    val text: String,
+    val displayName: String,
+    val sourceDescription: String
+)
+
+internal fun canOpenResponseAsMarkdown(
+    message: ModelChatMessage,
+    isPreparingChatMarkdown: Boolean,
+    isWorkspaceBusy: Boolean
+): Boolean =
+    !isPreparingChatMarkdown &&
+        !isWorkspaceBusy &&
+        message.isCompletedAssistantResponse()
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -81,7 +97,7 @@ fun ChatScreen(
     var promptInput by remember { mutableStateOf("") }
     var showModelMenu by remember { mutableStateOf(false) }
     var showChatActionsMenu by remember { mutableStateOf(false) }
-    var pendingChatMarkdown by remember { mutableStateOf<String?>(null) }
+    var pendingMarkdownAsset by remember { mutableStateOf<PendingMarkdownAsset?>(null) }
     var pendingMarkdownPromptReplacement by remember { mutableStateOf<String?>(null) }
     var isPreparingChatMarkdown by remember { mutableStateOf(false) }
 
@@ -90,24 +106,24 @@ fun ChatScreen(
         markdownWorkspaceViewModel.attachLifecycle(lifecycleOwner)
     }
 
-    fun openChatAsMarkdown(markdown: String, allowDiscardDirty: Boolean) {
+    fun openMarkdownAsset(asset: PendingMarkdownAsset, allowDiscardDirty: Boolean) {
         when (
             markdownWorkspaceViewModel.openExternalText(
-                text = markdown,
-                displayName = CHAT_MARKDOWN_EXPORT_NAME,
+                text = asset.text,
+                displayName = asset.displayName,
                 allowDiscardDirty = allowDiscardDirty
             )
         ) {
             ExternalMarkdownOpenResult.OPENED -> {
-                pendingChatMarkdown = null
+                pendingMarkdownAsset = null
                 viewModel.selectTab(NavigationTab.YAML)
             }
-            ExternalMarkdownOpenResult.NEEDS_DISCARD -> pendingChatMarkdown = markdown
+            ExternalMarkdownOpenResult.NEEDS_DISCARD -> pendingMarkdownAsset = asset
             ExternalMarkdownOpenResult.BUSY -> viewModel.showSnackbar(
                 "Markdown workspace is still restoring or busy. Try again when it is ready."
             )
             ExternalMarkdownOpenResult.TOO_LARGE -> viewModel.showSnackbar(
-                "Chat export is larger than the 8 MiB Markdown workspace limit."
+                "Markdown asset is larger than the 8 MiB workspace limit."
             )
         }
     }
@@ -307,8 +323,12 @@ fun ChatScreen(
                                                             "Chat export is larger than the 8 MiB Markdown workspace limit."
                                                         )
                                                     } else {
-                                                        openChatAsMarkdown(
-                                                            markdown = markdown,
+                                                        openMarkdownAsset(
+                                                            asset = PendingMarkdownAsset(
+                                                                text = markdown,
+                                                                displayName = CHAT_MARKDOWN_EXPORT_NAME,
+                                                                sourceDescription = "this chat snapshot"
+                                                            ),
                                                             allowDiscardDirty = false
                                                         )
                                                     }
@@ -580,11 +600,26 @@ fun ChatScreen(
             ) { message ->
                 ChatMessageItem(
                     message = message,
+                    canOpenMarkdown = canOpenResponseAsMarkdown(
+                        message = message,
+                        isPreparingChatMarkdown = isPreparingChatMarkdown,
+                        isWorkspaceBusy = markdownUiState.isBusy
+                    ),
                     onCopyText = { text ->
                         val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                         val clip = ClipData.newPlainText("AI Message", text)
                         clipboard.setPrimaryClip(clip)
                         viewModel.showSnackbar("Copied to clipboard")
+                    },
+                    onOpenMarkdown = { response ->
+                        openMarkdownAsset(
+                            asset = PendingMarkdownAsset(
+                                text = response.text,
+                                displayName = "llmbench-${(response.provider ?: AiProvider.GEMINI).id}-response.md",
+                                sourceDescription = "this AI response"
+                            ),
+                            allowDiscardDirty = false
+                        )
                     },
                     onRetryPrompt = { prompt ->
                         viewModel.sendChatMessage(prompt)
@@ -601,25 +636,25 @@ fun ChatScreen(
         }
     }
 
-    pendingChatMarkdown?.let { markdown ->
+    pendingMarkdownAsset?.let { asset ->
         AlertDialog(
-            onDismissRequest = { pendingChatMarkdown = null },
+            onDismissRequest = { pendingMarkdownAsset = null },
             title = { Text("Replace unsaved Markdown draft?") },
             text = {
                 Text(
-                    "${markdownUiState.displayName} has edits that have not been exported. Discard them and open this chat snapshot as a new local Markdown draft?"
+                    "${markdownUiState.displayName} has edits that have not been exported. Discard them and open ${asset.sourceDescription} as a new local Markdown draft?"
                 )
             },
             confirmButton = {
                 Button(
-                    onClick = { openChatAsMarkdown(markdown, allowDiscardDirty = true) },
-                    modifier = Modifier.testTag("btn_confirm_chat_markdown_replace")
+                    onClick = { openMarkdownAsset(asset, allowDiscardDirty = true) },
+                    modifier = Modifier.testTag("btn_confirm_markdown_asset_replace")
                 ) {
                     Text("Discard and open")
                 }
             },
             dismissButton = {
-                TextButton(onClick = { pendingChatMarkdown = null }) { Text("Cancel") }
+                TextButton(onClick = { pendingMarkdownAsset = null }) { Text("Cancel") }
             }
         )
     }
@@ -665,7 +700,9 @@ fun ChatScreen(
 @Composable
 fun ChatMessageItem(
     message: ModelChatMessage,
+    canOpenMarkdown: Boolean,
     onCopyText: (String) -> Unit,
+    onOpenMarkdown: (ModelChatMessage) -> Unit,
     onRetryPrompt: (String) -> Unit
 ) {
     val isUser = message.sender == "user"
@@ -820,6 +857,19 @@ fun ChatMessageItem(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier.fillMaxWidth()
                     ) {
+                        IconButton(
+                            onClick = { onOpenMarkdown(message) },
+                            enabled = canOpenMarkdown,
+                            modifier = Modifier
+                                .size(28.dp)
+                                .testTag("btn_open_response_markdown_${message.id}")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.Description,
+                                contentDescription = "Open response as Markdown",
+                                modifier = Modifier.size(15.dp)
+                            )
+                        }
                         IconButton(
                             onClick = { onCopyText(message.text) },
                             modifier = Modifier.size(28.dp)
