@@ -25,6 +25,12 @@ internal data class RecentMarkdownDocument(
 internal fun shouldForgetRecentDocumentAfterOpenFailure(error: Throwable): Boolean =
     error is FileNotFoundException || error is SecurityException
 
+internal fun reconcilePinnedToggle(
+    storedPinned: Boolean,
+    snapshotPinned: Boolean,
+    requestedPinned: Boolean
+): Boolean = if (storedPinned == snapshotPinned) requestedPinned else snapshotPinned
+
 internal class MarkdownRecentDocumentsStore(context: Context) {
     private val appContext = context.applicationContext
     private val resolver = appContext.contentResolver
@@ -72,13 +78,21 @@ internal class MarkdownRecentDocumentsStore(context: Context) {
         }
     }
 
-    suspend fun togglePinned(document: RecentMarkdownDocument): List<RecentMarkdownDocument> = mutex.withLock {
+    suspend fun setPinned(
+        document: RecentMarkdownDocument,
+        isPinned: Boolean
+    ): List<RecentMarkdownDocument> = mutex.withLock {
         withContext(Dispatchers.IO) {
             val saved = readEntries()
             val current = pruneToPersisted(saved, persistedReadUriStrings())
             val stored = current.firstOrNull { it.uriString == document.uriString }
             val next = stored?.let { entry ->
-                MarkdownRecentDocumentsCodec.setPinned(current, entry.uriString, !entry.isPinned)
+                val targetPinned = reconcilePinnedToggle(
+                    storedPinned = entry.isPinned,
+                    snapshotPinned = document.isPinned,
+                    requestedPinned = isPinned
+                )
+                MarkdownRecentDocumentsCodec.setPinned(current, entry.uriString, targetPinned)
             } ?: current
             if (next != saved) writeEntries(next)
             resolveDocuments(next)
