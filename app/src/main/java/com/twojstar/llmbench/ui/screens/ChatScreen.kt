@@ -39,11 +39,22 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.twojstar.llmbench.data.document.MarkdownWorkspaceRecoveryStore
 import com.twojstar.llmbench.data.model.AiProvider
+import com.twojstar.llmbench.data.model.CHAT_ROLE_USER
 import com.twojstar.llmbench.data.model.ModelChatMessage
+import com.twojstar.llmbench.data.model.renderChatMarkdown
 import com.twojstar.llmbench.ui.theme.*
+import com.twojstar.llmbench.ui.viewmodel.ExternalMarkdownOpenResult
+import com.twojstar.llmbench.ui.viewmodel.MarkdownWorkspaceViewModel
+import com.twojstar.llmbench.ui.viewmodel.NavigationTab
 import com.twojstar.llmbench.ui.viewmodel.StudioUiState
 import com.twojstar.llmbench.ui.viewmodel.StudioViewModel
+
+private const val CHAT_MARKDOWN_EXPORT_NAME = "llmbench-chat.md"
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -54,9 +65,46 @@ fun ChatScreen(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
     val listState = rememberLazyListState()
+    val markdownWorkspaceViewModel: MarkdownWorkspaceViewModel = viewModel()
+    val markdownUiState by markdownWorkspaceViewModel.uiState.collectAsStateWithLifecycle()
+    val recoveryStore = remember(context.applicationContext) {
+        MarkdownWorkspaceRecoveryStore(context.noBackupFilesDir)
+    }
     var promptInput by remember { mutableStateOf("") }
     var showModelMenu by remember { mutableStateOf(false) }
+    var pendingChatMarkdown by remember { mutableStateOf<String?>(null) }
+
+    SideEffect {
+        markdownWorkspaceViewModel.attachRecoveryStore(recoveryStore)
+        markdownWorkspaceViewModel.attachLifecycle(lifecycleOwner)
+    }
+
+    fun openChatAsMarkdown(markdown: String, allowDiscardDirty: Boolean) {
+        when (
+            markdownWorkspaceViewModel.openExternalText(
+                text = markdown,
+                displayName = CHAT_MARKDOWN_EXPORT_NAME,
+                allowDiscardDirty = allowDiscardDirty
+            )
+        ) {
+            ExternalMarkdownOpenResult.OPENED -> {
+                pendingChatMarkdown = null
+                viewModel.selectTab(NavigationTab.YAML)
+            }
+            ExternalMarkdownOpenResult.NEEDS_DISCARD -> pendingChatMarkdown = markdown
+            ExternalMarkdownOpenResult.BUSY -> viewModel.showSnackbar(
+                "Markdown workspace is still restoring or busy. Try again when it is ready."
+            )
+            ExternalMarkdownOpenResult.TOO_LARGE -> viewModel.showSnackbar(
+                "Chat export is larger than the 8 MiB Markdown workspace limit."
+            )
+        }
+    }
+
+    val canOpenChatAsMarkdown =
+        !uiState.isChatGenerating && uiState.chatMessages.any { it.sender == CHAT_ROLE_USER }
 
     val samplePrompts = listOf(
         "Compare how you analyze edge cases in code",
@@ -178,6 +226,22 @@ fun ChatScreen(
                                         tint = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                 }
+                            }
+
+                            IconButton(
+                                onClick = {
+                                    renderChatMarkdown(uiState.chatMessages)?.let { markdown ->
+                                        openChatAsMarkdown(markdown, allowDiscardDirty = false)
+                                    }
+                                },
+                                enabled = canOpenChatAsMarkdown && !markdownUiState.isBusy,
+                                modifier = Modifier.testTag("btn_open_chat_markdown")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.Description,
+                                    contentDescription = "Open chat as Markdown",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
                             }
 
                             // Clear history button
@@ -458,6 +522,29 @@ fun ChatScreen(
                 }
             }
         }
+    }
+
+    pendingChatMarkdown?.let { markdown ->
+        AlertDialog(
+            onDismissRequest = { pendingChatMarkdown = null },
+            title = { Text("Replace unsaved Markdown draft?") },
+            text = {
+                Text(
+                    "${markdownUiState.displayName} has edits that have not been exported. Discard them and open this chat snapshot as a new local Markdown draft?"
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = { openChatAsMarkdown(markdown, allowDiscardDirty = true) },
+                    modifier = Modifier.testTag("btn_confirm_chat_markdown_replace")
+                ) {
+                    Text("Discard and open")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingChatMarkdown = null }) { Text("Cancel") }
+            }
+        )
     }
 
     // API Keys Dialog
