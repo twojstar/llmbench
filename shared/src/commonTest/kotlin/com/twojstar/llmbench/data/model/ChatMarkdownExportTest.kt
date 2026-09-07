@@ -88,6 +88,18 @@ class ChatMarkdownExportTest {
     }
 
     @Test
+    fun respectsUtf8ByteLimitIncludingMultibyteText() {
+        val messages = listOf(
+            ModelChatMessage(id = "u1", sender = CHAT_ROLE_USER, text = "Zażółć 😀")
+        )
+        val markdown = assertNotNull(renderChatMarkdown(messages))
+        val exactUtf8Bytes = markdown.encodeToByteArray().size
+
+        assertEquals(markdown, renderChatMarkdown(messages, maxUtf8Bytes = exactUtf8Bytes))
+        assertNull(renderChatMarkdown(messages, maxUtf8Bytes = exactUtf8Bytes - 1))
+    }
+
+    @Test
     fun doesNotExportWelcomeOnlyState() {
         assertNull(
             renderChatMarkdown(
