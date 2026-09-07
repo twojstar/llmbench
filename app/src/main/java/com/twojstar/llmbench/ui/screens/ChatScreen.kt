@@ -42,6 +42,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.twojstar.llmbench.data.document.MarkdownDocumentFileAccess
 import com.twojstar.llmbench.data.document.MarkdownWorkspaceRecoveryStore
 import com.twojstar.llmbench.data.model.AiProvider
 import com.twojstar.llmbench.data.model.CHAT_ROLE_USER
@@ -53,6 +54,9 @@ import com.twojstar.llmbench.ui.viewmodel.MarkdownWorkspaceViewModel
 import com.twojstar.llmbench.ui.viewmodel.NavigationTab
 import com.twojstar.llmbench.ui.viewmodel.StudioUiState
 import com.twojstar.llmbench.ui.viewmodel.StudioViewModel
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 private const val CHAT_MARKDOWN_EXPORT_NAME = "llmbench-chat.md"
 
@@ -67,6 +71,7 @@ fun ChatScreen(
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
     val markdownWorkspaceViewModel: MarkdownWorkspaceViewModel = viewModel()
     val markdownUiState by markdownWorkspaceViewModel.uiState.collectAsStateWithLifecycle()
     val recoveryStore = remember(context.applicationContext) {
@@ -76,6 +81,7 @@ fun ChatScreen(
     var showModelMenu by remember { mutableStateOf(false) }
     var showChatActionsMenu by remember { mutableStateOf(false) }
     var pendingChatMarkdown by remember { mutableStateOf<String?>(null) }
+    var isPreparingChatMarkdown by remember { mutableStateOf(false) }
 
     SideEffect {
         markdownWorkspaceViewModel.attachRecoveryStore(recoveryStore)
@@ -105,7 +111,9 @@ fun ChatScreen(
     }
 
     val canOpenChatAsMarkdown =
-        !uiState.isChatGenerating && uiState.chatMessages.any { it.sender == CHAT_ROLE_USER }
+        !uiState.isChatGenerating &&
+            !isPreparingChatMarkdown &&
+            uiState.chatMessages.any { it.sender == CHAT_ROLE_USER }
 
     val samplePrompts = listOf(
         "Compare how you analyze edge cases in code",
@@ -252,8 +260,29 @@ fun ChatScreen(
                                         enabled = canOpenChatAsMarkdown && !markdownUiState.isBusy,
                                         onClick = {
                                             showChatActionsMenu = false
-                                            renderChatMarkdown(uiState.chatMessages)?.let { markdown ->
-                                                openChatAsMarkdown(markdown, allowDiscardDirty = false)
+                                            val snapshot = uiState.chatMessages.toList()
+                                            isPreparingChatMarkdown = true
+                                            scope.launch {
+                                                try {
+                                                    val markdown = withContext(Dispatchers.Default) {
+                                                        renderChatMarkdown(
+                                                            messages = snapshot,
+                                                            maxUtf8Bytes = MarkdownDocumentFileAccess.MAX_DOCUMENT_BYTES
+                                                        )
+                                                    }
+                                                    if (markdown == null) {
+                                                        viewModel.showSnackbar(
+                                                            "Chat export is larger than the 8 MiB Markdown workspace limit."
+                                                        )
+                                                    } else {
+                                                        openChatAsMarkdown(
+                                                            markdown = markdown,
+                                                            allowDiscardDirty = false
+                                                        )
+                                                    }
+                                                } finally {
+                                                    isPreparingChatMarkdown = false
+                                                }
                                             }
                                         },
                                         modifier = Modifier.testTag("btn_open_chat_markdown")
