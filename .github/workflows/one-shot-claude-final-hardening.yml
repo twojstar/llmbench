@@ -25,9 +25,7 @@ jobs:
       - name: Read Gradle version
         id: gradle-version
         shell: bash
-        run: |
-          version="$(.github/scripts/gradle-version.sh)"
-          echo "version=$version" >> "$GITHUB_OUTPUT"
+        run: .github/scripts/gradle-version.sh
       - uses: gradle/actions/setup-gradle@v6
         with:
           gradle-version: ${{ steps.gradle-version.outputs.version }}
