@@ -264,7 +264,7 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
         return updatePendingWebShare(
             service = service,
             shareId = shareId,
-            predicate = { pending -> pending.payload.uriStrings.containsAll(consed = consumed) }
+            predicate = { pending -> pending.payload.uriStrings.containsAll(consumed) }
         ) { pending ->
             val payload = pending.payload.copy(
                 uriStrings = pending.payload.uriStrings.filterNot(consumed::contains)
