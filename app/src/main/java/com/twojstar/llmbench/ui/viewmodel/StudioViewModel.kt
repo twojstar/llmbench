@@ -28,6 +28,7 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.io.File
+import java.io.IOException
 import java.util.concurrent.atomic.AtomicLong
 
 data class ChatMessage(
@@ -263,7 +264,7 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
         return updatePendingWebShare(
             service = service,
             shareId = shareId,
-            predicate = { pending -> pending.payload.uriStrings.containsAll(consumed) }
+            predicate = { pending -> pending.payload.uriStrings.containsAll(consed = consumed) }
         ) { pending ->
             val payload = pending.payload.copy(
                 uriStrings = pending.payload.uriStrings.filterNot(consumed::contains)
@@ -531,9 +532,18 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
                 } else {
                     null
                 }
+                val enabledLocalSkills = try {
+                    localSkillStore.loadEnabledManifests()
+                } catch (error: IOException) {
+                    showSnackbar(
+                        (error.message ?: "Could not prepare enabled local skills.") +
+                            " No provider request was sent."
+                    )
+                    return@launch
+                }
                 val systemPrompt = composeLocalSkillSystemInstruction(
                     profileSystemPrompt,
-                    localSkillStore.loadEnabledManifests()
+                    enabledLocalSkills
                 )
                 val activeProfile = if (_uiState.value.includeSystemProfileInChat) {
                     _uiState.value.mergedProfile
