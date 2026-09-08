@@ -140,7 +140,6 @@ fun SkillsBrowserScreen(
             verticalArrangement = Arrangement.spacedBy(12.dp),
             modifier = Modifier.fillMaxSize()
         ) {
-            // Search Bar
             item {
                 OutlinedTextField(
                     value = searchQuery,
@@ -162,7 +161,6 @@ fun SkillsBrowserScreen(
                 )
             }
 
-            // Tab row (Skills / Instructions / Templates)
             item {
                 TabRow(
                     selectedTabIndex = selectedCategoryTab,
@@ -213,7 +211,6 @@ fun SkillsBrowserScreen(
                         )
                     }
 
-                    // Skills list
                     val filtered = SkillsAndDocsRepository.skills.filter {
                         it.title.contains(searchQuery, ignoreCase = true) ||
                                 it.description.contains(searchQuery, ignoreCase = true) ||
@@ -283,7 +280,6 @@ fun SkillsBrowserScreen(
                     }
                 }
                 1 -> {
-                    // Instructions list
                     val filtered = SkillsAndDocsRepository.instructions.filter {
                         it.title.contains(searchQuery, ignoreCase = true) ||
                                 it.summary.contains(searchQuery, ignoreCase = true) ||
@@ -348,7 +344,6 @@ fun SkillsBrowserScreen(
                     }
                 }
                 2 -> {
-                    // Templates list
                     val filtered = SkillsAndDocsRepository.templates.filter {
                         it.filename.contains(searchQuery, ignoreCase = true) ||
                                 it.description.contains(searchQuery, ignoreCase = true) ||
@@ -412,7 +407,6 @@ fun SkillsBrowserScreen(
         }
     }
 
-    // Detail Dialog
     selectedItemContent?.let { (title, content) ->
         AlertDialog(
             onDismissRequest = { selectedItemContent = null },
@@ -481,8 +475,6 @@ fun SkillsBrowserScreen(
                         viewModel.showSnackbar("Saved '${saved.name}' to local skills.")
                     } catch (error: IOException) {
                         viewModel.showSnackbar(error.message ?: "Could not save local skill.")
-                    } catch (error: IllegalArgumentException) {
-                        viewModel.showSnackbar(error.message ?: "Selected skill is not valid.")
                     } finally {
                         skillImportSaving = false
                     }
