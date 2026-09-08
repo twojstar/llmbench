@@ -43,6 +43,7 @@ private const val TEST_OPENAI_MESSAGE_TYPE = "message"
 private const val TEST_OPENAI_ENCRYPTED_CONTENT_KEY = "encrypted_content"
 private const val TEST_OPENAI_ENCRYPTED_REASONING = "encrypted-reasoning"
 private const val TEST_OPENAI_REASONING_INCLUDE = "reasoning.encrypted_content"
+private const val TEST_OPENAI_TEXT_DELTA_SSE = "data: {\"type\":\"response.output_text.delta\",\"delta\":\"hello\"}\n\n"
 
 private fun openAiReplayStateJson(): String = """
     [
@@ -522,7 +523,7 @@ class AiChatServiceTest {
             .code(200)
             .message("OK")
             .body((
-                "data: {\"type\":\"response.output_text.delta\",\"delta\":\"hello\"}\n\n" +
+                TEST_OPENAI_TEXT_DELTA_SSE +
                     "data: {\"type\":\"response.completed\",\"response\":{\"output\":$completedOutput}}\n\n"
                 ).toResponseBody(TEST_EVENT_STREAM_TYPE.toMediaType()))
             .build()
@@ -798,7 +799,7 @@ class AiChatServiceTest {
             .code(200)
             .message("OK")
             .body(
-                "data: {\"type\":\"response.output_text.delta\",\"delta\":\"hello\"}\n\n"
+                TEST_OPENAI_TEXT_DELTA_SSE
                     .toResponseBody(TEST_EVENT_STREAM_TYPE.toMediaType())
             )
             .build()
@@ -825,7 +826,7 @@ class AiChatServiceTest {
             .code(200)
             .message("OK")
             .body(
-                "data: {\"type\":\"response.output_text.delta\",\"delta\":\"hello\"}\n\n"
+                TEST_OPENAI_TEXT_DELTA_SSE
                     .toResponseBody(TEST_EVENT_STREAM_TYPE.toMediaType())
             )
             .build()
