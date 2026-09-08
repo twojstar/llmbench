@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.FolderCopy
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material3.Card
@@ -43,6 +44,7 @@ internal fun LocalSkillLibrarySection(
     refreshToken: Int,
     onCountChanged: (Int) -> Unit,
     onViewSource: (String, String) -> Unit,
+    onExportSource: (String) -> Unit,
     onMessage: (String) -> Unit
 ) {
     val scope = rememberCoroutineScope()
@@ -140,8 +142,21 @@ internal fun LocalSkillLibrarySection(
                         ) {
                             Icon(Icons.Default.Visibility, contentDescription = null)
                             Spacer(Modifier.width(6.dp))
-                            Text("View source")
+                            Text("View")
                         }
+                        OutlinedButton(
+                            enabled = busySkill == null,
+                            onClick = { onExportSource(skill.name) }
+                        ) {
+                            Icon(Icons.Default.Download, contentDescription = null)
+                            Spacer(Modifier.width(6.dp))
+                            Text("Export")
+                        }
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End
+                    ) {
                         TextButton(
                             enabled = busySkill == null,
                             onClick = {
