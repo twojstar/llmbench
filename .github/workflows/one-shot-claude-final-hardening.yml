@@ -37,20 +37,27 @@ jobs:
             gradle wrapper --gradle-version "${{ steps.gradle-version.outputs.version }}"
             git checkout -- gradle/wrapper/gradle-wrapper.properties
           fi
-      - name: Normalize embedded test fixture delimiter
+      - name: Normalize embedded test fixture delimiters
         shell: bash
         run: |
           python - <<'PY'
           from pathlib import Path
           path = Path('.github/scripts/one-shot-claude-final-hardening.py')
           text = path.read_text()
-          start_token = 'metadata_tests = """'
-          end_token = '\n"""\ntest = replace_section('
-          assert text.count(start_token) == 1
-          start = text.index(start_token)
-          text = text[:start] + text[start:].replace(start_token, "metadata_tests = '''", 1)
-          end = text.index(end_token, start)
-          text = text[:end] + "\n'''\ntest = replace_section(" + text[end + len(end_token):]
+
+          def switch_block(name, next_call):
+              global text
+              start_token = f'{name} = """'
+              end_token = f'\n"""\ntest = {next_call}('
+              assert text.count(start_token) == 1, (name, text.count(start_token))
+              start = text.index(start_token)
+              text = text[:start] + text[start:].replace(start_token, f"{name} = '''", 1)
+              end = text.index(end_token, start)
+              replacement = f"\n'''\ntest = {next_call}("
+              text = text[:end] + replacement + text[end + len(end_token):]
+
+          switch_block('metadata_tests', 'replace_section')
+          switch_block('stop_test', 'replace_once')
           path.write_text(text)
           PY
       - name: Apply final Claude hardening
