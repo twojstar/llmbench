@@ -3,6 +3,7 @@ package com.twojstar.llmbench.data.skills
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
+import java.nio.charset.CharacterCodingException
 import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
@@ -113,7 +114,7 @@ internal class LocalSkillLibraryStore(
             sourceFile.readBytes().decodeToString(throwOnInvalidSequence = true)
         } catch (_: IOException) {
             null
-        } catch (_: IllegalArgumentException) {
+        } catch (_: CharacterCodingException) {
             null
         }
     }
