@@ -31,6 +31,10 @@ private const val SYSTEM_PROMPT = "system"
 private const val STREAM_HELLO = "hello"
 private const val TEST_STREAM_URL = "https://example.test/stream"
 private const val TEST_EVENT_STREAM_TYPE = "text/event-stream"
+private const val TEST_GEMINI_MODEL = "gemini-test-model"
+private const val TEST_GEMINI_ROLE = "model"
+private const val TEST_OPAQUE_SIGNATURE = "opaque-signature"
+private const val TEST_THOUGHT_SIGNATURE_KEY = "thoughtSignature"
 private const val TEST_CLAUDE_MAX_TOKENS = 128000
 private const val TEST_CLAUDE_OUTAGE_MODEL = "claude-outage"
 
@@ -195,8 +199,8 @@ class AiChatServiceTest {
         )
         val service = AiChatService()
 
-        val gemini = service.buildGeminiContents(prompt, history)
-        assertEquals(listOf(CHAT_ROLE_USER, "model", CHAT_ROLE_USER), gemini.map {
+        val gemini = service.buildGeminiContents(prompt, history, TEST_GEMINI_MODEL)
+        assertEquals(listOf(CHAT_ROLE_USER, TEST_GEMINI_ROLE, CHAT_ROLE_USER), gemini.map {
             it.jsonObject.getValue(TEST_ROLE_KEY).jsonPrimitive.content
         })
         assertEquals(listOf(FIRST_QUESTION, GEMINI_ANSWER, prompt), gemini.map {
@@ -289,6 +293,98 @@ class AiChatServiceTest {
         assertTrue(entries.first().supportsTextOutput)
         assertFalse(entries.last().supportsTextOutput)
     }
+    @Test
+    fun geminiHistoryReplaysOpaqueModelContentsIncludingSignatureOnlyChunk() {
+        val replayState = "[{\"role\":\"model\",\"parts\":[{\"text\":\"gemini answer\"}]},{\"role\":\"model\",\"parts\":[{\"text\":\"\",\"thoughtSignature\":\"opaque-signature\"}]}]"
+        val history = listOf(
+            ModelChatMessage(id = "u1", sender = CHAT_ROLE_USER, text = FIRST_QUESTION),
+            ModelChatMessage(
+                id = "gemini",
+                sender = CHAT_ROLE_ASSISTANT,
+                provider = AiProvider.GEMINI,
+                modelName = TEST_GEMINI_MODEL,
+                text = GEMINI_ANSWER,
+                providerReplayState = replayState
+            ),
+            ModelChatMessage(id = "u2", sender = CHAT_ROLE_USER, text = FOLLOW_UP)
+        )
+
+        val contents = AiChatService().buildGeminiContents(FOLLOW_UP, history, TEST_GEMINI_MODEL)
+
+        assertEquals(listOf(CHAT_ROLE_USER, TEST_GEMINI_ROLE, CHAT_ROLE_USER), contents.map {
+            it.jsonObject.getValue(TEST_ROLE_KEY).jsonPrimitive.content
+        })
+        val replayParts = contents[1].jsonObject.getValue("parts").jsonArray
+        assertEquals(2, replayParts.size)
+        val signaturePart = replayParts[1].jsonObject
+        assertEquals("", signaturePart.getValue("text").jsonPrimitive.content)
+        assertEquals(TEST_OPAQUE_SIGNATURE, signaturePart.getValue(TEST_THOUGHT_SIGNATURE_KEY).jsonPrimitive.content)
+    }
+
+    @Test
+    fun geminiModelSwitchFallsBackToVisibleTextReplay() {
+        val replayState = "[{\"role\":\"model\",\"parts\":[{\"text\":\"gemini answer\"},{\"text\":\"\",\"thoughtSignature\":\"opaque-signature\"}]}]"
+        val history = listOf(
+            ModelChatMessage(id = "u1", sender = CHAT_ROLE_USER, text = FIRST_QUESTION),
+            ModelChatMessage(
+                id = "gemini",
+                sender = CHAT_ROLE_ASSISTANT,
+                provider = AiProvider.GEMINI,
+                modelName = "gemini-old-model",
+                text = GEMINI_ANSWER,
+                providerReplayState = replayState
+            ),
+            ModelChatMessage(id = "u2", sender = CHAT_ROLE_USER, text = FOLLOW_UP)
+        )
+
+        val contents = AiChatService().buildGeminiContents(FOLLOW_UP, history, "gemini-new-model")
+
+        assertEquals(listOf(CHAT_ROLE_USER, TEST_GEMINI_ROLE, CHAT_ROLE_USER), contents.map {
+            it.jsonObject.getValue(TEST_ROLE_KEY).jsonPrimitive.content
+        })
+        val replayParts = contents[1].jsonObject.getValue("parts").jsonArray
+        assertEquals(1, replayParts.size)
+        val visiblePart = replayParts.single().jsonObject
+        assertEquals(GEMINI_ANSWER, visiblePart.getValue("text").jsonPrimitive.content)
+        assertFalse(TEST_THOUGHT_SIGNATURE_KEY in visiblePart)
+    }
+
+    @Test
+    fun geminiStreamingKeepsEmptyTextSignatureCarrier() {
+        val service = AiChatService()
+        val replayContents = mutableListOf<kotlinx.serialization.json.JsonObject>()
+        val response = Response.Builder()
+            .request(Request.Builder().url(TEST_STREAM_URL).build())
+            .protocol(Protocol.HTTP_1_1)
+            .code(200)
+            .message("OK")
+            .body((
+                "data: {\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[{\"text\":\"hello\"}]}}]}\n\n" +
+                    "data: {\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[{\"text\":\"\",\"thoughtSignature\":\"opaque-signature\"}]},\"finishReason\":\"STOP\"}]}\n\n"
+                ).toResponseBody(TEST_EVENT_STREAM_TYPE.toMediaType()))
+            .build()
+
+        val text = service.readSseResponse(
+            response = response,
+            extractText = service::extractGeminiStreamText,
+            isComplete = service::isGeminiStreamComplete,
+            onTextDelta = {},
+            onEvent = { event ->
+                service.extractGeminiReplayContent(event)?.let(replayContents::add)
+            }
+        )
+
+        assertEquals(STREAM_HELLO, text)
+        assertEquals(2, replayContents.size)
+        val merged = service.mergeGeminiReplayContents(replayContents)
+        val replayParts = requireNotNull(merged).getValue("parts").jsonArray
+        assertEquals(2, replayParts.size)
+        assertEquals("hello", replayParts[0].jsonObject.getValue("text").jsonPrimitive.content)
+        val signaturePart = replayParts[1].jsonObject
+        assertEquals("", signaturePart.getValue("text").jsonPrimitive.content)
+        assertEquals(TEST_OPAQUE_SIGNATURE, signaturePart.getValue(TEST_THOUGHT_SIGNATURE_KEY).jsonPrimitive.content)
+    }
+
     @Test
     fun extractsNativeStreamingTextDeltas() {
         val service = AiChatService()

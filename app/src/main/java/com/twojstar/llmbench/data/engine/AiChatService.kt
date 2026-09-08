@@ -88,6 +88,11 @@ internal fun buildClaudeMetadataHttpClient(baseClient: OkHttpClient): OkHttpClie
 
 class AiChatService {
 
+    private data class GeminiGenerationResult(
+        val text: String,
+        val replayState: String?
+    )
+
     private data class ClaudeMaxTokensCacheKey(
         val model: String,
         val credentialFingerprint: String
@@ -225,6 +230,7 @@ class AiChatService {
         val startTime = System.currentTimeMillis()
         val effectiveModel = if (modelName == "all" || modelName.isBlank()) provider.defaultModel else modelName
         var resolvedModel = effectiveModel
+        var providerReplayState: String? = null
 
         val (key, isKeyProvided) = when (provider) {
             AiProvider.GEMINI -> Pair(apiKeys.geminiKey.trim(), apiKeys.geminiKey.isNotBlank())
@@ -241,12 +247,16 @@ class AiChatService {
         if (isKeyProvided) {
             try {
                 val realResult = when (provider) {
-                    AiProvider.GEMINI -> if (onTextDelta != null) {
-                        callGeminiStreamApi(
-                            prompt, effectiveModel, key, systemInstruction, conversationHistory, onTextDelta
-                        )
-                    } else {
-                        callGeminiApi(prompt, effectiveModel, key, systemInstruction, conversationHistory)
+                    AiProvider.GEMINI -> {
+                        val result = if (onTextDelta != null) {
+                            callGeminiStreamApi(
+                                prompt, effectiveModel, key, systemInstruction, conversationHistory, onTextDelta
+                            )
+                        } else {
+                            callGeminiApi(prompt, effectiveModel, key, systemInstruction, conversationHistory)
+                        }
+                        providerReplayState = result.replayState
+                        result.text
                     }
                     AiProvider.CHATGPT -> if (onTextDelta != null) {
                         callOpenAiStreamApi(
@@ -293,7 +303,8 @@ class AiChatService {
                         isError = false,
                         isSimulated = false,
                         latencyMs = latency,
-                        activeProfileNotes = activeNotes
+                        activeProfileNotes = activeNotes,
+                        providerReplayState = providerReplayState
                     )
                 }
             } catch (e: Exception) {
@@ -362,15 +373,38 @@ class AiChatService {
     internal fun buildGeminiContents(
         prompt: String,
         conversationHistory: List<ModelChatMessage>,
+        modelName: String,
         systemInstruction: String? = null
     ): JsonArray = buildJsonArray {
         buildBoundedProviderTextTurns(
-            prompt, conversationHistory, AiProvider.GEMINI, systemInstruction
+            prompt = prompt,
+            conversationHistory = conversationHistory,
+            provider = AiProvider.GEMINI,
+            systemInstruction = systemInstruction,
+            replayStateModelName = modelName,
+            replayStateValidator = { state -> parseGeminiReplayState(state).isNotEmpty() }
         ).forEach { turn ->
-            addJsonObject {
-                put(JSON_ROLE_KEY, if (turn.role == CHAT_ROLE_ASSISTANT) JSON_MODEL_KEY else CHAT_ROLE_USER)
-                putJsonArray(JSON_PARTS_KEY) {
-                    addJsonObject { put(JSON_TEXT_KEY, turn.text) }
+            if (turn.role == CHAT_ROLE_ASSISTANT) {
+                val replayContents = turn.providerReplayState
+                    .takeIf { turn.modelName == modelName }
+                    ?.let(::parseGeminiReplayState)
+                    .orEmpty()
+                if (replayContents.isNotEmpty()) {
+                    replayContents.forEach(::add)
+                } else {
+                    addJsonObject {
+                        put(JSON_ROLE_KEY, JSON_MODEL_KEY)
+                        putJsonArray(JSON_PARTS_KEY) {
+                            addJsonObject { put(JSON_TEXT_KEY, turn.text) }
+                        }
+                    }
+                }
+            } else {
+                addJsonObject {
+                    put(JSON_ROLE_KEY, CHAT_ROLE_USER)
+                    putJsonArray(JSON_PARTS_KEY) {
+                        addJsonObject { put(JSON_TEXT_KEY, turn.text) }
+                    }
                 }
             }
         }
@@ -413,9 +447,9 @@ class AiChatService {
         apiKey: String,
         systemInstruction: String?,
         conversationHistory: List<ModelChatMessage>
-    ): String {
+    ): GeminiGenerationResult {
         val url = "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$apiKey"
-        val contentsArray = buildGeminiContents(prompt, conversationHistory, systemInstruction)
+        val contentsArray = buildGeminiContents(prompt, conversationHistory, model, systemInstruction)
 
         val requestPayload = buildJsonObject {
             put("contents", contentsArray)
@@ -436,16 +470,12 @@ class AiChatService {
 
         val responseBody = executeCancellableJson(request, "Empty response from Gemini server")
         val parsed = json.parseToJsonElement(responseBody).jsonObject
-        val text = parsed[JSON_CANDIDATES_KEY]?.jsonArray
-            ?.firstOrNull()?.jsonObject
-            ?.get(JSON_CONTENT_KEY)?.jsonObject
-            ?.get(JSON_PARTS_KEY)?.jsonArray
-            .orEmpty()
-            .mapNotNull { it.jsonObject[JSON_TEXT_KEY]?.jsonPrimitive?.contentOrNull }
-            .joinToString(separator = "")
-            .takeIf { it.isNotEmpty() }
-
-        return text ?: "Received empty content response from Gemini."
+        val content = extractGeminiReplayContent(parsed)
+        return GeminiGenerationResult(
+            text = extractGeminiStreamText(parsed)
+                ?: "Received empty content response from Gemini.",
+            replayState = content?.let { encodeGeminiReplayState(listOf(it)) }
+        )
     }
 
     // --- OpenAI Responses API ---
@@ -583,6 +613,49 @@ class AiChatService {
         return text ?: "Received empty content block from Claude."
     }
 
+    private fun isValidGeminiReplayContent(content: JsonObject): Boolean {
+        val role = (content[JSON_ROLE_KEY] as? JsonPrimitive)?.contentOrNull
+        val parts = content[JSON_PARTS_KEY] as? JsonArray ?: return false
+        return role == JSON_MODEL_KEY && parts.isNotEmpty() && parts.all { part ->
+            part is JsonObject && part.isNotEmpty()
+        }
+    }
+
+    internal fun extractGeminiReplayContent(event: JsonObject): JsonObject? {
+        val candidate = (event[JSON_CANDIDATES_KEY] as? JsonArray)
+            ?.firstOrNull() as? JsonObject ?: return null
+        val content = candidate[JSON_CONTENT_KEY] as? JsonObject ?: return null
+        return content.takeIf(::isValidGeminiReplayContent)
+    }
+
+    internal fun mergeGeminiReplayContents(contents: List<JsonObject>): JsonObject? {
+        if (contents.isEmpty() || contents.any { !isValidGeminiReplayContent(it) }) return null
+        val parts = contents.flatMap { content ->
+            (content[JSON_PARTS_KEY] as JsonArray).toList()
+        }
+        return buildJsonObject {
+            put(JSON_ROLE_KEY, JSON_MODEL_KEY)
+            put(JSON_PARTS_KEY, JsonArray(parts))
+        }
+    }
+
+    private fun encodeGeminiReplayState(contents: List<JsonObject>): String? =
+        mergeGeminiReplayContents(contents)?.let { JsonArray(listOf(it)).toString() }
+
+    private fun parseGeminiReplayState(state: String?): List<JsonObject> {
+        if (state.isNullOrBlank()) return emptyList()
+        return runCatching {
+            val array = json.parseToJsonElement(state) as? JsonArray
+                ?: return@runCatching emptyList()
+            val contents = array.mapNotNull { it as? JsonObject }
+            if (contents.size != array.size) {
+                emptyList()
+            } else {
+                mergeGeminiReplayContents(contents)?.let(::listOf).orEmpty()
+            }
+        }.getOrDefault(emptyList())
+    }
+
     internal fun extractGeminiStreamText(event: JsonObject): String? =
         event[JSON_CANDIDATES_KEY]?.jsonArray
             ?.firstOrNull()?.jsonObject
@@ -629,10 +702,10 @@ class AiChatService {
         systemInstruction: String?,
         conversationHistory: List<ModelChatMessage>,
         onTextDelta: (String) -> Unit
-    ): String {
+    ): GeminiGenerationResult {
         val url = "https://generativelanguage.googleapis.com/v1beta/models/$model:streamGenerateContent?alt=sse&key=$apiKey"
         val requestPayload = buildJsonObject {
-            put("contents", buildGeminiContents(prompt, conversationHistory, systemInstruction))
+            put("contents", buildGeminiContents(prompt, conversationHistory, model, systemInstruction))
             if (!systemInstruction.isNullOrBlank()) {
                 putJsonObject("systemInstruction") {
                     putJsonArray(JSON_PARTS_KEY) {
@@ -645,8 +718,20 @@ class AiChatService {
             .url(url)
             .post(requestPayload.toString().toRequestBody(JSON_MEDIA_TYPE.toMediaType()))
             .build()
-        return executeSse(request, ::extractGeminiStreamText, ::isGeminiStreamComplete, onTextDelta)
-            .ifEmpty { "Received empty content response from Gemini." }
+        val replayContents = mutableListOf<JsonObject>()
+        val text = executeSse(
+            request = request,
+            extractText = ::extractGeminiStreamText,
+            isComplete = ::isGeminiStreamComplete,
+            onTextDelta = onTextDelta,
+            onEvent = { event ->
+                extractGeminiReplayContent(event)?.let(replayContents::add)
+            }
+        )
+        return GeminiGenerationResult(
+            text = text.ifEmpty { "Received empty content response from Gemini." },
+            replayState = encodeGeminiReplayState(replayContents)
+        )
     }
 
     private suspend fun callOpenAiStreamApi(
@@ -759,7 +844,8 @@ class AiChatService {
         extractText: (JsonObject) -> String?,
         isComplete: (JsonObject) -> Boolean,
         onTextDelta: (String) -> Unit,
-        completeOnDoneSentinel: Boolean = false
+        completeOnDoneSentinel: Boolean = false,
+        onEvent: ((JsonObject) -> Unit)? = null
     ): String = suspendCancellableCoroutine { continuation ->
         val call = streamingHttpClient.newCall(request)
         continuation.invokeOnCancellation { call.cancel() }
@@ -769,7 +855,10 @@ class AiChatService {
             }
 
             override fun onResponse(call: Call, response: Response) {
-                completeSseContinuation(continuation, response, extractText, isComplete, onTextDelta, completeOnDoneSentinel)
+                completeSseContinuation(
+                    continuation, response, extractText, isComplete, onTextDelta,
+                    completeOnDoneSentinel, onEvent
+                )
             }
         })
     }
@@ -780,10 +869,14 @@ class AiChatService {
         extractText: (JsonObject) -> String?,
         isComplete: (JsonObject) -> Boolean,
         onTextDelta: (String) -> Unit,
-        completeOnDoneSentinel: Boolean
+        completeOnDoneSentinel: Boolean,
+        onEvent: ((JsonObject) -> Unit)?
     ) {
         val result = runCatching {
-            readSseResponse(response, extractText, isComplete, onTextDelta, completeOnDoneSentinel)
+            readSseResponse(
+                response, extractText, isComplete, onTextDelta,
+                completeOnDoneSentinel, onEvent
+            )
         }
         if (!continuation.isActive) return
 
@@ -801,12 +894,16 @@ class AiChatService {
         extractText: (JsonObject) -> String?,
         isComplete: (JsonObject) -> Boolean,
         onTextDelta: (String) -> Unit,
-        completeOnDoneSentinel: Boolean = false
+        completeOnDoneSentinel: Boolean = false,
+        onEvent: ((JsonObject) -> Unit)? = null
     ): String {
         response.use {
             ensureSuccessfulStreamingResponse(response)
             val source = response.body?.source() ?: throw IOException("Empty streaming response body")
-            return consumeSseSource(source, extractText, isComplete, onTextDelta, completeOnDoneSentinel)
+            return consumeSseSource(
+                source, extractText, isComplete, onTextDelta,
+                completeOnDoneSentinel, onEvent
+            )
         }
     }
 
@@ -821,7 +918,8 @@ class AiChatService {
         extractText: (JsonObject) -> String?,
         isComplete: (JsonObject) -> Boolean,
         onTextDelta: (String) -> Unit,
-        completeOnDoneSentinel: Boolean
+        completeOnDoneSentinel: Boolean,
+        onEvent: ((JsonObject) -> Unit)?
     ): String {
         val collected = StringBuilder()
         val dataLines = mutableListOf<String>()
@@ -838,6 +936,7 @@ class AiChatService {
                 return
             }
             val event = parseSseEvent(payload) ?: return
+            onEvent?.invoke(event)
             val (delta, eventComplete) = decodeSseEvent(event, extractText, isComplete)
             appendStreamingDelta(collected, delta, onTextDelta)
             if (eventComplete) {

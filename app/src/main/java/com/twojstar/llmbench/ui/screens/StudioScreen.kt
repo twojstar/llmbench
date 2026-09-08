@@ -693,6 +693,8 @@ private fun PromptRoutePreviewCard(uiState: StudioUiState) {
     val stateLabel = when (capabilities.conversationStateStrategy) {
         ConversationStateStrategy.PROVIDER_FAN_OUT -> "Isolated history per provider in compare fan-out"
         ConversationStateStrategy.BOUNDED_PROVIDER_TEXT_REPLAY -> "Bounded provider-scoped text replay"
+        ConversationStateStrategy.BOUNDED_PROVIDER_CONTENT_REPLAY ->
+            "Bounded provider content replay with opaque model state"
     }
     val resolvedModelLabel = when {
         provider == AiProvider.ALL -> "Captured per gateway when returned"

@@ -3,6 +3,7 @@ package com.twojstar.llmbench.data.model
 import kotlin.time.Clock
 
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.Transient
 
 @Serializable
 enum class WebAiService(
@@ -329,5 +330,6 @@ data class ModelChatMessage(
     val isSimulated: Boolean = false,
     val isPartial: Boolean = false,
     val latencyMs: Long? = null,
-    val activeProfileNotes: List<String> = emptyList()
+    val activeProfileNotes: List<String> = emptyList(),
+    @Transient val providerReplayState: String? = null
 )

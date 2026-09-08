@@ -14,7 +14,7 @@ Portable provider/model/profile data lives in `shared`. Android currently owns H
 
 | Provider | API shape | System instructions | Streaming | Conversation state today |
 | --- | --- | --- | --- | --- |
-| Gemini | `generateContent` REST | `systemInstruction` | SSE | bounded visible text replay |
+| Gemini | `generateContent` REST | `systemInstruction` | SSE | bounded provider content replay with opaque thought signatures |
 | OpenAI | Responses API | `instructions` | Responses SSE | bounded visible text replay, `store=false` |
 | Claude | Messages API | top-level `system` | SSE | bounded visible text replay |
 | DeepSeek | OpenAI-compatible chat completions | `system` message | SSE | bounded visible text replay |
@@ -32,7 +32,8 @@ Generation and gateway model-catalog requests are coroutine-cancellable: cancell
 - replay only successful, complete, non-simulated assistant responses from the selected provider;
 - replay a prior user prompt only when that provider produced a replayable response to that turn;
 - bound history by both turn count and approximate character budget;
-- reserve history budget for the current prompt and system instruction.
+- reserve history budget for the current prompt and system instruction;
+- keep provider-owned replay state opaque, provider/model-scoped, budgeted only when replayable, and out of serialization/UI/export/log output.
 
 This isolation matters in compare/switch-provider flows: a provider should not receive user turns it never answered unless that behavior is explicitly redesigned.
 
@@ -50,14 +51,11 @@ Example: Gemini 3 documentation recommends keeping temperature at the default `1
 
 ### Gemini
 
-The REST path currently reconstructs history from visible text only. Gemini thinking models can return `thoughtSignature` metadata that should be passed back unchanged in subsequent stateless turns. Dropping it can reduce reasoning continuity, and function-calling flows may reject requests without required signatures.
+The REST path remains stateless, but LlmBench now retains the full model `Content` chunks returned by Gemini alongside visible text. Subsequent Gemini turns replay those model-owned chunks unchanged, including an empty-text final part when it carries `thoughtSignature`. This mirrors the GenerateContent SDK behavior while preserving the existing local/provider-scoped history boundary.
 
-Potential directions:
+`providerReplayState` is ephemeral opaque transport state: it is excluded from `ModelChatMessage` serialization and is never rendered as chat text, exported to Markdown, logged, or rewritten. It is replayed and charged against the history budget only for the exact model that produced it; model switches and invalid/legacy state fall back to the existing visible-text reconstruction instead of making the chat unusable. Streaming capture runs through the terminal `STOP` event so signature-only final chunks are not dropped.
 
-- keep `generateContent` stateless but persist opaque response parts/signatures alongside visible text; or
-- evaluate Gemini Interactions stateful mode, with an explicit privacy/storage decision before switching transports.
-
-Do not expose or rewrite the signature content. Treat it as opaque provider state.
+A future move to Gemini Interactions can still be evaluated, but only with an explicit privacy/storage decision because that would change the current client-managed stateless model.
 
 ### OpenAI
 
@@ -96,7 +94,7 @@ OpenRouter and other OpenAI-compatible gateways may return the model actually us
 
 - [x] Make gateway model-catalog refresh cancellable through the same OkHttp coroutine bridge used by generation.
 - [x] Add a provider capability model for transport, instruction placement, response metadata and state strategy; extend it as reasoning controls land.
-- [ ] Preserve Gemini thought signatures or migrate that path to a stateful API with explicit storage semantics.
+- [x] Preserve Gemini thought signatures in stateless `generateContent` by replaying full model `Content` chunks unchanged.
 - [ ] Preserve OpenAI stateless reasoning items while keeping `store=false`, or document a deliberate move to stateful Responses.
 - [ ] Add Claude thinking/effort only through model-aware capabilities; preserve opaque thinking blocks when enabled.
 - [x] Record and display the actual routed model returned by OpenRouter when available.
