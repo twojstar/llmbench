@@ -1,5 +1,12 @@
 package com.twojstar.llmbench.data.model
 
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+
 enum class NativeChatTransport {
     COMPARE_FAN_OUT,
     GEMINI_GENERATE_CONTENT,
@@ -30,6 +37,70 @@ fun AiProvider.reasoningControlStrategy(): ReasoningControlStrategy = when (this
     AiProvider.ALL -> ReasoningControlStrategy.PER_PROVIDER
     AiProvider.CLAUDE -> ReasoningControlStrategy.MODEL_CAPABILITY_METADATA
     else -> ReasoningControlStrategy.PROVIDER_DEFAULT
+}
+
+private const val CLAUDE_CAPABILITIES_KEY = "capabilities"
+private const val CLAUDE_THINKING_KEY = "thinking"
+private const val CLAUDE_TYPES_KEY = "types"
+private const val CLAUDE_SUPPORTED_KEY = "supported"
+private const val CLAUDE_ADAPTIVE_KEY = "adaptive"
+private const val CLAUDE_ENABLED_KEY = "enabled"
+private const val CLAUDE_EFFORT_KEY = "effort"
+private const val CLAUDE_HIGH_EFFORT_KEY = "high"
+private const val CLAUDE_MIN_THINKING_BUDGET = 1024
+private const val CLAUDE_DEFAULT_THINKING_BUDGET = 4096
+
+data class ClaudeReasoningCapabilities(
+    val supportsAdaptive: Boolean = false,
+    val supportsEnabled: Boolean = false,
+    val supportsHighEffort: Boolean = false
+)
+
+fun parseClaudeReasoningCapabilities(rawJson: String): ClaudeReasoningCapabilities? = runCatching {
+    val root = Json.parseToJsonElement(rawJson).jsonObject
+    val capabilities = root[CLAUDE_CAPABILITIES_KEY] as? JsonObject ?: return@runCatching null
+    val thinking = capabilities[CLAUDE_THINKING_KEY] as? JsonObject ?: return@runCatching null
+    if (thinking[CLAUDE_SUPPORTED_KEY]?.jsonPrimitive?.booleanOrNull != true) {
+        return@runCatching ClaudeReasoningCapabilities()
+    }
+    val types = thinking[CLAUDE_TYPES_KEY] as? JsonObject
+    val effort = capabilities[CLAUDE_EFFORT_KEY] as? JsonObject
+    ClaudeReasoningCapabilities(
+        supportsAdaptive = types.supportsClaudeCapability(CLAUDE_ADAPTIVE_KEY),
+        supportsEnabled = types.supportsClaudeCapability(CLAUDE_ENABLED_KEY),
+        supportsHighEffort = effort.supportsClaudeCapability(CLAUDE_HIGH_EFFORT_KEY)
+    )
+}.getOrNull()
+
+private fun JsonObject?.supportsClaudeCapability(name: String): Boolean =
+    ((this?.get(name) as? JsonObject)?.get(CLAUDE_SUPPORTED_KEY) as? JsonPrimitive)
+        ?.booleanOrNull == true
+
+fun fallbackClaudeReasoningCapabilities(model: String): ClaudeReasoningCapabilities {
+    val normalized = model.lowercase()
+    return when {
+        normalized.startsWith("claude-haiku-4-5") ||
+            normalized.startsWith("claude-sonnet-4-5") ||
+            normalized.startsWith("claude-opus-4-5") -> ClaudeReasoningCapabilities(
+            supportsEnabled = true
+        )
+        normalized.startsWith("claude-sonnet-4-6") ||
+            normalized.startsWith("claude-opus-4-6") ||
+            normalized.startsWith("claude-opus-4-7") ||
+            normalized.startsWith("claude-opus-4-8") ||
+            normalized.startsWith("claude-sonnet-5") ||
+            normalized.startsWith("claude-opus-5") ||
+            normalized.startsWith("claude-fable-5") -> ClaudeReasoningCapabilities(
+            supportsAdaptive = true,
+            supportsHighEffort = true
+        )
+        else -> ClaudeReasoningCapabilities()
+    }
+}
+
+fun resolveClaudeThinkingBudget(maxTokens: Int): Int? {
+    val budget = minOf(CLAUDE_DEFAULT_THINKING_BUDGET, maxTokens / 2)
+    return budget.takeIf { it >= CLAUDE_MIN_THINKING_BUDGET && it < maxTokens }
 }
 
 data class ProviderRuntimeCapabilities(

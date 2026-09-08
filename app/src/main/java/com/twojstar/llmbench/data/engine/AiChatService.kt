@@ -4,6 +4,10 @@ import com.twojstar.llmbench.data.model.AiProvider
 import com.twojstar.llmbench.data.model.ApiKeyConfig
 import com.twojstar.llmbench.data.model.CHAT_ROLE_ASSISTANT
 import com.twojstar.llmbench.data.model.CHAT_ROLE_USER
+import com.twojstar.llmbench.data.model.ClaudeReasoningCapabilities
+import com.twojstar.llmbench.data.model.fallbackClaudeReasoningCapabilities
+import com.twojstar.llmbench.data.model.parseClaudeReasoningCapabilities
+import com.twojstar.llmbench.data.model.resolveClaudeThinkingBudget
 import com.twojstar.llmbench.data.model.GatewayModelCatalogEntry
 import com.twojstar.llmbench.data.model.ModelChatMessage
 import com.twojstar.llmbench.data.model.buildBoundedProviderTextTurns
@@ -54,10 +58,7 @@ private const val JSON_MAX_TOKENS_KEY = "max_tokens"
 private const val JSON_STORE_KEY = "store"
 private const val JSON_STREAM_KEY = "stream"
 private const val JSON_INSTRUCTIONS_KEY = "instructions"
-private const val JSON_CAPABILITIES_KEY = "capabilities"
 private const val JSON_THINKING_KEY = "thinking"
-private const val JSON_TYPES_KEY = "types"
-private const val JSON_SUPPORTED_KEY = "supported"
 private const val JSON_ADAPTIVE_KEY = "adaptive"
 private const val JSON_ENABLED_KEY = "enabled"
 private const val JSON_EFFORT_KEY = "effort"
@@ -95,8 +96,6 @@ private const val CLAUDE_THINKING_DELTA = "thinking_delta"
 private const val CLAUDE_SIGNATURE_DELTA = "signature_delta"
 private const val CLAUDE_THINKING_BLOCK = "thinking"
 private const val CLAUDE_REDACTED_THINKING_BLOCK = "redacted_thinking"
-private const val CLAUDE_MIN_THINKING_BUDGET = 1024
-private const val CLAUDE_DEFAULT_THINKING_BUDGET = 4096
 private const val MALFORMED_STREAM_EVENT = "Malformed streaming event"
 private const val CLAUDE_MESSAGES_API_URL = "https://api.anthropic.com/v1/messages"
 private const val CLAUDE_MODELS_API_URL = "https://api.anthropic.com/v1/models"
@@ -110,12 +109,6 @@ internal fun buildClaudeMetadataHttpClient(baseClient: OkHttpClient): OkHttpClie
     baseClient.newBuilder()
         .callTimeout(CLAUDE_METADATA_TIMEOUT_SECONDS, TimeUnit.SECONDS)
         .build()
-
-internal data class ClaudeReasoningCapabilities(
-    val supportsAdaptive: Boolean = false,
-    val supportsEnabled: Boolean = false,
-    val supportsHighEffort: Boolean = false
-)
 
 class AiChatService {
 
@@ -623,53 +616,6 @@ class AiChatService {
     internal fun parseClaudeModelMaxTokens(rawJson: String): Int? = runCatching {
         json.parseToJsonElement(rawJson).jsonObject[JSON_MAX_TOKENS_KEY]?.jsonPrimitive?.intOrNull
     }.getOrNull()?.takeIf { it > 0 }
-
-    internal fun parseClaudeReasoningCapabilities(rawJson: String): ClaudeReasoningCapabilities? = runCatching {
-        val root = json.parseToJsonElement(rawJson).jsonObject
-        val capabilities = root[JSON_CAPABILITIES_KEY] as? JsonObject ?: return@runCatching null
-        val thinking = capabilities[JSON_THINKING_KEY] as? JsonObject ?: return@runCatching null
-        if (thinking[JSON_SUPPORTED_KEY]?.jsonPrimitive?.booleanOrNull != true) {
-            return@runCatching ClaudeReasoningCapabilities()
-        }
-        val types = thinking[JSON_TYPES_KEY] as? JsonObject
-        val effort = capabilities[JSON_EFFORT_KEY] as? JsonObject
-        ClaudeReasoningCapabilities(
-            supportsAdaptive = types.supportsClaudeCapability(JSON_ADAPTIVE_KEY),
-            supportsEnabled = types.supportsClaudeCapability(JSON_ENABLED_KEY),
-            supportsHighEffort = effort.supportsClaudeCapability(JSON_HIGH_KEY)
-        )
-    }.getOrNull()
-
-    private fun JsonObject?.supportsClaudeCapability(name: String): Boolean =
-        ((this?.get(name) as? JsonObject)?.get(JSON_SUPPORTED_KEY) as? JsonPrimitive)
-            ?.booleanOrNull == true
-
-    internal fun fallbackClaudeReasoningCapabilities(model: String): ClaudeReasoningCapabilities {
-        val normalized = model.lowercase()
-        return when {
-            normalized.startsWith("claude-haiku-4-5") ||
-                normalized.startsWith("claude-sonnet-4-5") ||
-                normalized.startsWith("claude-opus-4-5") -> ClaudeReasoningCapabilities(
-                supportsEnabled = true
-            )
-            normalized.startsWith("claude-sonnet-4-6") ||
-                normalized.startsWith("claude-opus-4-6") ||
-                normalized.startsWith("claude-opus-4-7") ||
-                normalized.startsWith("claude-opus-4-8") ||
-                normalized.startsWith("claude-sonnet-5") ||
-                normalized.startsWith("claude-opus-5") ||
-                normalized.startsWith("claude-fable-5") -> ClaudeReasoningCapabilities(
-                supportsAdaptive = true,
-                supportsHighEffort = true
-            )
-            else -> ClaudeReasoningCapabilities()
-        }
-    }
-
-    internal fun resolveClaudeThinkingBudget(maxTokens: Int): Int? {
-        val budget = minOf(CLAUDE_DEFAULT_THINKING_BUDGET, maxTokens / 2)
-        return budget.takeIf { it >= CLAUDE_MIN_THINKING_BUDGET && it < maxTokens }
-    }
 
     internal fun buildClaudeModelMetadataRequest(
         model: String,

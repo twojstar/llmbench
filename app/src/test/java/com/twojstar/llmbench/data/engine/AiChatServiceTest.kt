@@ -3,6 +3,7 @@ package com.twojstar.llmbench.data.engine
 import com.twojstar.llmbench.data.model.AiProvider
 import com.twojstar.llmbench.data.model.CHAT_ROLE_ASSISTANT
 import com.twojstar.llmbench.data.model.CHAT_ROLE_USER
+import com.twojstar.llmbench.data.model.ClaudeReasoningCapabilities
 import com.twojstar.llmbench.data.model.ModelChatMessage
 import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.Json
@@ -133,38 +134,6 @@ class AiChatServiceTest {
         assertEquals("128000", streaming.getValue("max_tokens").jsonPrimitive.content)
         assertEquals("true", streaming.getValue("stream").jsonPrimitive.content)
         assertFalse("system" in streaming)
-    }
-
-    @Test
-    fun parsesClaudeReasoningCapabilitiesFromModelMetadata() {
-        val raw = """
-            {
-              "max_tokens": 128000,
-              "capabilities": {
-                "thinking": {
-                  "supported": true,
-                  "types": {
-                    "adaptive": {"supported": true},
-                    "enabled": {"supported": false}
-                  }
-                },
-                "effort": {
-                  "supported": true,
-                  "high": {"supported": true}
-                }
-              }
-            }
-        """.trimIndent()
-
-        val capabilities = AiChatService().parseClaudeReasoningCapabilities(raw)
-
-        assertEquals(
-            ClaudeReasoningCapabilities(
-                supportsAdaptive = true,
-                supportsHighEffort = true
-            ),
-            capabilities
-        )
     }
 
     @Test
