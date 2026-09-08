@@ -27,8 +27,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.twojstar.llmbench.data.document.MarkdownDocumentFileAccess
 import com.twojstar.llmbench.data.repository.SkillsAndDocsRepository
+import com.twojstar.llmbench.data.skills.LocalSkillAlreadyExistsException
+import com.twojstar.llmbench.data.skills.LocalSkillLibraryStore
 import com.twojstar.llmbench.ui.theme.*
 import com.twojstar.llmbench.ui.viewmodel.StudioViewModel
+import java.io.File
 import java.io.IOException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
@@ -51,11 +54,20 @@ fun SkillsBrowserScreen(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val localSkillStore = remember(context) {
+        LocalSkillLibraryStore(
+            File(context.noBackupFilesDir, LocalSkillLibraryStore.LIBRARY_DIRECTORY_NAME)
+        )
+    }
     var selectedCategoryTab by remember { mutableStateOf(0) } // 0: Skills, 1: Instructions, 2: Templates
     var searchQuery by remember { mutableStateOf("") }
     var selectedItemContent by remember { mutableStateOf<Pair<String, String>?>(null) } // Title to Content dialog
     var skillImportPreview by remember { mutableStateOf<SkillImportPreview?>(null) }
+    var pendingSkillReplacement by remember { mutableStateOf<SkillImportPreview?>(null) }
     var skillImportLoading by remember { mutableStateOf(false) }
+    var skillImportSaving by remember { mutableStateOf(false) }
+    var localSkillCount by remember { mutableIntStateOf(0) }
+    var localSkillsRefreshToken by remember { mutableIntStateOf(0) }
 
     val skillImportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
@@ -130,7 +142,6 @@ fun SkillsBrowserScreen(
             verticalArrangement = Arrangement.spacedBy(12.dp),
             modifier = Modifier.fillMaxSize()
         ) {
-            // Search Bar
             item {
                 OutlinedTextField(
                     value = searchQuery,
@@ -152,7 +163,6 @@ fun SkillsBrowserScreen(
                 )
             }
 
-            // Tab row (Skills / Instructions / Templates)
             item {
                 TabRow(
                     selectedTabIndex = selectedCategoryTab,
@@ -163,7 +173,13 @@ fun SkillsBrowserScreen(
                     Tab(
                         selected = selectedCategoryTab == 0,
                         onClick = { selectedCategoryTab = 0 },
-                        text = { Text("Skills (${SkillsAndDocsRepository.skills.size})", fontSize = 12.sp, fontWeight = FontWeight.SemiBold) }
+                        text = {
+                            Text(
+                                "Skills (${SkillsAndDocsRepository.skills.size + localSkillCount})",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
                     )
                     Tab(
                         selected = selectedCategoryTab == 1,
@@ -186,8 +202,17 @@ fun SkillsBrowserScreen(
                             onPreview = ::launchSkillPreview
                         )
                     }
+                    item {
+                        LocalSkillLibrarySection(
+                            store = localSkillStore,
+                            searchQuery = searchQuery,
+                            refreshToken = localSkillsRefreshToken,
+                            onCountChanged = { localSkillCount = it },
+                            onViewSource = { name, source -> selectedItemContent = name to source },
+                            onMessage = viewModel::showSnackbar
+                        )
+                    }
 
-                    // Skills list
                     val filtered = SkillsAndDocsRepository.skills.filter {
                         it.title.contains(searchQuery, ignoreCase = true) ||
                                 it.description.contains(searchQuery, ignoreCase = true) ||
@@ -257,7 +282,6 @@ fun SkillsBrowserScreen(
                     }
                 }
                 1 -> {
-                    // Instructions list
                     val filtered = SkillsAndDocsRepository.instructions.filter {
                         it.title.contains(searchQuery, ignoreCase = true) ||
                                 it.summary.contains(searchQuery, ignoreCase = true) ||
@@ -322,7 +346,6 @@ fun SkillsBrowserScreen(
                     }
                 }
                 2 -> {
-                    // Templates list
                     val filtered = SkillsAndDocsRepository.templates.filter {
                         it.filename.contains(searchQuery, ignoreCase = true) ||
                                 it.description.contains(searchQuery, ignoreCase = true) ||
@@ -386,7 +409,6 @@ fun SkillsBrowserScreen(
         }
     }
 
-    // Detail Dialog
     selectedItemContent?.let { (title, content) ->
         AlertDialog(
             onDismissRequest = { selectedItemContent = null },
@@ -444,7 +466,54 @@ fun SkillsBrowserScreen(
     skillImportPreview?.let { preview ->
         SkillImportPreviewDialog(
             preview = preview,
-            onDismiss = { skillImportPreview = null }
+            saving = skillImportSaving,
+            onAdd = {
+                scope.launch {
+                    skillImportSaving = true
+                    try {
+                        val saved = localSkillStore.add(preview.source)
+                        localSkillsRefreshToken += 1
+                        skillImportPreview = null
+                        viewModel.showSnackbar("Saved '${saved.name}' to local skills.")
+                    } catch (_: LocalSkillAlreadyExistsException) {
+                        pendingSkillReplacement = preview
+                        skillImportPreview = null
+                    } catch (error: IOException) {
+                        viewModel.showSnackbar(error.message ?: "Could not save local skill.")
+                    } finally {
+                        skillImportSaving = false
+                    }
+                }
+            },
+            onDismiss = { if (!skillImportSaving) skillImportPreview = null }
+        )
+    }
+
+    pendingSkillReplacement?.let { preview ->
+        SkillReplacementConfirmationDialog(
+            preview = preview,
+            saving = skillImportSaving,
+            onReplace = {
+                scope.launch {
+                    skillImportSaving = true
+                    try {
+                        val saved = localSkillStore.add(preview.source, replaceExisting = true)
+                        localSkillsRefreshToken += 1
+                        pendingSkillReplacement = null
+                        viewModel.showSnackbar("Replaced '${saved.name}' in local skills.")
+                    } catch (error: IOException) {
+                        viewModel.showSnackbar(error.message ?: "Could not replace local skill.")
+                    } finally {
+                        skillImportSaving = false
+                    }
+                }
+            },
+            onCancel = {
+                if (!skillImportSaving) {
+                    pendingSkillReplacement = null
+                    skillImportPreview = preview
+                }
+            }
         )
     }
 }
@@ -504,10 +573,12 @@ private fun LocalSkillPreviewCard(
 @Composable
 private fun SkillImportPreviewDialog(
     preview: SkillImportPreview,
+    saving: Boolean,
+    onAdd: () -> Unit,
     onDismiss: () -> Unit
 ) {
     AlertDialog(
-        onDismissRequest = onDismiss,
+        onDismissRequest = { if (!saving) onDismiss() },
         modifier = Modifier.testTag("skill_import_preview_dialog"),
         title = {
             Text(
@@ -532,7 +603,7 @@ private fun SkillImportPreviewDialog(
                 }
                 item {
                     Text(
-                        text = "Read-only preview. LlmBench does not execute imported instructions, scripts, or declared tools.",
+                        text = "Previewing is read-only. Adding stores a private copy; LlmBench does not execute imported instructions, scripts, or declared tools.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -639,8 +710,67 @@ private fun SkillImportPreviewDialog(
             }
         },
         confirmButton = {
-            Button(onClick = onDismiss) {
-                Text("Close")
+            if (preview.isValid) {
+                Button(onClick = onAdd, enabled = !saving) {
+                    if (saving) {
+                        CircularProgressIndicator(
+                            strokeWidth = 2.dp,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    } else {
+                        Icon(Icons.Default.Add, contentDescription = null, Modifier.size(18.dp))
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    Text(if (saving) "Adding…" else "Add to library")
+                }
+            } else {
+                Button(onClick = onDismiss) {
+                    Text("Close")
+                }
+            }
+        },
+        dismissButton = {
+            if (preview.isValid) {
+                TextButton(onClick = onDismiss, enabled = !saving) {
+                    Text("Close")
+                }
+            }
+        }
+    )
+}
+
+@Composable
+private fun SkillReplacementConfirmationDialog(
+    preview: SkillImportPreview,
+    saving: Boolean,
+    onReplace: () -> Unit,
+    onCancel: () -> Unit
+) {
+    val skillName = preview.manifest?.name ?: preview.displayName
+    AlertDialog(
+        onDismissRequest = { if (!saving) onCancel() },
+        title = { Text("Replace '$skillName'?") },
+        text = {
+            Text(
+                "A local skill with this name already exists. Replacing it overwrites the stored SKILL.md source. " +
+                    "Export the current copy first if you may need it later."
+            )
+        },
+        confirmButton = {
+            Button(onClick = onReplace, enabled = !saving) {
+                if (saving) {
+                    CircularProgressIndicator(
+                        strokeWidth = 2.dp,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(Modifier.width(8.dp))
+                }
+                Text(if (saving) "Replacing…" else "Replace")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onCancel, enabled = !saving) {
+                Text("Cancel")
             }
         }
     )
