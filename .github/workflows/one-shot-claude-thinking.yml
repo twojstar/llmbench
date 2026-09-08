@@ -59,10 +59,10 @@ jobs:
                   docs/provider-runtime.md \
                   shared/src/commonMain/kotlin/com/twojstar/llmbench/data/model/ProviderRuntimeCapabilities.kt \
                   shared/src/commonTest/kotlin/com/twojstar/llmbench/data/model/ProviderRuntimeCapabilitiesTest.kt
-          git rm .github/scripts/one-shot-claude-thinking.py \
-                 .github/scripts/one-shot-claude-thinking-postfix.py \
-                 .github/scripts/one-shot-claude-thinking-sourcefix.py \
-                 .github/workflows/one-shot-claude-thinking.yml
+          git rm -f .github/scripts/one-shot-claude-thinking.py \
+                    .github/scripts/one-shot-claude-thinking-postfix.py \
+                    .github/scripts/one-shot-claude-thinking-sourcefix.py \
+                    .github/workflows/one-shot-claude-thinking.yml
           git diff --cached --quiet && exit 1 || true
           git config user.name "GPTomek"
           git config user.email "314538226+gptomek[bot]@users.noreply.github.com"
