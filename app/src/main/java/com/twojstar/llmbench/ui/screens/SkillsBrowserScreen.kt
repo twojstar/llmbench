@@ -30,6 +30,7 @@ import com.twojstar.llmbench.data.repository.SkillsAndDocsRepository
 import com.twojstar.llmbench.ui.theme.*
 import com.twojstar.llmbench.ui.viewmodel.StudioViewModel
 import java.io.IOException
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
 private val SKILL_IMPORT_MIME_TYPES = arrayOf(
@@ -61,15 +62,25 @@ fun SkillsBrowserScreen(
             scope.launch {
                 skillImportLoading = true
                 try {
-                    val opened = MarkdownDocumentFileAccess.import(context, uri)
-                    skillImportPreview = buildSkillImportPreview(
-                        displayName = opened.displayName,
-                        source = opened.document.text
+                    val previewResult = runCatching {
+                        val opened = MarkdownDocumentFileAccess.import(context, uri)
+                        buildSkillImportPreview(
+                            displayName = opened.displayName,
+                            source = opened.document.text,
+                            validateFilename = opened.hasProviderDisplayName
+                        )
+                    }
+                    previewResult.fold(
+                        onSuccess = { skillImportPreview = it },
+                        onFailure = { error ->
+                            when (error) {
+                                is CancellationException -> throw error
+                                is IOException, is SecurityException ->
+                                    viewModel.showSnackbar(skillPreviewReadErrorMessage(error.message))
+                                else -> throw error
+                            }
+                        }
                     )
-                } catch (error: IOException) {
-                    viewModel.showSnackbar(skillPreviewReadErrorMessage(error.message))
-                } catch (error: SecurityException) {
-                    viewModel.showSnackbar(skillPreviewReadErrorMessage(error.message))
                 } finally {
                     skillImportLoading = false
                 }
