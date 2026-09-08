@@ -204,6 +204,7 @@ fun SkillsBrowserScreen(
                     }
                     item {
                         LocalSkillLibrarySection(
+                            store = localSkillStore,
                             searchQuery = searchQuery,
                             refreshToken = localSkillsRefreshToken,
                             onCountChanged = { localSkillCount = it },
