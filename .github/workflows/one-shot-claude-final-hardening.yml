@@ -58,6 +58,10 @@ jobs:
 
           switch_block('metadata_tests', 'replace_section')
           switch_block('stop_test', 'replace_once')
+          old_assert = 'assert app_path.read_text().count("isPartial = isPartial") == 1'
+          new_assert = 'assert app_path.read_text().count("isPartial = isPartial") == 3'
+          assert text.count(old_assert) == 1
+          text = text.replace(old_assert, new_assert, 1)
           path.write_text(text)
           PY
       - name: Apply final Claude hardening
