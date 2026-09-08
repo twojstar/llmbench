@@ -39,7 +39,19 @@ jobs:
           fi
 
       - name: Apply focused patch
-        run: python .github/scripts/one-shot-gemini-replay.py
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('.github/scripts/one-shot-gemini-replay.py')
+          text = path.read_text()
+          payload = '[{"role":"model","parts":[{"text":"gemini answer"}]},{"role":"model","parts":[{"text":"","thoughtSignature":"opaque-signature"}]}]'
+          old = '        val replayState = ' + '"""' + payload + '"""'
+          escaped = payload.replace('"', '\\"')
+          new = '        val replayState = "' + escaped + '"'
+          assert text.count(old) == 1
+          path.write_text(text.replace(old, new))
+          PY
+          python .github/scripts/one-shot-gemini-replay.py
 
       - name: Validate
         run: ./gradlew :app:assembleDebug :app:testDebugUnitTest :app:lintDebug :shared:desktopTest --stacktrace
