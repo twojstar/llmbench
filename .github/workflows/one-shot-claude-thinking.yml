@@ -39,7 +39,9 @@ jobs:
           fi
 
       - name: Apply Claude thinking patch
-        run: python .github/scripts/one-shot-claude-thinking.py
+        run: |
+          python .github/scripts/one-shot-claude-thinking.py
+          python .github/scripts/one-shot-claude-thinking-postfix.py
 
       - name: Validate full gate
         run: ./gradlew :app:assembleDebug :app:testDebugUnitTest :app:lintDebug :shared:desktopTest --stacktrace
@@ -56,7 +58,9 @@ jobs:
                   docs/provider-runtime.md \
                   shared/src/commonMain/kotlin/com/twojstar/llmbench/data/model/ProviderRuntimeCapabilities.kt \
                   shared/src/commonTest/kotlin/com/twojstar/llmbench/data/model/ProviderRuntimeCapabilitiesTest.kt
-          git rm .github/scripts/one-shot-claude-thinking.py .github/workflows/one-shot-claude-thinking.yml
+          git rm .github/scripts/one-shot-claude-thinking.py \
+                 .github/scripts/one-shot-claude-thinking-postfix.py \
+                 .github/workflows/one-shot-claude-thinking.yml
           git diff --cached --quiet && exit 1 || true
           git config user.name "GPTomek"
           git config user.email "314538226+gptomek[bot]@users.noreply.github.com"
