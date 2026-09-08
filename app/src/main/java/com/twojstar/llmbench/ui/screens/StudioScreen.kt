@@ -25,7 +25,9 @@ import com.twojstar.llmbench.data.model.AiProvider
 import com.twojstar.llmbench.data.model.ConversationStateStrategy
 import com.twojstar.llmbench.data.model.NativeChatTransport
 import com.twojstar.llmbench.data.model.ProfileOverlay
+import com.twojstar.llmbench.data.model.ReasoningControlStrategy
 import com.twojstar.llmbench.data.model.SystemInstructionPlacement
+import com.twojstar.llmbench.data.model.reasoningControlStrategy
 import com.twojstar.llmbench.data.model.runtimeCapabilities
 import com.twojstar.llmbench.ui.components.*
 import com.twojstar.llmbench.ui.theme.*
@@ -701,6 +703,11 @@ private fun PromptRoutePreviewCard(uiState: StudioUiState) {
         capabilities.reportsResolvedModel -> "Gateway response metadata when returned"
         else -> "Selected/requested model"
     }
+    val reasoningLabel = when (provider.reasoningControlStrategy()) {
+        ReasoningControlStrategy.PER_PROVIDER -> "Per-provider model capabilities"
+        ReasoningControlStrategy.PROVIDER_DEFAULT -> "Provider default"
+        ReasoningControlStrategy.MODEL_CAPABILITY_METADATA -> "Anthropic Models API capabilities"
+    }
 
     Card(
         shape = RoundedCornerShape(16.dp),
@@ -740,6 +747,7 @@ private fun PromptRoutePreviewCard(uiState: StudioUiState) {
             PromptRouteRow("Transport", capabilities.transport.displayLabel())
             PromptRouteRow("Profile", systemLabel)
             PromptRouteRow("History", stateLabel)
+            PromptRouteRow("Reasoning", reasoningLabel)
             PromptRouteRow("Streaming", if (capabilities.streamsText) "Incremental SSE" else "Buffered response")
             PromptRouteRow("Model label", resolvedModelLabel)
             if (uiState.includeSystemProfileInChat && uiState.renderedInstructions.isNotBlank()) {

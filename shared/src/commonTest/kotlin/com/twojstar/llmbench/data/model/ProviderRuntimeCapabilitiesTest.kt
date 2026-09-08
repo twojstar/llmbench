@@ -58,6 +58,54 @@ class ProviderRuntimeCapabilitiesTest {
     }
 
     @Test
+    fun claudeUsesModelCapabilityMetadataAndOpaqueContentReplay() {
+        assertEquals(
+            ReasoningControlStrategy.MODEL_CAPABILITY_METADATA,
+            AiProvider.CLAUDE.reasoningControlStrategy()
+        )
+        assertEquals(
+            ConversationStateStrategy.BOUNDED_PROVIDER_CONTENT_REPLAY,
+            AiProvider.CLAUDE.runtimeCapabilities().conversationStateStrategy
+        )
+    }
+
+    @Test
+    fun claudeReasoningMetadataParserUsesReportedThinkingAndEffortLevels() {
+        val raw = """
+            {
+              "capabilities": {
+                "thinking": {
+                  "supported": true,
+                  "types": {
+                    "adaptive": {"supported": true},
+                    "enabled": {"supported": false}
+                  }
+                },
+                "effort": {
+                  "supported": true,
+                  "high": {"supported": true}
+                }
+              }
+            }
+        """.trimIndent()
+
+        assertEquals(
+            ClaudeReasoningCapabilities(
+                supportsAdaptive = true,
+                supportsHighEffort = true
+            ),
+            parseClaudeReasoningCapabilities(raw)
+        )
+    }
+
+    @Test
+    fun claudeLegacyThinkingBudgetIsBoundedByOutputLimit() {
+        assertEquals(4096, resolveClaudeThinkingBudget(64_000))
+        assertEquals(1024, resolveClaudeThinkingBudget(2048))
+        assertEquals(null, resolveClaudeThinkingBudget(1024))
+    }
+
+    @Test
     fun compareModeIsFanOutRatherThanAProviderTransport() {
         val capabilities = AiProvider.ALL.runtimeCapabilities()
 

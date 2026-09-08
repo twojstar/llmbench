@@ -16,7 +16,7 @@ Portable provider/model/profile data lives in `shared`. Android currently owns H
 | --- | --- | --- | --- | --- |
 | Gemini | `generateContent` REST | `systemInstruction` | SSE | bounded provider content replay with opaque thought signatures |
 | OpenAI | Responses API | `instructions` | Responses SSE | bounded provider output-item replay with encrypted reasoning, `store=false` |
-| Claude | Messages API | top-level `system` | SSE | bounded visible text replay |
+| Claude | Messages API | top-level `system` | SSE | bounded provider content replay with opaque thinking blocks |
 | DeepSeek | OpenAI-compatible chat completions | `system` message | SSE | bounded visible text replay |
 | Kimi | OpenAI-compatible chat completions | `system` message | SSE | bounded visible text replay |
 | OpenRouter | OpenAI-compatible chat completions | `system` message | SSE | bounded visible text replay |
@@ -67,9 +67,13 @@ A stateful alternative remains `previous_response_id`. If stateful Responses are
 
 ### Claude
 
-The current Claude path does not enable or retain thinking blocks. If adaptive/extended thinking controls are added, preserve provider-returned `thinking` and `redacted_thinking` blocks exactly where the API requires them, especially around tool-use turns. Do not flatten them into visible text history.
+Claude reasoning is model-aware through the Anthropic Models API. LlmBench reads `capabilities.thinking.types` and effort support from the same short model-metadata lookup used for `max_tokens`: adaptive-capable models receive `thinking: {type: "adaptive"}` and high effort only when reported, while legacy extended-thinking models receive a conservative budget only when `budget_tokens < max_tokens` can be satisfied. If metadata is unavailable or incomplete, generation uses the 2048 compatibility output limit and omits explicit thinking/effort controls rather than guessing capability support from the model name. That conservative outage entry is cached only briefly before metadata is retried.
 
-Thinking configuration is model-family-specific. Prefer capability metadata over model-name conditionals scattered through UI code.
+Models API aliases are resolved to the returned concrete `id`. Successful alias metadata is reused briefly, while requests and replay scoping are pinned to that concrete model so an alias retarget cannot mix opaque thinking state across models. Buffered and streaming Messages responses can still report the actual serving model; a mismatch invalidates the linked requested/concrete cache entries.
+
+When thinking is active, buffered responses retain the complete ordered assistant `content` array as ephemeral provider replay state. Streaming responses reconstruct the provider blocks from `content_block_start` plus `thinking_delta`, `signature_delta`, and `text_delta` events, delaying strict thinking-block validation until the signature delta has arrived. `thinking`, `signature`, and `redacted_thinking` data are never rendered, exported, logged, or rewritten; they are replayed only for the exact model that produced them. Responses stopped by `max_tokens` are marked partial and excluded from later history entirely. A model switch or malformed state falls back to visible assistant text.
+
+The current native path does not expose client tools, so streaming replay only mutates the block fields used by text/thinking/signature deltas. Provider-returned block starts, including opaque redacted-thinking blocks, remain otherwise untouched.
 
 ### Gateways
 
@@ -98,9 +102,9 @@ OpenRouter and other OpenAI-compatible gateways may return the model actually us
 - [x] Add a provider capability model for transport, instruction placement, response metadata and state strategy; extend it as reasoning controls land.
 - [x] Preserve Gemini thought signatures in stateless `generateContent` by replaying full model `Content` chunks unchanged.
 - [x] Preserve OpenAI stateless reasoning items with `reasoning.encrypted_content` while keeping `store=false`.
-- [ ] Add Claude thinking/effort only through model-aware capabilities; preserve opaque thinking blocks when enabled.
+- [x] Add Claude thinking/effort only through model-aware capabilities; preserve opaque thinking blocks when enabled.
 - [x] Record and display the actual routed model returned by OpenRouter when available.
-- [x] Resolve Claude `max_tokens` from the Anthropic Models API per model with a short independent lookup budget; cache either the reported value or the old 2048 compatibility fallback per model and credential fingerprint so metadata outages do not repeatedly delay generation and replacing a bad key can refresh metadata.
+- [x] Resolve Claude runtime metadata from the Anthropic Models API with a short independent lookup budget; cache verified model data, cache alias mappings briefly, and use a short-lived 2048/no-reasoning outage entry so repeated failures do not block every generation while recovery remains automatic.
 - [x] Add a provider-aware Prompt Studio preview showing effective instruction placement, history strategy and transport metadata without exposing API keys or hidden reasoning state.
 - [ ] Parse provider usage/token metadata so comparisons can include latency and token/cost information when the API returns it.
 - [ ] Keep transport/SSE/history tests JVM-testable; device testing should be required only for Android/WebView behavior.
