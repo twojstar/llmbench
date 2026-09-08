@@ -156,6 +156,16 @@ fun ChatScreen(
         "Summarize the key design principles of .ai profiles"
     )
 
+    val latestAcceptedUserMessage = uiState.chatMessages.lastOrNull { it.sender == CHAT_ROLE_USER }
+    LaunchedEffect(latestAcceptedUserMessage?.id) {
+        if (
+            latestAcceptedUserMessage != null &&
+            promptInput.trim() == latestAcceptedUserMessage.text
+        ) {
+            promptInput = ""
+        }
+    }
+
     // Auto-scroll when new messages are appended
     LaunchedEffect(uiState.chatMessages.size, uiState.isChatGenerating) {
         if (uiState.chatMessages.isNotEmpty()) {
@@ -227,7 +237,6 @@ fun ChatScreen(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
-                            // System profile attachment badge
                             IconButton(
                                 onClick = {
                                     viewModel.toggleIncludeSystemProfile(!uiState.includeSystemProfileInChat)
@@ -241,7 +250,6 @@ fun ChatScreen(
                                 )
                             }
 
-                            // API Key configuration dialog trigger
                             IconButton(
                                 onClick = { viewModel.setShowApiKeyDialog(true) },
                                 modifier = Modifier.testTag("btn_api_keys_settings")
@@ -357,7 +365,6 @@ fun ChatScreen(
 
                     Spacer(Modifier.height(8.dp))
 
-                    // Provider selector pills
                     LazyRow(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         modifier = Modifier
@@ -404,7 +411,6 @@ fun ChatScreen(
                         }
                     }
 
-                    // Model selection dropdown for single provider
                     if (uiState.selectedChatProvider != AiProvider.ALL) {
                         val selectedProvider = uiState.selectedChatProvider
                         val modelOptions = uiState.gatewayModelOptions[selectedProvider]
@@ -488,7 +494,6 @@ fun ChatScreen(
                         .fillMaxWidth()
                         .padding(horizontal = 12.dp, vertical = 8.dp)
                 ) {
-                    // Quick sample prompt chips
                     LazyRow(
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                         modifier = Modifier
@@ -516,7 +521,6 @@ fun ChatScreen(
                         }
                     }
 
-                    // Input row
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -555,10 +559,7 @@ fun ChatScreen(
                                 if (uiState.isChatGenerating) {
                                     viewModel.cancelChatGeneration()
                                 } else if (promptInput.isNotBlank()) {
-                                    val textToSend = promptInput
-                                    if (viewModel.sendChatMessage(textToSend)) {
-                                        promptInput = ""
-                                    }
+                                    viewModel.sendChatMessage(promptInput)
                                 }
                             },
                             shape = CircleShape,
@@ -627,7 +628,6 @@ fun ChatScreen(
                 )
             }
 
-            // Typing / generating indicators
             if (uiState.isChatGenerating) {
                 item(key = "generating_indicator") {
                     GeneratingIndicator(activeProviders = uiState.activeGeneratingProviders)
@@ -685,7 +685,6 @@ fun ChatScreen(
         )
     }
 
-    // API Keys Dialog
     if (uiState.showApiKeyDialog) {
         ApiKeySettingsDialog(
             currentKeys = uiState.apiKeyConfig,
@@ -715,7 +714,6 @@ fun ChatMessageItem(
             .testTag(if (isUser) "user_message_bubble" else "assistant_message_bubble_${provider.id}"),
         horizontalAlignment = if (isUser) Alignment.End else Alignment.Start
     ) {
-        // Bubble Header
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -784,7 +782,6 @@ fun ChatMessageItem(
             }
         }
 
-        // Message Content Box
         Card(
             shape = RoundedCornerShape(
                 topStart = 16.dp,
@@ -833,7 +830,6 @@ fun ChatMessageItem(
                     }
                 }
 
-                // Active style profile or system prompt notes badge
                 if (!isUser && message.activeProfileNotes.isNotEmpty()) {
                     Spacer(Modifier.height(8.dp))
                     Column(
@@ -854,7 +850,6 @@ fun ChatMessageItem(
                     }
                 }
 
-                // Action row for assistant responses
                 if (!isUser) {
                     Spacer(Modifier.height(8.dp))
                     Row(
@@ -1119,14 +1114,14 @@ fun ApiKeySettingsDialog(
 
 fun getProviderColor(provider: AiProvider): Color {
     return when (provider) {
-        AiProvider.GEMINI -> Color(0xFF0EA5E9) // Vibrant Cyan/Sky
-        AiProvider.CHATGPT -> Color(0xFF10B981) // Emerald Green
-        AiProvider.CLAUDE -> Color(0xFFF59E0B) // Amber/Terracotta
-        AiProvider.DEEPSEEK -> Color(0xFF2563EB) // Deep Blue
-        AiProvider.KIMI -> Color(0xFF8B5CF6) // Violet / Electric Blue
-        AiProvider.OPENROUTER -> Color(0xFF6366F1) // Indigo gateway
-        AiProvider.AIHUBMIX -> Color(0xFF14B8A6) // Teal gateway
-        AiProvider.ALL -> Color(0xFF8B5CF6) // Purple Multi
+        AiProvider.GEMINI -> Color(0xFF0EA5E9)
+        AiProvider.CHATGPT -> Color(0xFF10B981)
+        AiProvider.CLAUDE -> Color(0xFFF59E0B)
+        AiProvider.DEEPSEEK -> Color(0xFF2563EB)
+        AiProvider.KIMI -> Color(0xFF8B5CF6)
+        AiProvider.OPENROUTER -> Color(0xFF6366F1)
+        AiProvider.AIHUBMIX -> Color(0xFF14B8A6)
+        AiProvider.ALL -> Color(0xFF8B5CF6)
     }
 }
 

@@ -26,6 +26,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -47,14 +48,23 @@ import com.twojstar.llmbench.data.document.TextDocumentCodec
 import com.twojstar.llmbench.data.skills.LocalSkillLibraryStore
 import com.twojstar.llmbench.data.skills.LocalSkillSummary
 import java.io.IOException
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
+
+private const val LOCAL_SKILL_MISSING_MESSAGE = "Local skill is no longer available."
 
 private sealed interface LocalSkillExportResult {
     data object Missing : LocalSkillExportResult
     data object Exported : LocalSkillExportResult
     data class Failed(val message: String) : LocalSkillExportResult
+}
+
+private sealed interface LocalSkillActivationResult {
+    data object Missing : LocalSkillActivationResult
+    data class Updated(val skill: LocalSkillSummary) : LocalSkillActivationResult
+    data class Failed(val message: String) : LocalSkillActivationResult
 }
 
 private suspend fun exportLocalSkill(
@@ -87,6 +97,120 @@ private suspend fun exportLocalSkill(
     }
 }
 
+private suspend fun updateLocalSkillActivation(
+    store: LocalSkillLibraryStore,
+    skillName: String,
+    enabled: Boolean
+): LocalSkillActivationResult = try {
+    val updated = store.setEnabled(skillName, enabled)
+        ?: return LocalSkillActivationResult.Missing
+    LocalSkillActivationResult.Updated(updated)
+} catch (error: IOException) {
+    LocalSkillActivationResult.Failed(error.message ?: "Could not change local skill activation.")
+}
+
+private fun CoroutineScope.launchLocalSkillActivation(
+    store: LocalSkillLibraryStore,
+    currentSkills: List<LocalSkillSummary>,
+    skillName: String,
+    enabled: Boolean,
+    onBusySkillChanged: (String?) -> Unit,
+    onSkillsChanged: (List<LocalSkillSummary>) -> Unit,
+    onMessage: (String) -> Unit
+) = launch {
+    onBusySkillChanged(skillName)
+    try {
+        when (val result = updateLocalSkillActivation(store, skillName, enabled)) {
+            LocalSkillActivationResult.Missing -> {
+                onSkillsChanged(store.load())
+                onMessage(LOCAL_SKILL_MISSING_MESSAGE)
+            }
+            is LocalSkillActivationResult.Updated -> {
+                onSkillsChanged(
+                    currentSkills.map { current ->
+                        if (current.name == result.skill.name) result.skill else current
+                    }
+                )
+                onMessage(
+                    if (enabled) {
+                        "Enabled '$skillName' for native/API chats."
+                    } else {
+                        "Disabled '$skillName'."
+                    }
+                )
+            }
+            is LocalSkillActivationResult.Failed -> onMessage(result.message)
+        }
+    } finally {
+        onBusySkillChanged(null)
+    }
+}
+
+private fun CoroutineScope.launchLocalSkillView(
+    store: LocalSkillLibraryStore,
+    skillName: String,
+    onBusySkillChanged: (String?) -> Unit,
+    onSkillsChanged: (List<LocalSkillSummary>) -> Unit,
+    onViewSource: (String, String) -> Unit,
+    onMessage: (String) -> Unit
+) = launch {
+    onBusySkillChanged(skillName)
+    try {
+        val document = store.read(skillName)
+        if (document == null) {
+            onSkillsChanged(store.load())
+            onMessage(LOCAL_SKILL_MISSING_MESSAGE)
+        } else {
+            onViewSource(skillName, boundedSkillSourceForDisplay(document.source))
+        }
+    } finally {
+        onBusySkillChanged(null)
+    }
+}
+
+private fun CoroutineScope.launchLocalSkillExport(
+    context: Context,
+    uri: Uri,
+    store: LocalSkillLibraryStore,
+    skillName: String,
+    onBusySkillChanged: (String?) -> Unit,
+    onSkillsChanged: (List<LocalSkillSummary>) -> Unit,
+    onMessage: (String) -> Unit
+) = launch {
+    onBusySkillChanged(skillName)
+    try {
+        when (val result = exportLocalSkill(context, uri, skillName, store)) {
+            LocalSkillExportResult.Missing -> {
+                onSkillsChanged(store.load())
+                onMessage(LOCAL_SKILL_MISSING_MESSAGE)
+            }
+            LocalSkillExportResult.Exported -> onMessage("Exported '$skillName' as SKILL.md.")
+            is LocalSkillExportResult.Failed -> onMessage(result.message)
+        }
+    } finally {
+        onBusySkillChanged(null)
+    }
+}
+
+private fun CoroutineScope.launchLocalSkillRemoval(
+    store: LocalSkillLibraryStore,
+    skillName: String,
+    onBusySkillChanged: (String?) -> Unit,
+    onSkillsChanged: (List<LocalSkillSummary>) -> Unit,
+    onMessage: (String) -> Unit
+) = launch {
+    onBusySkillChanged(skillName)
+    try {
+        store.remove(skillName)
+        onSkillsChanged(store.load())
+        onMessage("Removed '$skillName' from local skills.")
+    } catch (error: IOException) {
+        onMessage(error.message ?: "Could not remove local skill.")
+    } finally {
+        onBusySkillChanged(null)
+    }
+}
+
 @Composable
 internal fun LocalSkillLibrarySection(
     store: LocalSkillLibraryStore,
@@ -100,12 +224,25 @@ internal fun LocalSkillLibrarySection(
     val scope = rememberCoroutineScope()
     var skills by remember { mutableStateOf<List<LocalSkillSummary>>(emptyList()) }
     var busySkill by remember { mutableStateOf<String?>(null) }
+    var pendingEnableSkillName by rememberSaveable { mutableStateOf<String?>(null) }
     var pendingExportSkill by rememberSaveable { mutableStateOf<String?>(null) }
     var pendingRemoveSkill by rememberSaveable { mutableStateOf<String?>(null) }
 
-    suspend fun reloadSkills() {
-        skills = store.load()
-        onCountChanged(skills.size)
+    fun applySkills(updated: List<LocalSkillSummary>) {
+        skills = updated
+        onCountChanged(updated.size)
+    }
+
+    fun requestActivation(skillName: String, enabled: Boolean) {
+        scope.launchLocalSkillActivation(
+            store = store,
+            currentSkills = skills,
+            skillName = skillName,
+            enabled = enabled,
+            onBusySkillChanged = { busySkill = it },
+            onSkillsChanged = ::applySkills,
+            onMessage = onMessage
+        )
     }
 
     val exportLauncher = rememberLauncherForActivityResult(
@@ -114,75 +251,64 @@ internal fun LocalSkillLibrarySection(
         val skillName = pendingExportSkill
         pendingExportSkill = null
         if (uri != null && skillName != null) {
-            scope.launch {
-                busySkill = skillName
-                try {
-                    when (val result = exportLocalSkill(context, uri, skillName, store)) {
-                        LocalSkillExportResult.Missing -> {
-                            reloadSkills()
-                            onMessage("Local skill is no longer available.")
-                        }
-                        LocalSkillExportResult.Exported -> onMessage("Exported '$skillName' as SKILL.md.")
-                        is LocalSkillExportResult.Failed -> onMessage(result.message)
-                    }
-                } finally {
-                    busySkill = null
-                }
-            }
+            scope.launchLocalSkillExport(
+                context = context,
+                uri = uri,
+                store = store,
+                skillName = skillName,
+                onBusySkillChanged = { busySkill = it },
+                onSkillsChanged = ::applySkills,
+                onMessage = onMessage
+            )
         }
     }
 
     LaunchedEffect(store, refreshToken) {
-        reloadSkills()
+        applySkills(store.load())
     }
 
-    val filtered = skills.filter { skill ->
-        skill.name.contains(searchQuery, ignoreCase = true) ||
-            skill.description.contains(searchQuery, ignoreCase = true)
-    }
+    LocalSkillLibraryContent(
+        skills = skills,
+        searchQuery = searchQuery,
+        actionsEnabled = busySkill == null,
+        onActivationChanged = { skill, enabled ->
+            if (enabled) pendingEnableSkillName = skill.name
+            else requestActivation(skill.name, enabled = false)
+        },
+        onView = { skill ->
+            scope.launchLocalSkillView(
+                store = store,
+                skillName = skill.name,
+                onBusySkillChanged = { busySkill = it },
+                onSkillsChanged = ::applySkills,
+                onViewSource = onViewSource,
+                onMessage = onMessage
+            )
+        },
+        onExport = { skill ->
+            pendingExportSkill = skill.name
+            try {
+                exportLauncher.launch("SKILL.md")
+            } catch (_: ActivityNotFoundException) {
+                pendingExportSkill = null
+                onMessage("No document picker is available for export.")
+            }
+        },
+        onRemove = { skill -> pendingRemoveSkill = skill.name }
+    )
 
-    Column(
-        verticalArrangement = Arrangement.spacedBy(10.dp),
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        LocalSkillLibraryHeader(skills.size)
-        LocalSkillLibraryEmptyMessage(
-            allSkillsEmpty = skills.isEmpty(),
-            filteredSkillsEmpty = filtered.isEmpty()
-        )
-        filtered.forEach { skill ->
-            LocalSkillCard(
-                skill = skill,
-                enabled = busySkill == null,
-                onView = {
-                    scope.launch {
-                        busySkill = skill.name
-                        try {
-                            val document = store.read(skill.name)
-                            if (document == null) {
-                                reloadSkills()
-                                onMessage("Local skill is no longer available.")
-                            } else {
-                                onViewSource(skill.name, boundedSkillSourceForDisplay(document.source))
-                            }
-                        } finally {
-                            busySkill = null
-                        }
-                    }
-                },
-                onExport = {
-                    pendingExportSkill = skill.name
-                    try {
-                        exportLauncher.launch("SKILL.md")
-                    } catch (_: ActivityNotFoundException) {
-                        pendingExportSkill = null
-                        onMessage("No document picker is available for export.")
-                    }
-                },
-                onRemove = { pendingRemoveSkill = skill.name }
+    pendingEnableSkillName
+        ?.let { name -> skills.firstOrNull { it.name == name } }
+        ?.let { skill ->
+            ConfirmEnableLocalSkillDialog(
+                skillName = skill.name,
+                onDismiss = { pendingEnableSkillName = null },
+                onConfirm = {
+                    pendingEnableSkillName = null
+                    requestActivation(skill.name, enabled = true)
+                }
             )
         }
-    }
 
     pendingRemoveSkill?.let { skillName ->
         ConfirmRemoveLocalSkillDialog(
@@ -190,20 +316,56 @@ internal fun LocalSkillLibrarySection(
             onDismiss = { pendingRemoveSkill = null },
             onConfirm = {
                 pendingRemoveSkill = null
-                scope.launch {
-                    busySkill = skillName
-                    try {
-                        store.remove(skillName)
-                        reloadSkills()
-                        onMessage("Removed '$skillName' from local skills.")
-                    } catch (error: IOException) {
-                        onMessage(error.message ?: "Could not remove local skill.")
-                    } finally {
-                        busySkill = null
-                    }
-                }
+                scope.launchLocalSkillRemoval(
+                    store = store,
+                    skillName = skillName,
+                    onBusySkillChanged = { busySkill = it },
+                    onSkillsChanged = ::applySkills,
+                    onMessage = onMessage
+                )
             }
         )
+    }
+}
+
+@Composable
+private fun LocalSkillLibraryContent(
+    skills: List<LocalSkillSummary>,
+    searchQuery: String,
+    actionsEnabled: Boolean,
+    onActivationChanged: (LocalSkillSummary, Boolean) -> Unit,
+    onView: (LocalSkillSummary) -> Unit,
+    onExport: (LocalSkillSummary) -> Unit,
+    onRemove: (LocalSkillSummary) -> Unit
+) {
+    val filtered = skills.filter { skill ->
+        skill.name.contains(searchQuery, ignoreCase = true) ||
+            skill.description.contains(searchQuery, ignoreCase = true)
+    }
+    Column(
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        LocalSkillLibraryHeader(skills.size)
+        Text(
+            text = "Enabling a skill adds only its Markdown instructions to native/API system prompts. Declared scripts and tools remain inert.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        LocalSkillLibraryEmptyMessage(
+            allSkillsEmpty = skills.isEmpty(),
+            filteredSkillsEmpty = filtered.isEmpty()
+        )
+        filtered.forEach { skill ->
+            LocalSkillCard(
+                skill = skill,
+                actionsEnabled = actionsEnabled,
+                onActivationChanged = { enabled -> onActivationChanged(skill, enabled) },
+                onView = { onView(skill) },
+                onExport = { onExport(skill) },
+                onRemove = { onRemove(skill) }
+            )
+        }
     }
 }
 
@@ -242,7 +404,8 @@ private fun LocalSkillLibraryEmptyMessage(
 @Composable
 private fun LocalSkillCard(
     skill: LocalSkillSummary,
-    enabled: Boolean,
+    actionsEnabled: Boolean,
+    onActivationChanged: (Boolean) -> Unit,
     onView: () -> Unit,
     onExport: () -> Unit,
     onRemove: () -> Unit
@@ -269,15 +432,39 @@ private fun LocalSkillCard(
             Spacer(Modifier.height(8.dp))
             Row(
                 modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Use in native/API chats",
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        text = if (skill.enabled) "Enabled" else "Disabled",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Switch(
+                    checked = skill.enabled,
+                    enabled = actionsEnabled,
+                    onCheckedChange = onActivationChanged
+                )
+            }
+            Spacer(Modifier.height(8.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                OutlinedButton(enabled = enabled, onClick = onView) {
+                OutlinedButton(enabled = actionsEnabled, onClick = onView) {
                     Icon(Icons.Default.Visibility, contentDescription = null)
                     Spacer(Modifier.width(6.dp))
                     Text("View")
                 }
-                OutlinedButton(enabled = enabled, onClick = onExport) {
+                OutlinedButton(enabled = actionsEnabled, onClick = onExport) {
                     Icon(Icons.Default.Download, contentDescription = null)
                     Spacer(Modifier.width(6.dp))
                     Text("Export")
@@ -287,7 +474,7 @@ private fun LocalSkillCard(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.End
             ) {
-                TextButton(enabled = enabled, onClick = onRemove) {
+                TextButton(enabled = actionsEnabled, onClick = onRemove) {
                     Icon(Icons.Default.DeleteOutline, contentDescription = null)
                     Spacer(Modifier.width(6.dp))
                     Text("Remove")
@@ -295,6 +482,35 @@ private fun LocalSkillCard(
             }
         }
     }
+}
+
+@Composable
+private fun ConfirmEnableLocalSkillDialog(
+    skillName: String,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Enable '$skillName'?") },
+        text = {
+            Text(
+                "Its Markdown instructions can influence model responses in native/API chats. " +
+                    "LlmBench will not execute scripts or declared tools. Enable only skills you trust, " +
+                    "and keep secrets outside SKILL.md."
+            )
+        },
+        confirmButton = {
+            Button(onClick = onConfirm) {
+                Text("Enable")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
 }
 
 @Composable

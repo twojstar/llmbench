@@ -13,6 +13,8 @@ import com.twojstar.llmbench.data.preferences.StudioStateStore
 import com.twojstar.llmbench.data.preferences.StudioStateWriter
 import com.twojstar.llmbench.data.preferences.WebChatPreferencesStore
 import com.twojstar.llmbench.data.security.ApiKeyStore
+import com.twojstar.llmbench.data.skills.LocalSkillLibraryStore
+import com.twojstar.llmbench.data.skills.composeLocalSkillSystemInstruction
 import com.twojstar.llmbench.share.IncomingSharePayload
 import com.twojstar.llmbench.share.PendingWebShare
 import com.twojstar.llmbench.share.claimText
@@ -25,6 +27,8 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import java.io.File
+import java.io.IOException
 import java.util.concurrent.atomic.AtomicLong
 
 data class ChatMessage(
@@ -87,6 +91,9 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
     private val apiKeyStore = ApiKeyStore(application.applicationContext)
     private val studioStateStore = StudioStateStore(application.applicationContext)
     private val webChatPreferencesStore = WebChatPreferencesStore(application.applicationContext)
+    private val localSkillStore = LocalSkillLibraryStore(
+        File(application.noBackupFilesDir, LocalSkillLibraryStore.LIBRARY_DIRECTORY_NAME)
+    )
     private var studioStateWriter: StudioStateWriter? = null
 
     private val _uiState = MutableStateFlow(
@@ -501,34 +508,54 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
             return false
         }
 
-        val userMessage = ModelChatMessage(
-            id = "user_${System.currentTimeMillis()}",
-            sender = CHAT_ROLE_USER,
-            text = trimmed,
-            timestamp = System.currentTimeMillis()
-        )
-        val currentMessages = state.chatMessages + userMessage
         val generationId = activeChatGenerationId.incrementAndGet()
-
         _uiState.update {
             it.copy(
-                chatMessages = currentMessages,
                 isChatGenerating = true,
-                activeGeneratingProviders = providersToRun.toSet()
+                activeGeneratingProviders = emptySet()
             )
         }
 
         chatGenerationJob = viewModelScope.launch {
             try {
-                val systemPrompt = if (_uiState.value.includeSystemProfileInChat) {
+                val profileSystemPrompt = if (_uiState.value.includeSystemProfileInChat) {
                     _uiState.value.renderedInstructions.ifBlank { null }
                 } else {
                     null
                 }
+                val enabledLocalSkills = try {
+                    localSkillStore.loadEnabledManifests()
+                } catch (error: IOException) {
+                    showSnackbar(
+                        (error.message ?: "Could not prepare enabled local skills.") +
+                            " No provider request was sent."
+                    )
+                    return@launch
+                }
+                val systemPrompt = composeLocalSkillSystemInstruction(
+                    profileSystemPrompt,
+                    enabledLocalSkills
+                )
                 val activeProfile = if (_uiState.value.includeSystemProfileInChat) {
                     _uiState.value.mergedProfile
                 } else {
                     null
+                }
+
+                currentCoroutineContext().ensureActive()
+                if (generationId != activeChatGenerationId.get()) return@launch
+                val userMessage = ModelChatMessage(
+                    id = "user_${System.currentTimeMillis()}",
+                    sender = CHAT_ROLE_USER,
+                    text = trimmed,
+                    timestamp = System.currentTimeMillis()
+                )
+                val currentMessages = _uiState.value.chatMessages + userMessage
+                _uiState.update {
+                    it.copy(
+                        chatMessages = currentMessages,
+                        activeGeneratingProviders = providersToRun.toSet()
+                    )
                 }
 
                 suspend fun runProvider(provider: AiProvider, model: String, allowSimulationFallback: Boolean) {
