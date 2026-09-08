@@ -1,5 +1,8 @@
 package com.twojstar.llmbench.ui.screens
 
+import android.content.ActivityNotFoundException
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -30,8 +33,12 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.twojstar.llmbench.data.document.MarkdownDocumentFileAccess
+import com.twojstar.llmbench.data.document.TextDocument
+import com.twojstar.llmbench.data.document.TextDocumentCodec
 import com.twojstar.llmbench.data.skills.LocalSkillLibraryStore
 import com.twojstar.llmbench.data.skills.LocalSkillSummary
 import java.io.IOException
@@ -44,12 +51,51 @@ internal fun LocalSkillLibrarySection(
     refreshToken: Int,
     onCountChanged: (Int) -> Unit,
     onViewSource: (String, String) -> Unit,
-    onExportSource: (String) -> Unit,
     onMessage: (String) -> Unit
 ) {
+    val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var skills by remember { mutableStateOf<List<LocalSkillSummary>>(emptyList()) }
     var busySkill by remember { mutableStateOf<String?>(null) }
+    var pendingExportSkill by remember { mutableStateOf<String?>(null) }
+
+    val exportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("text/markdown")
+    ) { uri ->
+        val skillName = pendingExportSkill
+        pendingExportSkill = null
+        if (uri != null && skillName != null) {
+            scope.launch {
+                busySkill = skillName
+                try {
+                    val stored = store.read(skillName)
+                    if (stored == null) {
+                        skills = store.load()
+                        onCountChanged(skills.size)
+                        onMessage("Local skill is no longer available.")
+                    } else {
+                        val source = stored.source
+                        MarkdownDocumentFileAccess.export(
+                            context = context,
+                            uri = uri,
+                            document = TextDocument(
+                                text = source,
+                                hadUtf8Bom = false,
+                                lineEndings = TextDocumentCodec.detectLineEndings(source)
+                            )
+                        )
+                        onMessage("Exported '$skillName' as SKILL.md.")
+                    }
+                } catch (error: IOException) {
+                    onMessage(error.message ?: "Could not export local skill.")
+                } catch (_: SecurityException) {
+                    onMessage("The selected export destination is no longer accessible.")
+                } finally {
+                    busySkill = null
+                }
+            }
+        }
+    }
 
     LaunchedEffect(store, refreshToken) {
         skills = store.load()
@@ -146,7 +192,15 @@ internal fun LocalSkillLibrarySection(
                         }
                         OutlinedButton(
                             enabled = busySkill == null,
-                            onClick = { onExportSource(skill.name) }
+                            onClick = {
+                                pendingExportSkill = skill.name
+                                try {
+                                    exportLauncher.launch("SKILL.md")
+                                } catch (_: ActivityNotFoundException) {
+                                    pendingExportSkill = null
+                                    onMessage("No document picker is available for export.")
+                                }
+                            }
                         ) {
                             Icon(Icons.Default.Download, contentDescription = null)
                             Spacer(Modifier.width(6.dp))
