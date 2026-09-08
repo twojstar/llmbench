@@ -26,10 +26,10 @@ app_path.write_text(app)
 
 test_path = Path("app/src/test/java/com/twojstar/llmbench/data/engine/AiChatServiceTest.kt")
 test = test_path.read_text()
-old = '        assertEquals(concrete, service.parseClaudeModelId("""{\\"model\\":\\"$concrete\\"}"""))\n'
+old = '        assertEquals(concrete, service.parseClaudeModelId("""{"model":"$concrete"}"""))\n'
 new = (
-    '        assertEquals(concrete, service.parseClaudeModelId("""{\\"id\\":\\"$concrete\\"}"""))\n'
-    '        assertEquals(null, service.parseClaudeModelId("""{\\"model\\":\\"$concrete\\"}"""))\n'
+    '        assertEquals(concrete, service.parseClaudeModelId("""{"id":"$concrete"}"""))\n'
+    '        assertEquals(null, service.parseClaudeModelId("""{"model":"$concrete"}"""))\n'
 )
 test = replace_once(test, old, new, "Models API id regression")
 test_path.write_text(test)
