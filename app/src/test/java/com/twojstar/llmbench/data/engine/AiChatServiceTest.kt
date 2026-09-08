@@ -132,7 +132,8 @@ class AiChatServiceTest {
 
         assertEquals(2048, service.rememberClaudeMaxTokens(alias, apiKey, null))
         assertEquals(TEST_CLAUDE_MAX_TOKENS, service.rememberClaudeMaxTokens(concrete, apiKey, null))
-        assertEquals(concrete, service.parseClaudeModelId("""{"model":"$concrete"}"""))
+        assertEquals(concrete, service.parseClaudeModelId("""{"id":"$concrete"}"""))
+        assertEquals(null, service.parseClaudeModelId("""{"model":"$concrete"}"""))
     }
 
     @Test

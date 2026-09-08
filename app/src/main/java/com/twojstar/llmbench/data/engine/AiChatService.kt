@@ -43,6 +43,7 @@ private const val JSON_CONTENT_KEY = "content"
 private const val JSON_PARTS_KEY = "parts"
 private const val JSON_TEXT_KEY = "text"
 private const val JSON_MODEL_KEY = "model"
+private const val JSON_MODEL_ID_KEY = "id"
 private const val JSON_PRICING_KEY = "pricing"
 private const val JSON_INPUT_KEY = "input"
 private const val JSON_OUTPUT_KEY = "output"
@@ -655,7 +656,7 @@ class AiChatService {
     }
 
     internal fun parseClaudeModelId(rawJson: String): String? = runCatching {
-        json.parseToJsonElement(rawJson).jsonObject[JSON_MODEL_KEY]
+        json.parseToJsonElement(rawJson).jsonObject[JSON_MODEL_ID_KEY]
             ?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
     }.getOrNull()
 
