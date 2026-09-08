@@ -50,6 +50,7 @@ object AgentSkillManifestParser {
     private const val MAX_DESCRIPTION_LENGTH = 1_024
     private const val MAX_COMPATIBILITY_LENGTH = 500
 
+    private val unicodeNameCharacters = Regex("^[\\p{L}\\p{N}-]+$")
     private val knownFields = setOf(
         FIELD_NAME,
         FIELD_DESCRIPTION,
@@ -155,7 +156,7 @@ object AgentSkillManifestParser {
                 FIELD_NAME,
                 "$FIELD_NAME is required"
             )
-            canonicalName.length > MAX_NAME_LENGTH -> issues += AgentSkillValidationIssue(
+            canonicalName.codePointCount() > MAX_NAME_LENGTH -> issues += AgentSkillValidationIssue(
                 FIELD_NAME,
                 "$FIELD_NAME must be at most $MAX_NAME_LENGTH characters"
             )
@@ -172,7 +173,7 @@ object AgentSkillManifestParser {
                 FIELD_NAME,
                 "$FIELD_NAME must not contain consecutive hyphens"
             )
-            !canonicalName.all { character -> character.isLetterOrDigit() || character == '-' } ->
+            !unicodeNameCharacters.matches(canonicalName) ->
                 issues += AgentSkillValidationIssue(
                     FIELD_NAME,
                     "$FIELD_NAME may contain only Unicode letters, digits and hyphens"
@@ -199,10 +200,11 @@ object AgentSkillManifestParser {
                 FIELD_DESCRIPTION,
                 "$FIELD_DESCRIPTION is required"
             )
-            description.length > MAX_DESCRIPTION_LENGTH -> issues += AgentSkillValidationIssue(
-                FIELD_DESCRIPTION,
-                "$FIELD_DESCRIPTION must be at most $MAX_DESCRIPTION_LENGTH characters"
-            )
+            description.codePointCount() > MAX_DESCRIPTION_LENGTH ->
+                issues += AgentSkillValidationIssue(
+                    FIELD_DESCRIPTION,
+                    "$FIELD_DESCRIPTION must be at most $MAX_DESCRIPTION_LENGTH characters"
+                )
         }
     }
 
@@ -216,7 +218,7 @@ object AgentSkillManifestParser {
                 FIELD_COMPATIBILITY,
                 "$FIELD_COMPATIBILITY must not be blank"
             )
-            compatibility.length > MAX_COMPATIBILITY_LENGTH ->
+            compatibility.codePointCount() > MAX_COMPATIBILITY_LENGTH ->
                 issues += AgentSkillValidationIssue(
                     FIELD_COMPATIBILITY,
                     "$FIELD_COMPATIBILITY must be at most $MAX_COMPATIBILITY_LENGTH characters"
@@ -226,6 +228,25 @@ object AgentSkillManifestParser {
 
     private fun canonicalSkillName(name: String): String =
         name.trim().normalize(Form.NFKC)
+
+    private fun String.codePointCount(): Int {
+        var count = 0
+        var index = 0
+        while (index < length) {
+            val current = this[index]
+            index += if (
+                current.isHighSurrogate() &&
+                index + 1 < length &&
+                this[index + 1].isLowSurrogate()
+            ) {
+                2
+            } else {
+                1
+            }
+            count += 1
+        }
+        return count
+    }
 
     private fun YamlMap.containsField(field: String): Boolean =
         entries.keys.any { it.content == field }
