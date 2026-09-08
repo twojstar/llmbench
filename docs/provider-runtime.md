@@ -24,6 +24,8 @@ Portable provider/model/profile data lives in `shared`. Android currently owns H
 
 Generation and gateway model-catalog requests are coroutine-cancellable: cancelling their coroutine cancels the underlying OkHttp call. SSE parsing is shared, accepts multi-line `data:` events, propagates provider error events, and stops at provider completion or `[DONE]` where applicable.
 
+Transport, SSE and provider-history regressions stay in local JVM/shared tests. CI runs `:app:testDebugUnitTest` and `:shared:desktopTest`; device-dependent coverage is reserved for Android/WebView behavior rather than provider transport semantics.
+
 ## History invariants
 
 `buildBoundedProviderTextTurns` is the source of truth for replaying text history. Keep these properties intact:
@@ -113,7 +115,7 @@ Costs are recorded only when the response reports them. LlmBench does not estima
 - [x] Resolve Claude runtime metadata from the Anthropic Models API with a short independent lookup budget; cache verified model data, cache alias mappings briefly, and use a short-lived 2048/no-reasoning outage entry so repeated failures do not block every generation while recovery remains automatic.
 - [x] Add a provider-aware Prompt Studio preview showing effective instruction placement, history strategy and transport metadata without exposing API keys or hidden reasoning state.
 - [x] Parse provider usage/token metadata so comparisons can include latency and provider-reported token/cost information when the API returns it.
-- [ ] Keep transport/SSE/history tests JVM-testable; device testing should be required only for Android/WebView behavior.
+- [x] Keep transport/SSE/history tests JVM-testable; device testing should be required only for Android/WebView behavior.
 
 ## References
 
