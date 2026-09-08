@@ -1,0 +1,64 @@
+name: One-shot Claude thinking replay
+
+on: # yamllint disable-line rule:truthy
+  push:
+    branches: [gptomek/claude-thinking-replay]
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Read Gradle version
+        id: gradle
+        run: .github/scripts/gradle-version.sh
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          gradle-version: ${{ steps.gradle.outputs.version }}
+
+      - name: Generate Gradle wrapper if missing
+        env:
+          GRADLE_VERSION: ${{ steps.gradle.outputs.version }}
+        run: |
+          if [ ! -f gradle/wrapper/gradle-wrapper.jar ]; then
+            gradle wrapper --gradle-version "$GRADLE_VERSION"
+            git checkout -- gradle/wrapper/gradle-wrapper.properties
+          fi
+
+      - name: Apply Claude thinking patch
+        run: python .github/scripts/one-shot-claude-thinking.py
+
+      - name: Validate full gate
+        run: ./gradlew :app:assembleDebug :app:testDebugUnitTest :app:lintDebug :shared:desktopTest --stacktrace
+
+      - name: Commit verified product patch as GPTomek
+        env:
+          VALIDATED_SHA: ${{ github.sha }}
+        run: |
+          git fetch origin gptomek/claude-thinking-replay
+          test "$(git rev-parse origin/gptomek/claude-thinking-replay)" = "$VALIDATED_SHA"
+          git add app/src/main/java/com/twojstar/llmbench/data/engine/AiChatService.kt \
+                  app/src/main/java/com/twojstar/llmbench/ui/screens/StudioScreen.kt \
+                  app/src/test/java/com/twojstar/llmbench/data/engine/AiChatServiceTest.kt \
+                  docs/provider-runtime.md \
+                  shared/src/commonMain/kotlin/com/twojstar/llmbench/data/model/ProviderRuntimeCapabilities.kt \
+                  shared/src/commonTest/kotlin/com/twojstar/llmbench/data/model/ProviderRuntimeCapabilitiesTest.kt
+          git rm .github/scripts/one-shot-claude-thinking.py .github/workflows/one-shot-claude-thinking.yml
+          git diff --cached --quiet && exit 1 || true
+          git config user.name "GPTomek"
+          git config user.email "314538226+gptomek[bot]@users.noreply.github.com"
+          git commit -m "feat(claude) preserve model-aware thinking state"
+          git push origin HEAD:gptomek/claude-thinking-replay
