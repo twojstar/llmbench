@@ -24,39 +24,31 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.twojstar.llmbench.data.skills.LocalSkillLibraryStore
 import com.twojstar.llmbench.data.skills.LocalSkillSummary
-import java.io.File
 import java.io.IOException
 import kotlinx.coroutines.launch
 
 @Composable
 internal fun LocalSkillLibrarySection(
+    store: LocalSkillLibraryStore,
     searchQuery: String,
     refreshToken: Int,
     onCountChanged: (Int) -> Unit,
     onViewSource: (String, String) -> Unit,
     onMessage: (String) -> Unit
 ) {
-    val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val store = remember(context) {
-        LocalSkillLibraryStore(
-            File(context.noBackupFilesDir, LocalSkillLibraryStore.LIBRARY_DIRECTORY_NAME)
-        )
-    }
-    var skills by remember { mutableStateOf<List<LocalSkillSummary>>(emptyList()) }
-    var busySkill by remember { mutableStateOf<String?>(null) }
+    var skills by mutableStateOfRememberedSummaries()
+    var busySkill by mutableStateOfRememberedBusySkill()
 
-    LaunchedEffect(refreshToken) {
+    LaunchedEffect(store, refreshToken) {
         skills = store.load()
         onCountChanged(skills.size)
     }
@@ -127,14 +119,17 @@ internal fun LocalSkillLibrarySection(
                             onClick = {
                                 scope.launch {
                                     busySkill = skill.name
-                                    val document = store.read(skill.name)
-                                    busySkill = null
-                                    if (document == null) {
-                                        skills = store.load()
-                                        onCountChanged(skills.size)
-                                        onMessage("Local skill is no longer available.")
-                                    } else {
-                                        onViewSource(skill.name, document.source)
+                                    try {
+                                        val document = store.read(skill.name)
+                                        if (document == null) {
+                                            skills = store.load()
+                                            onCountChanged(skills.size)
+                                            onMessage("Local skill is no longer available.")
+                                        } else {
+                                            onViewSource(skill.name, document.source)
+                                        }
+                                    } finally {
+                                        busySkill = null
                                     }
                                 }
                             }
@@ -172,3 +167,11 @@ internal fun LocalSkillLibrarySection(
         }
     }
 }
+
+@Composable
+private fun mutableStateOfRememberedSummaries() =
+    androidx.compose.runtime.remember { mutableStateOf<List<LocalSkillSummary>>(emptyList()) }
+
+@Composable
+private fun mutableStateOfRememberedBusySkill() =
+    androidx.compose.runtime.remember { mutableStateOf<String?>(null) }
