@@ -37,6 +37,22 @@ jobs:
             gradle wrapper --gradle-version "${{ steps.gradle-version.outputs.version }}"
             git checkout -- gradle/wrapper/gradle-wrapper.properties
           fi
+      - name: Normalize embedded test fixture delimiter
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('.github/scripts/one-shot-claude-final-hardening.py')
+          text = path.read_text()
+          start_token = 'metadata_tests = """'
+          end_token = '\n"""\ntest = replace_section('
+          assert text.count(start_token) == 1
+          start = text.index(start_token)
+          text = text[:start] + text[start:].replace(start_token, "metadata_tests = '''", 1)
+          end = text.index(end_token, start)
+          text = text[:end] + "\n'''\ntest = replace_section(" + text[end + len(end_token):]
+          path.write_text(text)
+          PY
       - name: Apply final Claude hardening
         run: python .github/scripts/one-shot-claude-final-hardening.py
       - name: Validate full gate
