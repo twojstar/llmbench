@@ -228,6 +228,26 @@ class AgentSkillManifestTest {
     }
 
     @Test
+    fun rejectsUnicodeNumericSymbolsThatAreNotDecimalDigits() {
+        val result = AgentSkillManifestParser.parse(
+            """
+                ---
+                name: ½-tools
+                description: Reject numeric symbols that are not decimal digits.
+                ---
+                Instructions.
+            """.trimIndent()
+        )
+
+        assertFalse(result.isValid)
+        assertTrue(
+            result.issues.any {
+                it.field == "name" && it.message.contains("decimal digits")
+            }
+        )
+    }
+
+    @Test
     fun normalizesNameAndDirectoryBeforeComparing() {
         val decomposedName = "cafe\u0301-tools"
         val composedName = "café-tools"
@@ -243,6 +263,82 @@ class AgentSkillManifestTest {
 
         assertTrue(result.isValid)
         assertEquals(composedName, result.manifest?.name)
+    }
+
+    @Test
+    fun rejectsSurroundingWhitespaceInName() {
+        val result = AgentSkillManifestParser.parse(
+            """
+                ---
+                name: " release-checklist "
+                description: Do not silently rewrite malformed portable names.
+                ---
+                Instructions.
+            """.trimIndent(),
+            directoryName = "release-checklist"
+        )
+
+        assertFalse(result.isValid)
+        assertNull(result.manifest)
+        assertTrue(result.issues.any { it.field == "name" && it.message.contains("decimal digits") })
+    }
+
+    @Test
+    fun rejectsImplicitNonStringYamlScalars() {
+        val result = AgentSkillManifestParser.parse(
+            """
+                ---
+                name: 123
+                description: true
+                license: 42
+                compatibility: 1.5
+                metadata:
+                  version: 2
+                  enabled: false
+                allowed-tools: 7
+                ---
+                Instructions.
+            """.trimIndent()
+        )
+
+        assertFalse(result.isValid)
+        assertNull(result.manifest)
+        assertTrue(result.issues.any { it.field == "name" && it.message.contains("YAML string") })
+        assertTrue(result.issues.any { it.field == "description" && it.message.contains("YAML string") })
+        assertTrue(result.issues.any { it.field == "license" && it.message.contains("YAML string") })
+        assertTrue(result.issues.any { it.field == "compatibility" && it.message.contains("YAML string") })
+        assertTrue(result.issues.any { it.field == "metadata.version" && it.message.contains("YAML strings") })
+        assertTrue(result.issues.any { it.field == "metadata.enabled" && it.message.contains("YAML strings") })
+        assertTrue(result.issues.any { it.field == "allowed-tools" && it.message.contains("YAML string") })
+    }
+
+    @Test
+    fun acceptsQuotedStringScalarsThatLookTyped() {
+        val result = AgentSkillManifestParser.parse(
+            """
+                ---
+                name: "123"
+                description: "true"
+                license: "42"
+                compatibility: "1.5"
+                metadata:
+                  version: "2"
+                  enabled: "false"
+                allowed-tools: "7"
+                ---
+                Instructions.
+            """.trimIndent(),
+            directoryName = "123"
+        )
+
+        assertTrue(result.isValid)
+        val manifest = requireNotNull(result.manifest)
+        assertEquals("123", manifest.name)
+        assertEquals("true", manifest.description)
+        assertEquals("42", manifest.license)
+        assertEquals("1.5", manifest.compatibility)
+        assertEquals(mapOf("version" to "2", "enabled" to "false"), manifest.metadata)
+        assertEquals("7", manifest.allowedTools)
     }
 
     @Test
@@ -435,7 +531,7 @@ class AgentSkillManifestTest {
         assertNull(result.manifest)
         assertTrue(
             result.issues.any {
-                it.field == "metadata.nested" && it.message.contains("must be YAML scalars")
+                it.field == "metadata.nested" && it.message.contains("must be YAML strings")
             }
         )
     }
