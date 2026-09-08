@@ -5,13 +5,16 @@ import com.twojstar.llmbench.data.model.ProviderUsage
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
+private const val ASSISTANT_SENDER = "assistant"
+private const val ANSWER_TEXT = "answer"
+
 class ChatUsageMetadataTest {
     @Test
     fun formatsLatencyProviderTokensAndReportedCost() {
         val message = ModelChatMessage(
             id = "m1",
-            sender = "assistant",
-            text = "answer",
+            sender = ASSISTANT_SENDER,
+            text = ANSWER_TEXT,
             latencyMs = 842,
             usage = ProviderUsage(
                 inputTokens = 1_234,
@@ -32,8 +35,8 @@ class ChatUsageMetadataTest {
     fun preservesTinyPositiveReportedCosts() {
         val message = ModelChatMessage(
             id = "m2",
-            sender = "assistant",
-            text = "answer",
+            sender = ASSISTANT_SENDER,
+            text = ANSWER_TEXT,
             usage = ProviderUsage(costUsd = 0.0000004)
         )
         assertEquals("<$0.000001", formatChatResponseDiagnostics(message))
@@ -41,7 +44,12 @@ class ChatUsageMetadataTest {
 
     @Test
     fun keepsLatencyOnlyResponsesCompact() {
-        val message = ModelChatMessage(id = "m3", sender = "assistant", text = "answer", latencyMs = 120)
+        val message = ModelChatMessage(
+            id = "m3",
+            sender = ASSISTANT_SENDER,
+            text = ANSWER_TEXT,
+            latencyMs = 120
+        )
         assertEquals("120ms", formatChatResponseDiagnostics(message))
     }
 }
