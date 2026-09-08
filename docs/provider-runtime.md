@@ -15,7 +15,7 @@ Portable provider/model/profile data lives in `shared`. Android currently owns H
 | Provider | API shape | System instructions | Streaming | Conversation state today |
 | --- | --- | --- | --- | --- |
 | Gemini | `generateContent` REST | `systemInstruction` | SSE | bounded provider content replay with opaque thought signatures |
-| OpenAI | Responses API | `instructions` | Responses SSE | bounded visible text replay, `store=false` |
+| OpenAI | Responses API | `instructions` | Responses SSE | bounded provider output-item replay with encrypted reasoning, `store=false` |
 | Claude | Messages API | top-level `system` | SSE | bounded visible text replay |
 | DeepSeek | OpenAI-compatible chat completions | `system` message | SSE | bounded visible text replay |
 | Kimi | OpenAI-compatible chat completions | `system` message | SSE | bounded visible text replay |
@@ -59,9 +59,11 @@ A future move to Gemini Interactions can still be evaluated, but only with an ex
 
 ### OpenAI
 
-The Responses API is currently called with `store=false`, while LlmBench replays only visible user/assistant text. Current OpenAI APIs support stateless reasoning continuity by requesting `reasoning.encrypted_content` and replaying the returned output items. A stateful alternative is `previous_response_id`.
+The Responses API remains client-managed and stateless with `store=false`. LlmBench requests `reasoning.encrypted_content`, retains the complete ordered `response.output` array as ephemeral provider replay state, and sends those output items back between the matching user turns on the next request. This preserves encrypted reasoning items without exposing or rewriting their contents.
 
-If stateful Responses are evaluated later, remember that `instructions` are not automatically inherited through `previous_response_id`; the active Studio instruction still needs to be supplied deliberately.
+OpenAI replay state follows the same privacy and bounding rules as Gemini state: it is transient, provider/model-scoped, charged against the history budget only when valid and replayable, and falls back to visible assistant text after a model switch or malformed state. Streaming captures the final output array from `response.completed`, where the complete Response object is available.
+
+A stateful alternative remains `previous_response_id`. If stateful Responses are evaluated later, remember that `instructions` are not automatically inherited through `previous_response_id`; the active Studio instruction still needs to be supplied deliberately.
 
 ### Claude
 
@@ -95,7 +97,7 @@ OpenRouter and other OpenAI-compatible gateways may return the model actually us
 - [x] Make gateway model-catalog refresh cancellable through the same OkHttp coroutine bridge used by generation.
 - [x] Add a provider capability model for transport, instruction placement, response metadata and state strategy; extend it as reasoning controls land.
 - [x] Preserve Gemini thought signatures in stateless `generateContent` by replaying full model `Content` chunks unchanged.
-- [ ] Preserve OpenAI stateless reasoning items while keeping `store=false`, or document a deliberate move to stateful Responses.
+- [x] Preserve OpenAI stateless reasoning items with `reasoning.encrypted_content` while keeping `store=false`.
 - [ ] Add Claude thinking/effort only through model-aware capabilities; preserve opaque thinking blocks when enabled.
 - [x] Record and display the actual routed model returned by OpenRouter when available.
 - [x] Resolve Claude `max_tokens` from the Anthropic Models API per model with a short independent lookup budget; cache either the reported value or the old 2048 compatibility fallback per model and credential fingerprint so metadata outages do not repeatedly delay generation and replacing a bad key can refresh metadata.

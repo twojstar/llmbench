@@ -50,6 +50,14 @@ class ProviderRuntimeCapabilitiesTest {
     }
 
     @Test
+    fun openAiPreservesOpaqueStatelessResponseItems() {
+        assertEquals(
+            ConversationStateStrategy.BOUNDED_PROVIDER_CONTENT_REPLAY,
+            AiProvider.CHATGPT.runtimeCapabilities().conversationStateStrategy
+        )
+    }
+
+    @Test
     fun compareModeIsFanOutRatherThanAProviderTransport() {
         val capabilities = AiProvider.ALL.runtimeCapabilities()
 

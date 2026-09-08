@@ -37,6 +37,37 @@ private const val TEST_OPAQUE_SIGNATURE = "opaque-signature"
 private const val TEST_THOUGHT_SIGNATURE_KEY = "thoughtSignature"
 private const val TEST_CLAUDE_MAX_TOKENS = 128000
 private const val TEST_CLAUDE_OUTAGE_MODEL = "claude-outage"
+private const val TEST_OPENAI_MODEL = "gpt-test-model"
+private const val TEST_OPENAI_REASONING_TYPE = "reasoning"
+private const val TEST_OPENAI_MESSAGE_TYPE = "message"
+private const val TEST_OPENAI_ENCRYPTED_CONTENT_KEY = "encrypted_content"
+private const val TEST_OPENAI_ENCRYPTED_REASONING = "encrypted-reasoning"
+private const val TEST_OPENAI_REASONING_INCLUDE = "reasoning.encrypted_content"
+private const val TEST_OPENAI_TEXT_DELTA_SSE = "data: {\"type\":\"response.output_text.delta\",\"delta\":\"hello\"}\n\n"
+
+private fun openAiReplayStateJson(): String = """
+    [
+      {
+        "id": "rs_1",
+        "type": "$TEST_OPENAI_REASONING_TYPE",
+        "$TEST_OPENAI_ENCRYPTED_CONTENT_KEY": "$TEST_OPENAI_ENCRYPTED_REASONING",
+        "summary": []
+      },
+      {
+        "id": "msg_1",
+        "type": "$TEST_OPENAI_MESSAGE_TYPE",
+        "status": "completed",
+        "role": "assistant",
+        "content": [
+          {
+            "type": "output_text",
+            "text": "$OPENAI_ANSWER",
+            "annotations": []
+          }
+        ]
+      }
+    ]
+""".trimIndent()
 
 class AiChatServiceTest {
     @Test
@@ -386,6 +417,162 @@ class AiChatServiceTest {
     }
 
     @Test
+    fun openAiHistoryReplaysEncryptedReasoningItemsInOrder() {
+        val history = listOf(
+            ModelChatMessage(id = "u1", sender = CHAT_ROLE_USER, text = FIRST_QUESTION),
+            ModelChatMessage(
+                id = "gpt",
+                sender = CHAT_ROLE_ASSISTANT,
+                provider = AiProvider.CHATGPT,
+                modelName = TEST_OPENAI_MODEL,
+                text = OPENAI_ANSWER,
+                providerReplayState = openAiReplayStateJson()
+            ),
+            ModelChatMessage(id = "u2", sender = CHAT_ROLE_USER, text = FOLLOW_UP)
+        )
+
+        val input = AiChatService().buildOpenAiResponseInput(
+            prompt = FOLLOW_UP,
+            conversationHistory = history,
+            modelName = TEST_OPENAI_MODEL
+        )
+
+        assertEquals(4, input.size)
+        assertEquals(CHAT_ROLE_USER, input[0].jsonObject.getValue(TEST_ROLE_KEY).jsonPrimitive.content)
+        assertEquals(FIRST_QUESTION, input[0].jsonObject.getValue(TEST_CONTENT_KEY).jsonPrimitive.content)
+        assertEquals(TEST_OPENAI_REASONING_TYPE, input[1].jsonObject.getValue("type").jsonPrimitive.content)
+        assertEquals(
+            TEST_OPENAI_ENCRYPTED_REASONING,
+            input[1].jsonObject.getValue(TEST_OPENAI_ENCRYPTED_CONTENT_KEY).jsonPrimitive.content
+        )
+        assertEquals(TEST_OPENAI_MESSAGE_TYPE, input[2].jsonObject.getValue("type").jsonPrimitive.content)
+        assertEquals(CHAT_ROLE_ASSISTANT, input[2].jsonObject.getValue(TEST_ROLE_KEY).jsonPrimitive.content)
+        assertEquals(CHAT_ROLE_USER, input[3].jsonObject.getValue(TEST_ROLE_KEY).jsonPrimitive.content)
+        assertEquals(FOLLOW_UP, input[3].jsonObject.getValue(TEST_CONTENT_KEY).jsonPrimitive.content)
+    }
+
+    @Test
+    fun openAiModelSwitchFallsBackToVisibleTextReplay() {
+        val history = listOf(
+            ModelChatMessage(id = "u1", sender = CHAT_ROLE_USER, text = FIRST_QUESTION),
+            ModelChatMessage(
+                id = "gpt",
+                sender = CHAT_ROLE_ASSISTANT,
+                provider = AiProvider.CHATGPT,
+                modelName = "gpt-old-model",
+                text = OPENAI_ANSWER,
+                providerReplayState = openAiReplayStateJson()
+            ),
+            ModelChatMessage(id = "u2", sender = CHAT_ROLE_USER, text = FOLLOW_UP)
+        )
+
+        val input = AiChatService().buildOpenAiResponseInput(
+            prompt = FOLLOW_UP,
+            conversationHistory = history,
+            modelName = TEST_OPENAI_MODEL
+        )
+
+        assertEquals(listOf(CHAT_ROLE_USER, CHAT_ROLE_ASSISTANT, CHAT_ROLE_USER), input.map {
+            it.jsonObject.getValue(TEST_ROLE_KEY).jsonPrimitive.content
+        })
+        assertEquals(listOf(FIRST_QUESTION, OPENAI_ANSWER, FOLLOW_UP), input.map {
+            it.jsonObject.getValue(TEST_CONTENT_KEY).jsonPrimitive.content
+        })
+    }
+
+    @Test
+    fun openAiRequestKeepsStoreFalseAndRequestsEncryptedReasoning() {
+        val service = AiChatService()
+        val input = service.buildOpenAiResponseInput(
+            prompt = FOLLOW_UP,
+            conversationHistory = emptyList(),
+            modelName = TEST_OPENAI_MODEL
+        )
+        val buffered = service.buildOpenAiRequestPayload(
+            model = TEST_OPENAI_MODEL,
+            stream = false,
+            systemInstruction = SYSTEM_PROMPT,
+            input = input
+        )
+        val streaming = service.buildOpenAiRequestPayload(
+            model = TEST_OPENAI_MODEL,
+            stream = true,
+            systemInstruction = null,
+            input = input
+        )
+
+        assertEquals("false", buffered.getValue("store").jsonPrimitive.content)
+        assertEquals(
+            TEST_OPENAI_REASONING_INCLUDE,
+            buffered.getValue("include").jsonArray.single().jsonPrimitive.content
+        )
+        assertEquals(SYSTEM_PROMPT, buffered.getValue("instructions").jsonPrimitive.content)
+        assertFalse("stream" in buffered)
+        assertEquals("false", streaming.getValue("store").jsonPrimitive.content)
+        assertEquals("true", streaming.getValue("stream").jsonPrimitive.content)
+    }
+
+    @Test
+    fun openAiBufferedTerminalFailuresAreRejectedBeforeReplayCapture() {
+        val service = AiChatService()
+        val incomplete = Json.parseToJsonElement(
+            """{"status":"incomplete","incomplete_details":{"reason":"max_output_tokens"},"output":${openAiReplayStateJson()}}"""
+        ).jsonObject
+        val failed = Json.parseToJsonElement(
+            """{"status":"failed","error":{"message":"server exploded"},"output":${openAiReplayStateJson()}}"""
+        ).jsonObject
+
+        val incompleteFailure = runCatching {
+            service.ensureOpenAiBufferedResponseCompleted(incomplete)
+        }.exceptionOrNull()
+        val failedFailure = runCatching {
+            service.ensureOpenAiBufferedResponseCompleted(failed)
+        }.exceptionOrNull()
+
+        assertTrue(incompleteFailure is java.io.IOException)
+        assertEquals("OpenAI response incomplete: max_output_tokens", incompleteFailure?.message)
+        assertTrue(failedFailure is java.io.IOException)
+        assertEquals("server exploded", failedFailure?.message)
+    }
+
+    @Test
+    fun openAiStreamingCapturesCompletedEncryptedReasoningOutput() {
+        val service = AiChatService()
+        var replayState: String? = null
+        val completedOutput = openAiReplayStateJson().lineSequence().joinToString(separator = "") { it.trim() }
+        val response = Response.Builder()
+            .request(Request.Builder().url(TEST_STREAM_URL).build())
+            .protocol(Protocol.HTTP_1_1)
+            .code(200)
+            .message("OK")
+            .body((
+                TEST_OPENAI_TEXT_DELTA_SSE +
+                    "data: {\"type\":\"response.completed\",\"response\":{\"output\":$completedOutput}}\n\n"
+                ).toResponseBody(TEST_EVENT_STREAM_TYPE.toMediaType()))
+            .build()
+
+        val text = service.readSseResponse(
+            response = response,
+            extractText = service::extractOpenAiStreamText,
+            isComplete = service::isOpenAiStreamComplete,
+            onTextDelta = {},
+            onEvent = { event ->
+                service.extractOpenAiCompletedReplayState(event)?.let { replayState = it }
+            }
+        )
+
+        assertEquals(STREAM_HELLO, text)
+        val replayItems = service.parseOpenAiReplayState(replayState)
+        assertEquals(listOf(TEST_OPENAI_REASONING_TYPE, TEST_OPENAI_MESSAGE_TYPE), replayItems.map {
+            it.getValue("type").jsonPrimitive.content
+        })
+        assertEquals(
+            TEST_OPENAI_ENCRYPTED_REASONING,
+            replayItems.first().getValue(TEST_OPENAI_ENCRYPTED_CONTENT_KEY).jsonPrimitive.content
+        )
+    }
+
+    @Test
     fun extractsNativeStreamingTextDeltas() {
         val service = AiChatService()
         val gemini = Json.parseToJsonElement(
@@ -635,7 +822,7 @@ class AiChatServiceTest {
             .code(200)
             .message("OK")
             .body(
-                "data: {\"type\":\"response.output_text.delta\",\"delta\":\"hello\"}\n\n"
+                TEST_OPENAI_TEXT_DELTA_SSE
                     .toResponseBody(TEST_EVENT_STREAM_TYPE.toMediaType())
             )
             .build()
@@ -662,7 +849,7 @@ class AiChatServiceTest {
             .code(200)
             .message("OK")
             .body(
-                "data: {\"type\":\"response.output_text.delta\",\"delta\":\"hello\"}\n\n"
+                TEST_OPENAI_TEXT_DELTA_SSE
                     .toResponseBody(TEST_EVENT_STREAM_TYPE.toMediaType())
             )
             .build()
