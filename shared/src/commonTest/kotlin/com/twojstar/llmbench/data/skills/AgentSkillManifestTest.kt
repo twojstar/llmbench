@@ -19,7 +19,6 @@ class AgentSkillManifestTest {
               author: twojstar
               version: '1.0'
             allowed-tools: shell git
-            x-llmbench-note: preview-only
             ---
 
             # Release checklist
@@ -41,7 +40,6 @@ class AgentSkillManifestTest {
         assertEquals("Requires git and a POSIX shell", manifest.compatibility)
         assertEquals(mapOf("author" to "twojstar", "version" to "1.0"), manifest.metadata)
         assertEquals("shell git", manifest.allowedTools)
-        assertEquals("preview-only", manifest.extraFrontmatter["x-llmbench-note"])
         assertTrue(manifest.instructions.startsWith("# Release checklist"))
     }
 
@@ -138,7 +136,8 @@ class AgentSkillManifestTest {
             name: commented-skill # documented name
             description: "Quoted description" # documented description
             license: 'Apache-2.0' # documented license
-            x-doc-url: https://example.invalid/page#anchor
+            metadata:
+              url: https://example.invalid/page#anchor
             ---
             Instructions.
         """.trimIndent()
@@ -150,7 +149,69 @@ class AgentSkillManifestTest {
         assertEquals("commented-skill", manifest.name)
         assertEquals("Quoted description", manifest.description)
         assertEquals("Apache-2.0", manifest.license)
-        assertEquals("https://example.invalid/page#anchor", manifest.extraFrontmatter["x-doc-url"])
+        assertEquals("https://example.invalid/page#anchor", manifest.metadata["url"])
+    }
+
+    @Test
+    fun acceptsUnicodeLowercaseNames() {
+        val chinese = AgentSkillManifestParser.parse(
+            """
+                ---
+                name: 数据分析
+                description: Analyze imported data.
+                ---
+                Instructions.
+            """.trimIndent(),
+            directoryName = "数据分析"
+        )
+        val cyrillic = AgentSkillManifestParser.parse(
+            """
+                ---
+                name: анализ-данных
+                description: Analyze imported data.
+                ---
+                Instructions.
+            """.trimIndent(),
+            directoryName = "анализ-данных"
+        )
+
+        assertTrue(chinese.isValid)
+        assertTrue(cyrillic.isValid)
+    }
+
+    @Test
+    fun rejectsUnicodeUppercaseNames() {
+        val result = AgentSkillManifestParser.parse(
+            """
+                ---
+                name: Анализ-данных
+                description: Analyze imported data.
+                ---
+                Instructions.
+            """.trimIndent(),
+            directoryName = "Анализ-данных"
+        )
+
+        assertFalse(result.isValid)
+        assertTrue(result.issues.any { it.field == "name" && it.message.contains("lowercase") })
+    }
+
+    @Test
+    fun normalizesNameAndDirectoryBeforeComparing() {
+        val decomposedName = "cafe\u0301-tools"
+        val composedName = "café-tools"
+        val source = """
+            ---
+            name: $decomposedName
+            description: Work with normalized identifiers.
+            ---
+            Instructions.
+        """.trimIndent()
+
+        val result = AgentSkillManifestParser.parse(source, directoryName = composedName)
+
+        assertTrue(result.isValid)
+        assertEquals(composedName, result.manifest?.name)
     }
 
     @Test
@@ -193,6 +254,47 @@ class AgentSkillManifestTest {
 
         assertFalse(result.isValid)
         assertTrue(result.issues.any { it.field == "description" && it.message.contains("required") })
+    }
+
+    @Test
+    fun rejectsBlankCompatibility() {
+        val source = """
+            ---
+            name: blank-compatibility
+            description: Validate optional compatibility when present.
+            compatibility: "   "
+            ---
+            Instructions.
+        """.trimIndent()
+
+        val result = AgentSkillManifestParser.parse(source)
+
+        assertFalse(result.isValid)
+        assertTrue(
+            result.issues.any {
+                it.field == "compatibility" && it.message.contains("must not be blank")
+            }
+        )
+    }
+
+    @Test
+    fun rejectsUnknownFrontmatterFields() {
+        val source = """
+            ---
+            name: strict-frontmatter
+            description: Reject fields outside the portable Agent Skills contract.
+            x-llmbench-note: preview-only
+            custom:
+              nested: value
+            ---
+            Instructions.
+        """.trimIndent()
+
+        val result = AgentSkillManifestParser.parse(source)
+
+        assertFalse(result.isValid)
+        assertTrue(result.issues.any { it.field == "x-llmbench-note" })
+        assertTrue(result.issues.any { it.field == "custom" })
     }
 
     @Test
