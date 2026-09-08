@@ -1,0 +1,100 @@
+name: One-shot provider usage metadata
+
+on:
+  push:
+    branches:
+      - gptomek/provider-usage-metadata
+    paths:
+      - .github/scripts/one-shot-provider-usage.py
+      - .github/workflows/one-shot-provider-usage.yml
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      validated_sha: ${{ steps.revision.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - id: revision
+        run: echo "sha=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Read Gradle version
+        id: gradle_version
+        shell: bash
+        run: |
+          VERSION=$(sed -n 's#.*gradle-\([0-9][0-9.]*\)-bin.zip#\1#p' gradle/wrapper/gradle-wrapper.properties)
+          test -n "$VERSION"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+      - uses: gradle/actions/setup-gradle@v6
+        with:
+          gradle-version: ${{ steps.gradle_version.outputs.version }}
+      - name: Generate transient Gradle wrapper
+        run: gradle wrapper --gradle-version "${{ steps.gradle_version.outputs.version }}"
+      - name: Apply provider usage patch
+        run: python .github/scripts/one-shot-provider-usage.py
+      - name: Validate full gate
+        run: ./gradlew :app:assembleDebug :app:testDebugUnitTest :app:lintDebug :shared:desktopTest --stacktrace
+      - name: Capture validated patch
+        shell: bash
+        run: |
+          git add -N \
+            shared/src/commonMain/kotlin/com/twojstar/llmbench/data/model/ProviderUsage.kt \
+            app/src/main/java/com/twojstar/llmbench/ui/screens/ChatUsageMetadata.kt \
+            app/src/test/java/com/twojstar/llmbench/data/engine/ProviderUsageMetadataTest.kt \
+            app/src/test/java/com/twojstar/llmbench/ui/screens/ChatUsageMetadataTest.kt
+          git diff --binary -- \
+            shared/src/commonMain/kotlin/com/twojstar/llmbench/data/model/ProviderUsage.kt \
+            shared/src/commonMain/kotlin/com/twojstar/llmbench/data/model/ChatModels.kt \
+            app/src/main/java/com/twojstar/llmbench/data/engine/AiChatService.kt \
+            app/src/main/java/com/twojstar/llmbench/ui/screens/ChatScreen.kt \
+            app/src/main/java/com/twojstar/llmbench/ui/screens/ChatUsageMetadata.kt \
+            app/src/test/java/com/twojstar/llmbench/data/engine/ProviderUsageMetadataTest.kt \
+            app/src/test/java/com/twojstar/llmbench/ui/screens/ChatUsageMetadataTest.kt \
+            docs/provider-runtime.md > provider-usage.patch
+          test -s provider-usage.patch
+      - uses: actions/upload-artifact@v4
+        with:
+          name: provider-usage-patch
+          path: provider-usage.patch
+          if-no-files-found: error
+
+  commit:
+    needs: validate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.validate.outputs.validated_sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: provider-usage-patch
+      - name: Guard source branch and apply validated patch
+        shell: bash
+        env:
+          VALIDATED_SHA: ${{ needs.validate.outputs.validated_sha }}
+          BRANCH: gptomek/provider-usage-metadata
+        run: |
+          REMOTE_SHA=$(git ls-remote "https://github.com/${GITHUB_REPOSITORY}.git" "refs/heads/${BRANCH}" | cut -f1)
+          test "$REMOTE_SHA" = "$VALIDATED_SHA"
+          git apply --index provider-usage.patch
+      - name: Commit verified product files as GPTomek
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: gptomek/provider-usage-metadata
+        run: |
+          git config user.name "GPTomek"
+          git config user.email "314538226+gptomek[bot]@users.noreply.github.com"
+          git status --short
+          git commit -m "feat(chat) show provider usage metadata"
+          git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "HEAD:refs/heads/${BRANCH}"
