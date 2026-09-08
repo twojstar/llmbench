@@ -42,6 +42,12 @@ private const val TEST_CLAUDE_MODEL = "claude-sonnet-5"
 private const val TEST_CLAUDE_LEGACY_MODEL = "claude-haiku-4-5-20251001"
 private const val TEST_CLAUDE_SIGNATURE = "claude-signature"
 private const val TEST_CLAUDE_REDACTED_DATA = "redacted-data"
+private const val TEST_TYPE_KEY = "type"
+private const val TEST_TEXT_KEY = "text"
+private const val TEST_SIGNATURE_KEY = "signature"
+private const val TEST_DATA_KEY = "data"
+private const val TEST_CLAUDE_THINKING = "thinking"
+private const val TEST_CLAUDE_REDACTED_THINKING = "redacted_thinking"
 private const val TEST_OPENAI_MODEL = "gpt-test-model"
 private const val TEST_OPENAI_REASONING_TYPE = "reasoning"
 private const val TEST_OPENAI_MESSAGE_TYPE = "message"
@@ -182,10 +188,10 @@ class AiChatServiceTest {
             ClaudeReasoningCapabilities(supportsEnabled = true)
         )
 
-        assertEquals("adaptive", adaptive.getValue("thinking").jsonObject.getValue("type").jsonPrimitive.content)
+        assertEquals("adaptive", adaptive.getValue(TEST_CLAUDE_THINKING).jsonObject.getValue(TEST_TYPE_KEY).jsonPrimitive.content)
         assertEquals("high", adaptive.getValue("output_config").jsonObject.getValue("effort").jsonPrimitive.content)
-        assertEquals("enabled", legacy.getValue("thinking").jsonObject.getValue("type").jsonPrimitive.content)
-        assertEquals("4096", legacy.getValue("thinking").jsonObject.getValue("budget_tokens").jsonPrimitive.content)
+        assertEquals("enabled", legacy.getValue(TEST_CLAUDE_THINKING).jsonObject.getValue(TEST_TYPE_KEY).jsonPrimitive.content)
+        assertEquals("4096", legacy.getValue(TEST_CLAUDE_THINKING).jsonObject.getValue("budget_tokens").jsonPrimitive.content)
     }
 
     @Test
@@ -206,16 +212,16 @@ class AiChatServiceTest {
 
         val replayed = service.buildClaudeMessages(FOLLOW_UP, history, modelName = TEST_CLAUDE_MODEL)
         val blocks = replayed[1].jsonObject.getValue(TEST_CONTENT_KEY).jsonArray
-        assertEquals(listOf("thinking", "redacted_thinking", "text"), blocks.map {
-            it.jsonObject.getValue("type").jsonPrimitive.content
+        assertEquals(listOf(TEST_CLAUDE_THINKING, TEST_CLAUDE_REDACTED_THINKING, TEST_TEXT_KEY), blocks.map {
+            it.jsonObject.getValue(TEST_TYPE_KEY).jsonPrimitive.content
         })
         assertEquals(
             TEST_CLAUDE_SIGNATURE,
-            blocks[0].jsonObject.getValue("signature").jsonPrimitive.content
+            blocks[0].jsonObject.getValue(TEST_SIGNATURE_KEY).jsonPrimitive.content
         )
         assertEquals(
             TEST_CLAUDE_REDACTED_DATA,
-            blocks[1].jsonObject.getValue("data").jsonPrimitive.content
+            blocks[1].jsonObject.getValue(TEST_DATA_KEY).jsonPrimitive.content
         )
 
         val switched = service.buildClaudeMessages(FOLLOW_UP, history, modelName = "claude-opus-5")
@@ -241,12 +247,12 @@ class AiChatServiceTest {
         }
 
         val replay = service.parseClaudeReplayState(service.encodeClaudeStreamReplayState(blocks))
-        assertEquals(listOf("thinking", "redacted_thinking", "text"), replay.map {
-            it.getValue("type").jsonPrimitive.content
+        assertEquals(listOf(TEST_CLAUDE_THINKING, TEST_CLAUDE_REDACTED_THINKING, TEST_TEXT_KEY), replay.map {
+            it.getValue(TEST_TYPE_KEY).jsonPrimitive.content
         })
-        assertEquals(TEST_CLAUDE_SIGNATURE, replay[0].getValue("signature").jsonPrimitive.content)
-        assertEquals(TEST_CLAUDE_REDACTED_DATA, replay[1].getValue("data").jsonPrimitive.content)
-        assertEquals(CLAUDE_ANSWER, replay[2].getValue("text").jsonPrimitive.content)
+        assertEquals(TEST_CLAUDE_SIGNATURE, replay[0].getValue(TEST_SIGNATURE_KEY).jsonPrimitive.content)
+        assertEquals(TEST_CLAUDE_REDACTED_DATA, replay[1].getValue(TEST_DATA_KEY).jsonPrimitive.content)
+        assertEquals(CLAUDE_ANSWER, replay[2].getValue(TEST_TEXT_KEY).jsonPrimitive.content)
     }
 
     @Test
@@ -368,7 +374,7 @@ class AiChatServiceTest {
             it.jsonObject.getValue(TEST_ROLE_KEY).jsonPrimitive.content
         })
         assertEquals(listOf(FIRST_QUESTION, GEMINI_ANSWER, prompt), gemini.map {
-            it.jsonObject.getValue("parts").jsonArray.first().jsonObject.getValue("text").jsonPrimitive.content
+            it.jsonObject.getValue("parts").jsonArray.first().jsonObject.getValue(TEST_TEXT_KEY).jsonPrimitive.content
         })
 
         val openAi = service.buildOpenAiResponseInput(prompt, history)
@@ -481,7 +487,7 @@ class AiChatServiceTest {
         val replayParts = contents[1].jsonObject.getValue("parts").jsonArray
         assertEquals(2, replayParts.size)
         val signaturePart = replayParts[1].jsonObject
-        assertEquals("", signaturePart.getValue("text").jsonPrimitive.content)
+        assertEquals("", signaturePart.getValue(TEST_TEXT_KEY).jsonPrimitive.content)
         assertEquals(TEST_OPAQUE_SIGNATURE, signaturePart.getValue(TEST_THOUGHT_SIGNATURE_KEY).jsonPrimitive.content)
     }
 
@@ -509,7 +515,7 @@ class AiChatServiceTest {
         val replayParts = contents[1].jsonObject.getValue("parts").jsonArray
         assertEquals(1, replayParts.size)
         val visiblePart = replayParts.single().jsonObject
-        assertEquals(GEMINI_ANSWER, visiblePart.getValue("text").jsonPrimitive.content)
+        assertEquals(GEMINI_ANSWER, visiblePart.getValue(TEST_TEXT_KEY).jsonPrimitive.content)
         assertFalse(TEST_THOUGHT_SIGNATURE_KEY in visiblePart)
     }
 
@@ -543,9 +549,9 @@ class AiChatServiceTest {
         val merged = service.mergeGeminiReplayContents(replayContents)
         val replayParts = requireNotNull(merged).getValue("parts").jsonArray
         assertEquals(2, replayParts.size)
-        assertEquals("hello", replayParts[0].jsonObject.getValue("text").jsonPrimitive.content)
+        assertEquals("hello", replayParts[0].jsonObject.getValue(TEST_TEXT_KEY).jsonPrimitive.content)
         val signaturePart = replayParts[1].jsonObject
-        assertEquals("", signaturePart.getValue("text").jsonPrimitive.content)
+        assertEquals("", signaturePart.getValue(TEST_TEXT_KEY).jsonPrimitive.content)
         assertEquals(TEST_OPAQUE_SIGNATURE, signaturePart.getValue(TEST_THOUGHT_SIGNATURE_KEY).jsonPrimitive.content)
     }
 
@@ -573,12 +579,12 @@ class AiChatServiceTest {
         assertEquals(4, input.size)
         assertEquals(CHAT_ROLE_USER, input[0].jsonObject.getValue(TEST_ROLE_KEY).jsonPrimitive.content)
         assertEquals(FIRST_QUESTION, input[0].jsonObject.getValue(TEST_CONTENT_KEY).jsonPrimitive.content)
-        assertEquals(TEST_OPENAI_REASONING_TYPE, input[1].jsonObject.getValue("type").jsonPrimitive.content)
+        assertEquals(TEST_OPENAI_REASONING_TYPE, input[1].jsonObject.getValue(TEST_TYPE_KEY).jsonPrimitive.content)
         assertEquals(
             TEST_OPENAI_ENCRYPTED_REASONING,
             input[1].jsonObject.getValue(TEST_OPENAI_ENCRYPTED_CONTENT_KEY).jsonPrimitive.content
         )
-        assertEquals(TEST_OPENAI_MESSAGE_TYPE, input[2].jsonObject.getValue("type").jsonPrimitive.content)
+        assertEquals(TEST_OPENAI_MESSAGE_TYPE, input[2].jsonObject.getValue(TEST_TYPE_KEY).jsonPrimitive.content)
         assertEquals(CHAT_ROLE_ASSISTANT, input[2].jsonObject.getValue(TEST_ROLE_KEY).jsonPrimitive.content)
         assertEquals(CHAT_ROLE_USER, input[3].jsonObject.getValue(TEST_ROLE_KEY).jsonPrimitive.content)
         assertEquals(FOLLOW_UP, input[3].jsonObject.getValue(TEST_CONTENT_KEY).jsonPrimitive.content)
@@ -697,7 +703,7 @@ class AiChatServiceTest {
         assertEquals(STREAM_HELLO, text)
         val replayItems = service.parseOpenAiReplayState(replayState)
         assertEquals(listOf(TEST_OPENAI_REASONING_TYPE, TEST_OPENAI_MESSAGE_TYPE), replayItems.map {
-            it.getValue("type").jsonPrimitive.content
+            it.getValue(TEST_TYPE_KEY).jsonPrimitive.content
         })
         assertEquals(
             TEST_OPENAI_ENCRYPTED_REASONING,
