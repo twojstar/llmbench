@@ -9,6 +9,7 @@ import com.twojstar.llmbench.data.model.parseClaudeReasoningCapabilities
 import com.twojstar.llmbench.data.model.resolveClaudeThinkingBudget
 import com.twojstar.llmbench.data.model.GatewayModelCatalogEntry
 import com.twojstar.llmbench.data.model.ModelChatMessage
+import com.twojstar.llmbench.data.model.ProviderUsage
 import com.twojstar.llmbench.data.model.buildBoundedProviderTextTurns
 import com.twojstar.llmbench.data.model.freeGatewayModelOptions
 import com.twojstar.llmbench.data.model.Profile
@@ -47,6 +48,29 @@ private const val JSON_MODEL_ID_KEY = "id"
 private const val JSON_PRICING_KEY = "pricing"
 private const val JSON_INPUT_KEY = "input"
 private const val JSON_OUTPUT_KEY = "output"
+private const val JSON_USAGE_KEY = "usage"
+private const val JSON_TOTAL_TOKENS_KEY = "total_tokens"
+private const val JSON_PROMPT_TOKENS_KEY = "prompt_tokens"
+private const val JSON_COMPLETION_TOKENS_KEY = "completion_tokens"
+private const val JSON_INPUT_TOKENS_KEY = "input_tokens"
+private const val JSON_OUTPUT_TOKENS_KEY = "output_tokens"
+private const val JSON_INPUT_TOKEN_DETAILS_KEY = "input_tokens_details"
+private const val JSON_OUTPUT_TOKEN_DETAILS_KEY = "output_tokens_details"
+private const val JSON_PROMPT_TOKEN_DETAILS_KEY = "prompt_tokens_details"
+private const val JSON_COMPLETION_TOKEN_DETAILS_KEY = "completion_tokens_details"
+private const val JSON_CACHED_TOKENS_KEY = "cached_tokens"
+private const val JSON_REASONING_TOKENS_KEY = "reasoning_tokens"
+private const val JSON_COST_KEY = "cost"
+private const val GEMINI_USAGE_METADATA_KEY = "usageMetadata"
+private const val GEMINI_PROMPT_TOKENS_KEY = "promptTokenCount"
+private const val GEMINI_CANDIDATE_TOKENS_KEY = "candidatesTokenCount"
+private const val GEMINI_TOTAL_TOKENS_KEY = "totalTokenCount"
+private const val GEMINI_CACHED_TOKENS_KEY = "cachedContentTokenCount"
+private const val GEMINI_THOUGHT_TOKENS_KEY = "thoughtsTokenCount"
+private const val CLAUDE_CACHE_CREATION_TOKENS_KEY = "cache_creation_input_tokens"
+private const val CLAUDE_CACHE_READ_TOKENS_KEY = "cache_read_input_tokens"
+private const val CLAUDE_THINKING_TOKENS_KEY = "thinking_tokens"
+private const val DEEPSEEK_CACHE_HIT_TOKENS_KEY = "prompt_cache_hit_tokens"
 private const val JSON_STATUS_KEY = "status"
 private const val JSON_INCLUDE_KEY = "include"
 private const val JSON_CANDIDATES_KEY = "candidates"
@@ -126,19 +150,27 @@ class AiChatService {
 
     private data class GeminiGenerationResult(
         val text: String,
-        val replayState: String?
+        val replayState: String?,
+        val usage: ProviderUsage?
     )
 
     private data class OpenAiGenerationResult(
         val text: String,
-        val replayState: String?
+        val replayState: String?,
+        val usage: ProviderUsage?
     )
 
     private data class ClaudeGenerationResult(
         val text: String,
         val replayState: String?,
         val resolvedModel: String,
-        val isPartial: Boolean
+        val isPartial: Boolean,
+        val usage: ProviderUsage?
+    )
+
+    private data class OpenAiCompatibleGenerationResult(
+        val text: String,
+        val usage: ProviderUsage?
     )
 
     internal data class ClaudeRuntimeMetadata(
@@ -274,6 +306,59 @@ class AiChatService {
         else -> null
     }
 
+    private fun JsonElement?.asUsageLongOrNull(): Long? =
+        (this as? JsonPrimitive)?.longOrNull?.takeIf { it >= 0L }
+
+    private fun sumUsageTokens(vararg values: Long?): Long? {
+        val present = values.filterNotNull()
+        return present.takeIf { it.isNotEmpty() }?.sum()
+    }
+
+    private fun providerUsage(
+        inputTokens: Long? = null,
+        outputTokens: Long? = null,
+        totalTokens: Long? = null,
+        cachedInputTokens: Long? = null,
+        reasoningTokens: Long? = null,
+        costUsd: Double? = null
+    ): ProviderUsage? {
+        val normalizedCost = costUsd?.takeIf { it >= 0.0 && it.isFinite() }
+        return ProviderUsage(
+            inputTokens = inputTokens,
+            outputTokens = outputTokens,
+            totalTokens = totalTokens ?: if (inputTokens != null && outputTokens != null) {
+                inputTokens + outputTokens
+            } else null,
+            cachedInputTokens = cachedInputTokens,
+            reasoningTokens = reasoningTokens,
+            costUsd = normalizedCost
+        ).takeIf { usage ->
+            usage.inputTokens != null || usage.outputTokens != null || usage.totalTokens != null ||
+                usage.cachedInputTokens != null || usage.reasoningTokens != null || usage.costUsd != null
+        }
+    }
+
+    internal fun mergeProviderUsage(current: ProviderUsage?, update: ProviderUsage?): ProviderUsage? {
+        if (update == null) return current
+        if (current == null) return update
+        val input = update.inputTokens ?: current.inputTokens
+        val output = update.outputTokens ?: current.outputTokens
+        val tokensChanged = update.inputTokens != null || update.outputTokens != null
+        val total = update.totalTokens ?: if (tokensChanged && input != null && output != null) {
+            input + output
+        } else {
+            current.totalTokens
+        }
+        return ProviderUsage(
+            inputTokens = input,
+            outputTokens = output,
+            totalTokens = total,
+            cachedInputTokens = update.cachedInputTokens ?: current.cachedInputTokens,
+            reasoningTokens = update.reasoningTokens ?: current.reasoningTokens,
+            costUsd = update.costUsd ?: current.costUsd
+        )
+    }
+
     private fun bearerToken(apiKey: String): String = "Bearer $apiKey"
 
     suspend fun generateResponse(
@@ -291,6 +376,7 @@ class AiChatService {
         val effectiveModel = if (modelName == "all" || modelName.isBlank()) provider.defaultModel else modelName
         var resolvedModel = effectiveModel
         var providerReplayState: String? = null
+        var providerUsage: ProviderUsage? = null
         var isPartial = false
 
         val (key, isKeyProvided) = when (provider) {
@@ -317,6 +403,7 @@ class AiChatService {
                             callGeminiApi(prompt, effectiveModel, key, systemInstruction, conversationHistory)
                         }
                         providerReplayState = result.replayState
+                        providerUsage = result.usage
                         result.text
                     }
                     AiProvider.CHATGPT -> {
@@ -328,6 +415,7 @@ class AiChatService {
                             callOpenAiApi(prompt, effectiveModel, key, systemInstruction, conversationHistory)
                         }
                         providerReplayState = result.replayState
+                        providerUsage = result.usage
                         result.text
                     }
                     AiProvider.CLAUDE -> {
@@ -341,11 +429,12 @@ class AiChatService {
                         providerReplayState = result.replayState
                         resolvedModel = result.resolvedModel
                         isPartial = result.isPartial
+                        providerUsage = result.usage
                         result.text
                     }
                     AiProvider.DEEPSEEK, AiProvider.KIMI, AiProvider.OPENROUTER, AiProvider.AIHUBMIX -> {
                         val config = checkNotNull(openAiCompatibleProviders[provider])
-                        if (onTextDelta != null) {
+                        val result = if (onTextDelta != null) {
                             callOpenAiCompatibleStreamApi(
                                 config, prompt, effectiveModel, key, systemInstruction,
                                 conversationHistory, provider, onTextDelta,
@@ -358,6 +447,8 @@ class AiChatService {
                                 onResolvedModel = { resolvedModel = it }
                             )
                         }
+                        providerUsage = result.usage
+                        result.text
                     }
                     AiProvider.ALL -> null
                 }
@@ -375,6 +466,7 @@ class AiChatService {
                         isSimulated = false,
                         isPartial = isPartial,
                         latencyMs = latency,
+                        usage = providerUsage,
                         activeProfileNotes = activeNotes,
                         providerReplayState = providerReplayState
                     )
@@ -563,6 +655,94 @@ class AiChatService {
         }
     }
 
+    internal fun extractGeminiUsage(response: JsonObject): ProviderUsage? {
+        val usage = response[GEMINI_USAGE_METADATA_KEY] as? JsonObject ?: return null
+        return providerUsage(
+            inputTokens = usage[GEMINI_PROMPT_TOKENS_KEY].asUsageLongOrNull(),
+            outputTokens = usage[GEMINI_CANDIDATE_TOKENS_KEY].asUsageLongOrNull(),
+            totalTokens = usage[GEMINI_TOTAL_TOKENS_KEY].asUsageLongOrNull(),
+            cachedInputTokens = usage[GEMINI_CACHED_TOKENS_KEY].asUsageLongOrNull(),
+            reasoningTokens = usage[GEMINI_THOUGHT_TOKENS_KEY].asUsageLongOrNull()
+        )
+    }
+
+    internal fun extractOpenAiUsage(response: JsonObject): ProviderUsage? {
+        val usage = response[JSON_USAGE_KEY] as? JsonObject ?: return null
+        val inputDetails = usage[JSON_INPUT_TOKEN_DETAILS_KEY] as? JsonObject
+        val outputDetails = usage[JSON_OUTPUT_TOKEN_DETAILS_KEY] as? JsonObject
+        return providerUsage(
+            inputTokens = usage[JSON_INPUT_TOKENS_KEY].asUsageLongOrNull(),
+            outputTokens = usage[JSON_OUTPUT_TOKENS_KEY].asUsageLongOrNull(),
+            totalTokens = usage[JSON_TOTAL_TOKENS_KEY].asUsageLongOrNull(),
+            cachedInputTokens = inputDetails?.get(JSON_CACHED_TOKENS_KEY).asUsageLongOrNull(),
+            reasoningTokens = outputDetails?.get(JSON_REASONING_TOKENS_KEY).asUsageLongOrNull()
+        )
+    }
+
+    internal fun extractOpenAiCompletedUsage(event: JsonObject): ProviderUsage? =
+        if (event[STREAM_TYPE_KEY]?.jsonPrimitive?.contentOrNull == OPENAI_RESPONSE_COMPLETED) {
+            (event[STREAM_RESPONSE_KEY] as? JsonObject)?.let(::extractOpenAiUsage)
+        } else null
+
+    private fun parseClaudeUsageObject(usage: JsonObject?): ProviderUsage? {
+        usage ?: return null
+        val directInput = usage[JSON_INPUT_TOKENS_KEY].asUsageLongOrNull()
+        val cacheCreation = usage[CLAUDE_CACHE_CREATION_TOKENS_KEY].asUsageLongOrNull()
+        val cacheRead = usage[CLAUDE_CACHE_READ_TOKENS_KEY].asUsageLongOrNull()
+        val output = usage[JSON_OUTPUT_TOKENS_KEY].asUsageLongOrNull()
+        val outputDetails = usage[JSON_OUTPUT_TOKEN_DETAILS_KEY] as? JsonObject
+        return providerUsage(
+            inputTokens = sumUsageTokens(directInput, cacheCreation, cacheRead),
+            outputTokens = output,
+            cachedInputTokens = cacheRead,
+            reasoningTokens = outputDetails?.get(CLAUDE_THINKING_TOKENS_KEY).asUsageLongOrNull()
+        )
+    }
+
+    internal fun extractClaudeUsage(response: JsonObject): ProviderUsage? =
+        parseClaudeUsageObject(response[JSON_USAGE_KEY] as? JsonObject)
+
+    internal fun extractClaudeStreamUsage(event: JsonObject): ProviderUsage? =
+        when (event[STREAM_TYPE_KEY]?.jsonPrimitive?.contentOrNull) {
+            CLAUDE_MESSAGE_START -> (event[STREAM_MESSAGE_KEY] as? JsonObject)
+                ?.get(JSON_USAGE_KEY)
+                ?.let { it as? JsonObject }
+                ?.let(::parseClaudeUsageObject)
+            CLAUDE_MESSAGE_DELTA -> parseClaudeUsageObject(event[JSON_USAGE_KEY] as? JsonObject)
+            else -> null
+        }
+
+    internal fun extractOpenAiCompatibleUsage(response: JsonObject): ProviderUsage? {
+        val usage = response[JSON_USAGE_KEY] as? JsonObject ?: return null
+        val promptDetails = usage[JSON_PROMPT_TOKEN_DETAILS_KEY] as? JsonObject
+        val completionDetails = usage[JSON_COMPLETION_TOKEN_DETAILS_KEY] as? JsonObject
+        return providerUsage(
+            inputTokens = usage[JSON_PROMPT_TOKENS_KEY].asUsageLongOrNull(),
+            outputTokens = usage[JSON_COMPLETION_TOKENS_KEY].asUsageLongOrNull(),
+            totalTokens = usage[JSON_TOTAL_TOKENS_KEY].asUsageLongOrNull(),
+            cachedInputTokens = promptDetails?.get(JSON_CACHED_TOKENS_KEY).asUsageLongOrNull()
+                ?: usage[DEEPSEEK_CACHE_HIT_TOKENS_KEY].asUsageLongOrNull(),
+            reasoningTokens = completionDetails?.get(JSON_REASONING_TOKENS_KEY).asUsageLongOrNull(),
+            costUsd = usage[JSON_COST_KEY].asDoubleOrNull()
+        )
+    }
+
+    internal fun buildOpenAiCompatibleRequestPayload(
+        provider: AiProvider,
+        model: String,
+        messages: JsonArray,
+        stream: Boolean
+    ): JsonObject = buildJsonObject {
+        put(JSON_MODEL_KEY, model)
+        put(JSON_MESSAGES_KEY, messages)
+        if (stream) put(JSON_STREAM_KEY, true)
+        if (provider == AiProvider.OPENROUTER) {
+            putJsonObject(JSON_USAGE_KEY) {
+                put(JSON_INCLUDE_KEY, true)
+            }
+        }
+    }
+
     // --- Google Gemini REST API ---
     private suspend fun callGeminiApi(
         prompt: String,
@@ -597,7 +777,8 @@ class AiChatService {
         return GeminiGenerationResult(
             text = extractGeminiStreamText(parsed)
                 ?: "Received empty content response from Gemini.",
-            replayState = content?.let { encodeGeminiReplayState(listOf(it)) }
+            replayState = content?.let { encodeGeminiReplayState(listOf(it)) },
+            usage = extractGeminiUsage(parsed)
         )
     }
 
@@ -637,7 +818,8 @@ class AiChatService {
         return OpenAiGenerationResult(
             text = extractOpenAiResponseText(parsed)
                 ?: "Received empty message content from OpenAI.",
-            replayState = extractOpenAiReplayState(parsed)
+            replayState = extractOpenAiReplayState(parsed),
+            usage = extractOpenAiUsage(parsed)
         )
     }
 
@@ -829,7 +1011,8 @@ class AiChatService {
             text = extractClaudeResponseText(parsed) ?: "Received empty content block from Claude.",
             replayState = if (isPartial) null else extractClaudeReplayState(parsed),
             resolvedModel = resolvedModel,
-            isPartial = isPartial
+            isPartial = isPartial,
+            usage = extractClaudeUsage(parsed)
         )
     }
 
@@ -1120,6 +1303,7 @@ class AiChatService {
             .post(requestPayload.toString().toRequestBody(JSON_MEDIA_TYPE.toMediaType()))
             .build()
         val replayContents = mutableListOf<JsonObject>()
+        var usage: ProviderUsage? = null
         val text = executeSse(
             request = request,
             extractText = ::extractGeminiStreamText,
@@ -1127,11 +1311,13 @@ class AiChatService {
             onTextDelta = onTextDelta,
             onEvent = { event ->
                 extractGeminiReplayContent(event)?.let(replayContents::add)
+                usage = mergeProviderUsage(usage, extractGeminiUsage(event))
             }
         )
         return GeminiGenerationResult(
             text = text.ifEmpty { "Received empty content response from Gemini." },
-            replayState = encodeGeminiReplayState(replayContents)
+            replayState = encodeGeminiReplayState(replayContents),
+            usage = usage
         )
     }
 
@@ -1162,6 +1348,7 @@ class AiChatService {
             .post(requestPayload.toString().toRequestBody(JSON_MEDIA_TYPE.toMediaType()))
             .build()
         var replayState: String? = null
+        var usage: ProviderUsage? = null
         val text = executeSse(
             request = request,
             extractText = ::extractOpenAiStreamText,
@@ -1169,11 +1356,13 @@ class AiChatService {
             onTextDelta = onTextDelta,
             onEvent = { event ->
                 extractOpenAiCompletedReplayState(event)?.let { replayState = it }
+                usage = mergeProviderUsage(usage, extractOpenAiCompletedUsage(event))
             }
         )
         return OpenAiGenerationResult(
             text = text.ifEmpty { "Received empty message content from OpenAI." },
-            replayState = replayState
+            replayState = replayState,
+            usage = usage
         )
     }
 
@@ -1201,6 +1390,7 @@ class AiChatService {
         val replayBlocks = mutableMapOf<Int, JsonObject>()
         var resolvedModel = metadata.resolvedModel
         var stopReason: String? = null
+        var usage: ProviderUsage? = null
         val text = executeSse(
             request,
             ::extractClaudeStreamText,
@@ -1209,6 +1399,7 @@ class AiChatService {
             onEvent = { event ->
                 extractClaudeStreamResolvedModel(event)?.let { resolvedModel = it }
                 extractClaudeStreamStopReason(event)?.let { stopReason = it }
+                usage = mergeProviderUsage(usage, extractClaudeStreamUsage(event))
                 applyClaudeReplayEvent(replayBlocks, event)
             }
         )
@@ -1220,7 +1411,8 @@ class AiChatService {
             text = text.ifEmpty { "Received empty content block from Claude." },
             replayState = if (isPartial) null else encodeClaudeStreamReplayState(replayBlocks),
             resolvedModel = resolvedModel,
-            isPartial = isPartial
+            isPartial = isPartial,
+            usage = usage
         )
     }
 
@@ -1478,14 +1670,15 @@ class AiChatService {
         systemInstruction: String?, conversationHistory: List<ModelChatMessage>,
         provider: AiProvider, onTextDelta: (String) -> Unit,
         onResolvedModel: (String) -> Unit = {}
-    ): String {
-        val requestPayload = buildJsonObject {
-            put(JSON_MODEL_KEY, model)
-            put(JSON_MESSAGES_KEY, buildOpenAiCompatibleMessages(
+    ): OpenAiCompatibleGenerationResult {
+        val requestPayload = buildOpenAiCompatibleRequestPayload(
+            provider = provider,
+            model = model,
+            messages = buildOpenAiCompatibleMessages(
                 prompt, systemInstruction, conversationHistory, provider
-            ))
-            put(JSON_STREAM_KEY, true)
-        }
+            ),
+            stream = true
+        )
         val requestBuilder = Request.Builder().url(config.endpointUrl)
             .addHeader(HEADER_AUTHORIZATION, bearerToken(apiKey))
             .addHeader(HEADER_CONTENT_TYPE, JSON_MEDIA_TYPE)
@@ -1494,16 +1687,20 @@ class AiChatService {
             requestPayload.toString().toRequestBody(JSON_MEDIA_TYPE.toMediaType())
         ).build()
 
-        return executeSse(
+        var usage: ProviderUsage? = null
+        val waitForDoneSentinel = provider == AiProvider.OPENROUTER
+        val text = executeSse(
             request,
-            extractText = { event ->
-                extractOpenAiCompatibleModel(event)?.let(onResolvedModel)
-                extractOpenAiCompatibleStreamText(event)
-            },
-            isComplete = ::isOpenAiCompatibleStreamComplete,
+            extractText = ::extractOpenAiCompatibleStreamText,
+            isComplete = if (waitForDoneSentinel) { { false } } else ::isOpenAiCompatibleStreamComplete,
             onTextDelta = onTextDelta,
-            completeOnDoneSentinel = true
+            completeOnDoneSentinel = true,
+            onEvent = { event ->
+                extractOpenAiCompatibleModel(event)?.let(onResolvedModel)
+                usage = mergeProviderUsage(usage, extractOpenAiCompatibleUsage(event))
+            }
         ).ifEmpty { "Received empty message content." }
+        return OpenAiCompatibleGenerationResult(text = text, usage = usage)
     }
 
     private suspend fun callOpenAiCompatibleApi(
@@ -1515,7 +1712,7 @@ class AiChatService {
         conversationHistory: List<ModelChatMessage>,
         provider: AiProvider,
         onResolvedModel: (String) -> Unit = {}
-    ): String {
+    ): OpenAiCompatibleGenerationResult {
         val messagesArray = buildOpenAiCompatibleMessages(
             prompt = prompt,
             systemInstruction = systemInstruction,
@@ -1523,10 +1720,12 @@ class AiChatService {
             provider = provider
         )
 
-        val requestPayload = buildJsonObject {
-            put(JSON_MODEL_KEY, model)
-            put(JSON_MESSAGES_KEY, messagesArray)
-        }
+        val requestPayload = buildOpenAiCompatibleRequestPayload(
+            provider = provider,
+            model = model,
+            messages = messagesArray,
+            stream = false
+        )
 
         val body = requestPayload.toString().toRequestBody(JSON_MEDIA_TYPE.toMediaType())
         val requestBuilder = Request.Builder()
@@ -1544,7 +1743,10 @@ class AiChatService {
         val message = firstChoice?.get(STREAM_MESSAGE_KEY)?.jsonObject
         val content = message?.get(JSON_CONTENT_KEY)?.jsonPrimitive?.contentOrNull
 
-        return content ?: "Received empty message content."
+        return OpenAiCompatibleGenerationResult(
+            text = content ?: "Received empty message content.",
+            usage = extractOpenAiCompatibleUsage(parsed)
+        )
     }
 
     internal fun buildOpenAiCompatibleMessages(

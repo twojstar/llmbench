@@ -767,14 +767,6 @@ fun ChatMessageItem(
                         )
                     }
                 }
-                if (message.latencyMs != null) {
-                    Text(
-                        text = "(${message.latencyMs}ms)",
-                        style = MaterialTheme.typography.labelSmall,
-                        fontSize = 10.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
-                    )
-                }
             } else {
                 Text(
                     text = "You",
@@ -827,6 +819,19 @@ fun ChatMessageItem(
                     },
                     lineHeight = 21.sp
                 )
+
+                if (!isUser) {
+                    formatChatResponseDiagnostics(message)?.let { diagnostics ->
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            text = diagnostics,
+                            style = MaterialTheme.typography.labelSmall,
+                            fontSize = 10.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
+                            lineHeight = 14.sp
+                        )
+                    }
+                }
 
                 // Active style profile or system prompt notes badge
                 if (!isUser && message.activeProfileNotes.isNotEmpty()) {

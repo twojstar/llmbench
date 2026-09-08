@@ -79,6 +79,12 @@ The current native path does not expose client tools, so streaming replay only m
 
 OpenRouter and other OpenAI-compatible gateways may return the model actually used. LlmBench captures that response metadata when present and falls back to the requested model/route otherwise, so aliases such as `openrouter/free` can show the actual responder.
 
+## Usage and comparison metadata
+
+Native/API responses retain provider-reported usage next to the existing local wall-clock latency. The portable message metadata normalizes input, output and total tokens while preserving optional cached-input and reasoning-token counts. Claude input includes direct, cache-creation and cache-read tokens so its normalized input matches Anthropic's billing/accounting semantics; Gemini keeps `thoughtsTokenCount` separate while preserving the provider's `totalTokenCount`.
+
+Costs are recorded only when the response reports them. LlmBench does not estimate provider prices in this path. OpenRouter requests usage accounting explicitly and may therefore supply a reported USD cost; other OpenAI-compatible gateways are parsed opportunistically when they return compatible usage fields. Hidden reasoning content remains opaque and is never exposed by these counters.
+
 ## Web/account-chat TODO
 
 - [x] Never invent a fallback Studio prompt when no rendered instructions are active.
@@ -106,7 +112,7 @@ OpenRouter and other OpenAI-compatible gateways may return the model actually us
 - [x] Record and display the actual routed model returned by OpenRouter when available.
 - [x] Resolve Claude runtime metadata from the Anthropic Models API with a short independent lookup budget; cache verified model data, cache alias mappings briefly, and use a short-lived 2048/no-reasoning outage entry so repeated failures do not block every generation while recovery remains automatic.
 - [x] Add a provider-aware Prompt Studio preview showing effective instruction placement, history strategy and transport metadata without exposing API keys or hidden reasoning state.
-- [ ] Parse provider usage/token metadata so comparisons can include latency and token/cost information when the API returns it.
+- [x] Parse provider usage/token metadata so comparisons can include latency and provider-reported token/cost information when the API returns it.
 - [ ] Keep transport/SSE/history tests JVM-testable; device testing should be required only for Android/WebView behavior.
 
 ## References
