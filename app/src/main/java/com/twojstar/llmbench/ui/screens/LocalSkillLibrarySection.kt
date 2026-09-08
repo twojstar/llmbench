@@ -1,5 +1,8 @@
 package com.twojstar.llmbench.ui.screens
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -10,6 +13,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.FolderCopy
 import androidx.compose.material.icons.filled.Visibility
@@ -29,6 +33,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.twojstar.llmbench.data.skills.LocalSkillLibraryStore
@@ -45,6 +50,7 @@ internal fun LocalSkillLibrarySection(
     onViewSource: (String, String) -> Unit,
     onMessage: (String) -> Unit
 ) {
+    val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var skills by remember { mutableStateOf<List<LocalSkillSummary>>(emptyList()) }
     var busySkill by remember { mutableStateOf<String?>(null) }
@@ -127,7 +133,10 @@ internal fun LocalSkillLibrarySection(
                                             onCountChanged(skills.size)
                                             onMessage("Local skill is no longer available.")
                                         } else {
-                                            onViewSource(skill.name, document.source)
+                                            onViewSource(
+                                                skill.name,
+                                                boundedSkillSourceForDisplay(document.source)
+                                            )
                                         }
                                     } finally {
                                         busySkill = null
@@ -138,6 +147,35 @@ internal fun LocalSkillLibrarySection(
                             Icon(Icons.Default.Visibility, contentDescription = null)
                             Spacer(Modifier.width(6.dp))
                             Text("View source")
+                        }
+                        Spacer(Modifier.width(8.dp))
+                        TextButton(
+                            enabled = busySkill == null,
+                            onClick = {
+                                scope.launch {
+                                    busySkill = skill.name
+                                    try {
+                                        val document = store.read(skill.name)
+                                        if (document == null) {
+                                            skills = store.load()
+                                            onCountChanged(skills.size)
+                                            onMessage("Local skill is no longer available.")
+                                        } else {
+                                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                            clipboard.setPrimaryClip(
+                                                ClipData.newPlainText(skill.name, document.source)
+                                            )
+                                            onMessage("Copied full '${skill.name}' source.")
+                                        }
+                                    } finally {
+                                        busySkill = null
+                                    }
+                                }
+                            }
+                        ) {
+                            Icon(Icons.Default.ContentCopy, contentDescription = null)
+                            Spacer(Modifier.width(6.dp))
+                            Text("Copy full")
                         }
                         Spacer(Modifier.width(8.dp))
                         TextButton(
