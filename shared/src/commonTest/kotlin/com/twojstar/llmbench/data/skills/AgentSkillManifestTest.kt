@@ -109,6 +109,28 @@ class AgentSkillManifestTest {
     }
 
     @Test
+    fun rejectsDuplicateEmptyMetadataField() {
+        val source = """
+            ---
+            name: duplicate-metadata
+            description: Reject ambiguous frontmatter before importing a skill.
+            metadata: {}
+            metadata:
+            ---
+            Instructions.
+        """.trimIndent()
+
+        val result = AgentSkillManifestParser.parse(source)
+
+        assertFalse(result.isValid)
+        assertTrue(
+            result.issues.any {
+                it.field == "metadata" && it.message.contains("Duplicate frontmatter field")
+            }
+        )
+    }
+
+    @Test
     fun parsesLiteralMetadataWithoutExecutingIt() {
         val source = """
             ---
