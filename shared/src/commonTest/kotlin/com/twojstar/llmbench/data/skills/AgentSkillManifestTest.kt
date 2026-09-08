@@ -67,6 +67,93 @@ class AgentSkillManifestTest {
     }
 
     @Test
+    fun preservesFoldedParagraphAndMoreIndentedLines() {
+        val source = """
+            ---
+            name: folded-details
+            description: >-
+              First paragraph.
+
+              Second paragraph.
+                indented detail
+              Tail.
+            ---
+            Instructions.
+        """.trimIndent()
+
+        val result = AgentSkillManifestParser.parse(source)
+
+        assertTrue(result.isValid)
+        val description = requireNotNull(result.manifest).description
+        assertTrue(description.contains("First paragraph.\nSecond paragraph."))
+        assertTrue(description.contains("\n  indented detail\n"))
+    }
+
+    @Test
+    fun keepsIndentedLiteralDelimiterInsideFrontmatter() {
+        val source = """
+            ---
+            name: literal-delimiter
+            description: Preview literal metadata safely.
+            metadata:
+              note: |-
+                before
+                ---
+                after
+            ---
+            Instructions.
+        """.trimIndent()
+
+        val result = AgentSkillManifestParser.parse(source)
+
+        assertTrue(result.isValid)
+        assertEquals("before\n---\nafter", result.manifest?.metadata?.get("note"))
+        assertEquals("Instructions.", result.manifest?.instructions)
+    }
+
+    @Test
+    fun keepsIndentedFoldedDelimiterInsideFrontmatter() {
+        val source = """
+            ---
+            name: folded-delimiter
+            description: >-
+              before
+              ---
+              after
+            ---
+            Instructions.
+        """.trimIndent()
+
+        val result = AgentSkillManifestParser.parse(source)
+
+        assertTrue(result.isValid)
+        assertEquals("before --- after", result.manifest?.description)
+        assertEquals("Instructions.", result.manifest?.instructions)
+    }
+
+    @Test
+    fun handlesInlineYamlCommentsWithoutChangingScalarContent() {
+        val source = """
+            ---
+            name: commented-skill # documented name
+            description: "Quoted description" # documented description
+            license: 'Apache-2.0' # documented license
+            x-doc-url: https://example.invalid/page#anchor
+            ---
+            Instructions.
+        """.trimIndent()
+
+        val result = AgentSkillManifestParser.parse(source)
+
+        assertTrue(result.isValid)
+        val manifest = requireNotNull(result.manifest)
+        assertEquals("commented-skill", manifest.name)
+        assertEquals("Quoted description", manifest.description)
+        assertEquals("Apache-2.0", manifest.license)
+        assertEquals("https://example.invalid/page#anchor", manifest.extraFrontmatter["x-doc-url"])
+    }
+
+    @Test
     fun rejectsMissingFrontmatter() {
         val result = AgentSkillManifestParser.parse("# Not a skill")
 
@@ -109,13 +196,14 @@ class AgentSkillManifestTest {
     }
 
     @Test
-    fun rejectsDuplicateEmptyMetadataField() {
+    fun rejectsDuplicateMetadataField() {
         val source = """
             ---
             name: duplicate-metadata
             description: Reject ambiguous frontmatter before importing a skill.
             metadata: {}
             metadata:
+              author: twojstar
             ---
             Instructions.
         """.trimIndent()
@@ -123,11 +211,49 @@ class AgentSkillManifestTest {
         val result = AgentSkillManifestParser.parse(source)
 
         assertFalse(result.isValid)
+        assertTrue(result.issues.single().message.contains("Duplicate key"))
+    }
+
+    @Test
+    fun rejectsNestedMetadataInsteadOfFlatteningIt() {
+        val source = """
+            ---
+            name: nested-metadata
+            description: Reject metadata that cannot fit the preview model.
+            metadata:
+              author: twojstar
+              nested:
+                channel: stable
+            ---
+            Instructions.
+        """.trimIndent()
+
+        val result = AgentSkillManifestParser.parse(source)
+
+        assertFalse(result.isValid)
+        assertNull(result.manifest)
         assertTrue(
             result.issues.any {
-                it.field == "metadata" && it.message.contains("Duplicate frontmatter field")
+                it.field == "metadata.nested" && it.message.contains("must be YAML scalars")
             }
         )
+    }
+
+    @Test
+    fun rejectsUnterminatedSingleQuotedScalar() {
+        val source = """
+            ---
+            name: malformed-quote
+            description: 'unterminated
+            ---
+            Instructions.
+        """.trimIndent()
+
+        val result = AgentSkillManifestParser.parse(source)
+
+        assertFalse(result.isValid)
+        assertNull(result.manifest)
+        assertTrue(result.issues.single().message.contains("Invalid YAML frontmatter"))
     }
 
     @Test
