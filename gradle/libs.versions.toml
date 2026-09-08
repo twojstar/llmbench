@@ -7,6 +7,7 @@ activityCompose = "1.10.1"
 composeBom = "2025.02.00"
 navigationCompose = "2.10.0"
 serialization = "1.11.0"
+kotaml = "0.110.0"
 material3 = "1.3.1"
 materialIconsExtended = "1.7.8"
 room = "2.6.1"
@@ -32,6 +33,7 @@ androidx-material3 = { group = "androidx.compose.material3", name = "material3" 
 androidx-material-icons-extended = { group = "androidx.compose.material", name = "material-icons-extended" }
 androidx-navigation-compose = { group = "androidx.navigation", name = "navigation-compose", version.ref = "navigationCompose" }
 kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "serialization" }
+kotaml = { group = "io.heapy.kotaml", name = "kotaml", version.ref = "kotaml" }
 kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "coroutines" }
 okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version.ref = "okhttp" }
 okhttp-logging = { group = "com.squareup.okhttp3", name = "logging-interceptor", version.ref = "okhttp" }
