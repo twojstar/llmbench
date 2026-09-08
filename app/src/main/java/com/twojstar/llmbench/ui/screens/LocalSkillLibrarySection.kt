@@ -71,27 +71,34 @@ internal fun LocalSkillLibrarySection(
             scope.launch {
                 busySkill = skillName
                 try {
-                    val stored = store.read(skillName)
-                    if (stored == null) {
-                        skills = store.load()
-                        onCountChanged(skills.size)
-                        onMessage("Local skill is no longer available.")
-                    } else {
-                        val source = stored.source
-                        MarkdownDocumentFileAccess.export(
-                            context = context,
-                            uri = uri,
-                            document = TextDocument(
-                                text = source,
-                                hadUtf8Bom = false,
-                                lineEndings = TextDocumentCodec.detectLineEndings(source)
+                    val exportFailure = runCatching {
+                        val stored = store.read(skillName)
+                        if (stored == null) {
+                            skills = store.load()
+                            onCountChanged(skills.size)
+                            onMessage("Local skill is no longer available.")
+                        } else {
+                            val source = stored.source
+                            MarkdownDocumentFileAccess.export(
+                                context = context,
+                                uri = uri,
+                                document = TextDocument(
+                                    text = source,
+                                    hadUtf8Bom = false,
+                                    lineEndings = TextDocumentCodec.detectLineEndings(source)
+                                )
                             )
-                        )
-                        onMessage("Exported '$skillName' as SKILL.md.")
+                            onMessage("Exported '$skillName' as SKILL.md.")
+                        }
+                    }.exceptionOrNull()
+                    if (exportFailure != null) {
+                        currentCoroutineContext().ensureActive()
+                        when (exportFailure) {
+                            is IOException, is SecurityException ->
+                                onMessage(exportFailure.message ?: "Could not export local skill.")
+                            else -> throw exportFailure
+                        }
                     }
-                } catch (error: Exception) {
-                    currentCoroutineContext().ensureActive()
-                    onMessage(error.message ?: "Could not export local skill.")
                 } finally {
                     busySkill = null
                 }
