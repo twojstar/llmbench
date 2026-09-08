@@ -68,6 +68,10 @@ jobs:
           cache_with_parser = '        return ClaudeMetadataCacheKey(model, fingerprint)\n    }\n\n    internal fun parseClaudeModelId(rawJson: String): String? = runCatching {\n        json.parseToJsonElement(rawJson).jsonObject[JSON_MODEL_ID_KEY]\n            ?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }\n    }.getOrNull()\n\n    internal fun readClaudeMetadataCache(\n'
           assert text.count(cache_anchor) == 1
           text = text.replace(cache_anchor, cache_with_parser, 1)
+
+          duplicate_test_header = '    metadata_tests + "    @Test\\n    fun claudePayloadUsesResolvedOutputLimitInBufferedAndStreamingModes() {",'
+          assert text.count(duplicate_test_header) == 1
+          text = text.replace(duplicate_test_header, '    metadata_tests,', 1)
           path.write_text(text)
           PY
       - name: Apply final Claude hardening
