@@ -40,6 +40,7 @@ jobs:
 
       - name: Apply Claude thinking patch
         run: |
+          python .github/scripts/one-shot-claude-thinking-sourcefix.py
           python .github/scripts/one-shot-claude-thinking.py
           python .github/scripts/one-shot-claude-thinking-postfix.py
 
@@ -60,6 +61,7 @@ jobs:
                   shared/src/commonTest/kotlin/com/twojstar/llmbench/data/model/ProviderRuntimeCapabilitiesTest.kt
           git rm .github/scripts/one-shot-claude-thinking.py \
                  .github/scripts/one-shot-claude-thinking-postfix.py \
+                 .github/scripts/one-shot-claude-thinking-sourcefix.py \
                  .github/workflows/one-shot-claude-thinking.yml
           git diff --cached --quiet && exit 1 || true
           git config user.name "GPTomek"
