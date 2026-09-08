@@ -38,11 +38,19 @@ class LocalSkillLibraryStoreTest {
     }
 
     @Test
-    fun addingSameSkillNameReplacesItsStoredSource() = runBlocking {
-        store.add(skillSource("release-checklist", "First version."))
+    fun addingSameSkillNameRequiresExplicitReplacement() = runBlocking {
+        val original = skillSource("release-checklist", "First version.")
         val replacement = skillSource("release-checklist", "Second version.")
+        store.add(original)
 
-        store.add(replacement)
+        val conflict = assertThrows(LocalSkillAlreadyExistsException::class.java) {
+            runBlocking { store.add(replacement) }
+        }
+
+        assertEquals("release-checklist", conflict.skillName)
+        assertEquals(original, store.read("release-checklist")?.source)
+
+        store.add(replacement, replaceExisting = true)
 
         assertEquals(1, store.load().size)
         assertEquals(replacement, store.read("release-checklist")?.source)
