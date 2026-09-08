@@ -58,6 +58,18 @@ class ProviderRuntimeCapabilitiesTest {
     }
 
     @Test
+    fun claudeUsesModelCapabilityMetadataAndOpaqueContentReplay() {
+        assertEquals(
+            ReasoningControlStrategy.MODEL_CAPABILITY_METADATA,
+            AiProvider.CLAUDE.reasoningControlStrategy()
+        )
+        assertEquals(
+            ConversationStateStrategy.BOUNDED_PROVIDER_CONTENT_REPLAY,
+            AiProvider.CLAUDE.runtimeCapabilities().conversationStateStrategy
+        )
+    }
+
+    @Test
     fun compareModeIsFanOutRatherThanAProviderTransport() {
         val capabilities = AiProvider.ALL.runtimeCapabilities()
 

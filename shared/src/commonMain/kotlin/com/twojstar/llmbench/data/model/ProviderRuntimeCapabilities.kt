@@ -20,6 +20,18 @@ enum class ConversationStateStrategy {
     BOUNDED_PROVIDER_CONTENT_REPLAY
 }
 
+enum class ReasoningControlStrategy {
+    PER_PROVIDER,
+    PROVIDER_DEFAULT,
+    MODEL_CAPABILITY_METADATA
+}
+
+fun AiProvider.reasoningControlStrategy(): ReasoningControlStrategy = when (this) {
+    AiProvider.ALL -> ReasoningControlStrategy.PER_PROVIDER
+    AiProvider.CLAUDE -> ReasoningControlStrategy.MODEL_CAPABILITY_METADATA
+    else -> ReasoningControlStrategy.PROVIDER_DEFAULT
+}
+
 data class ProviderRuntimeCapabilities(
     val transport: NativeChatTransport,
     val systemInstructionPlacement: SystemInstructionPlacement,
@@ -53,7 +65,7 @@ fun AiProvider.runtimeCapabilities(): ProviderRuntimeCapabilities = when (this) 
     AiProvider.CLAUDE -> ProviderRuntimeCapabilities(
         transport = NativeChatTransport.ANTHROPIC_MESSAGES,
         systemInstructionPlacement = SystemInstructionPlacement.NATIVE_FIELD,
-        conversationStateStrategy = ConversationStateStrategy.BOUNDED_PROVIDER_TEXT_REPLAY,
+        conversationStateStrategy = ConversationStateStrategy.BOUNDED_PROVIDER_CONTENT_REPLAY,
         streamsText = true,
         reportsResolvedModel = false
     )

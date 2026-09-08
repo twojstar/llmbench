@@ -6,6 +6,7 @@ import com.twojstar.llmbench.data.model.CHAT_ROLE_USER
 import com.twojstar.llmbench.data.model.ModelChatMessage
 import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -37,6 +38,10 @@ private const val TEST_OPAQUE_SIGNATURE = "opaque-signature"
 private const val TEST_THOUGHT_SIGNATURE_KEY = "thoughtSignature"
 private const val TEST_CLAUDE_MAX_TOKENS = 128000
 private const val TEST_CLAUDE_OUTAGE_MODEL = "claude-outage"
+private const val TEST_CLAUDE_MODEL = "claude-sonnet-5"
+private const val TEST_CLAUDE_LEGACY_MODEL = "claude-haiku-4-5-20251001"
+private const val TEST_CLAUDE_SIGNATURE = "claude-signature"
+private const val TEST_CLAUDE_REDACTED_DATA = "redacted-data"
 private const val TEST_OPENAI_MODEL = "gpt-test-model"
 private const val TEST_OPENAI_REASONING_TYPE = "reasoning"
 private const val TEST_OPENAI_MESSAGE_TYPE = "message"
@@ -44,6 +49,14 @@ private const val TEST_OPENAI_ENCRYPTED_CONTENT_KEY = "encrypted_content"
 private const val TEST_OPENAI_ENCRYPTED_REASONING = "encrypted-reasoning"
 private const val TEST_OPENAI_REASONING_INCLUDE = "reasoning.encrypted_content"
 private const val TEST_OPENAI_TEXT_DELTA_SSE = "data: {\"type\":\"response.output_text.delta\",\"delta\":\"hello\"}\n\n"
+
+private fun claudeReplayStateJson(): String = """
+    [
+      {"type":"thinking","thinking":"reasoning summary","signature":"$TEST_CLAUDE_SIGNATURE"},
+      {"type":"redacted_thinking","data":"$TEST_CLAUDE_REDACTED_DATA"},
+      {"type":"text","text":"$CLAUDE_ANSWER"}
+    ]
+""".trimIndent()
 
 private fun openAiReplayStateJson(): String = """
     [
@@ -105,8 +118,8 @@ class AiChatServiceTest {
     fun claudePayloadUsesResolvedOutputLimitInBufferedAndStreamingModes() {
         val service = AiChatService()
         val messages = Json.parseToJsonElement("""[{"role":"user","content":"hello"}]""").jsonArray
-        val buffered = service.buildClaudeRequestPayload("claude-sonnet-5", 128000, false, SYSTEM_PROMPT, messages)
-        val streaming = service.buildClaudeRequestPayload("claude-sonnet-5", 128000, true, null, messages)
+        val buffered = service.buildClaudeRequestPayload(TEST_CLAUDE_MODEL, 128000, false, SYSTEM_PROMPT, messages)
+        val streaming = service.buildClaudeRequestPayload(TEST_CLAUDE_MODEL, 128000, true, null, messages)
 
         assertEquals("128000", buffered.getValue("max_tokens").jsonPrimitive.content)
         assertEquals(SYSTEM_PROMPT, buffered.getValue("system").jsonPrimitive.content)
@@ -114,6 +127,126 @@ class AiChatServiceTest {
         assertEquals("128000", streaming.getValue("max_tokens").jsonPrimitive.content)
         assertEquals("true", streaming.getValue("stream").jsonPrimitive.content)
         assertFalse("system" in streaming)
+    }
+
+    @Test
+    fun parsesClaudeReasoningCapabilitiesFromModelMetadata() {
+        val raw = """
+            {
+              "max_tokens": 128000,
+              "capabilities": {
+                "thinking": {
+                  "supported": true,
+                  "types": {
+                    "adaptive": {"supported": true},
+                    "enabled": {"supported": false}
+                  }
+                },
+                "effort": {
+                  "supported": true,
+                  "high": {"supported": true}
+                }
+              }
+            }
+        """.trimIndent()
+
+        val capabilities = AiChatService().parseClaudeReasoningCapabilities(raw)
+
+        assertEquals(
+            ClaudeReasoningCapabilities(
+                supportsAdaptive = true,
+                supportsHighEffort = true
+            ),
+            capabilities
+        )
+    }
+
+    @Test
+    fun claudePayloadUsesModelAwareAdaptiveAndLegacyThinking() {
+        val service = AiChatService()
+        val messages = Json.parseToJsonElement("""[{"role":"user","content":"hello"}]""").jsonArray
+        val adaptive = service.buildClaudeRequestPayload(
+            TEST_CLAUDE_MODEL,
+            TEST_CLAUDE_MAX_TOKENS,
+            false,
+            null,
+            messages,
+            ClaudeReasoningCapabilities(supportsAdaptive = true, supportsHighEffort = true)
+        )
+        val legacy = service.buildClaudeRequestPayload(
+            TEST_CLAUDE_LEGACY_MODEL,
+            64_000,
+            false,
+            null,
+            messages,
+            ClaudeReasoningCapabilities(supportsEnabled = true)
+        )
+
+        assertEquals("adaptive", adaptive.getValue("thinking").jsonObject.getValue("type").jsonPrimitive.content)
+        assertEquals("high", adaptive.getValue("output_config").jsonObject.getValue("effort").jsonPrimitive.content)
+        assertEquals("enabled", legacy.getValue("thinking").jsonObject.getValue("type").jsonPrimitive.content)
+        assertEquals("4096", legacy.getValue("thinking").jsonObject.getValue("budget_tokens").jsonPrimitive.content)
+    }
+
+    @Test
+    fun claudeHistoryReplaysOpaqueThinkingBlocksOnlyForMatchingModel() {
+        val history = listOf(
+            ModelChatMessage(id = "u1", sender = CHAT_ROLE_USER, text = FIRST_QUESTION),
+            ModelChatMessage(
+                id = "claude",
+                sender = CHAT_ROLE_ASSISTANT,
+                provider = AiProvider.CLAUDE,
+                modelName = TEST_CLAUDE_MODEL,
+                text = CLAUDE_ANSWER,
+                providerReplayState = claudeReplayStateJson()
+            ),
+            ModelChatMessage(id = "u2", sender = CHAT_ROLE_USER, text = FOLLOW_UP)
+        )
+        val service = AiChatService()
+
+        val replayed = service.buildClaudeMessages(FOLLOW_UP, history, modelName = TEST_CLAUDE_MODEL)
+        val blocks = replayed[1].jsonObject.getValue(TEST_CONTENT_KEY).jsonArray
+        assertEquals(listOf("thinking", "redacted_thinking", "text"), blocks.map {
+            it.jsonObject.getValue("type").jsonPrimitive.content
+        })
+        assertEquals(
+            TEST_CLAUDE_SIGNATURE,
+            blocks[0].jsonObject.getValue("signature").jsonPrimitive.content
+        )
+        assertEquals(
+            TEST_CLAUDE_REDACTED_DATA,
+            blocks[1].jsonObject.getValue("data").jsonPrimitive.content
+        )
+
+        val switched = service.buildClaudeMessages(FOLLOW_UP, history, modelName = "claude-opus-5")
+        assertEquals(
+            CLAUDE_ANSWER,
+            switched[1].jsonObject.getValue(TEST_CONTENT_KEY).jsonPrimitive.content
+        )
+    }
+
+    @Test
+    fun claudeStreamingReconstructsThinkingSignatureRedactionAndTextInOrder() {
+        val service = AiChatService()
+        val blocks = mutableMapOf<Int, JsonObject>()
+        listOf(
+            """{"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"","signature":""}}""",
+            """{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"reasoning summary"}}""",
+            """{"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"$TEST_CLAUDE_SIGNATURE"}}""",
+            """{"type":"content_block_start","index":1,"content_block":{"type":"redacted_thinking","data":"$TEST_CLAUDE_REDACTED_DATA"}}""",
+            """{"type":"content_block_start","index":2,"content_block":{"type":"text","text":""}}""",
+            """{"type":"content_block_delta","index":2,"delta":{"type":"text_delta","text":"$CLAUDE_ANSWER"}}"""
+        ).forEach { raw ->
+            service.applyClaudeReplayEvent(blocks, Json.parseToJsonElement(raw).jsonObject)
+        }
+
+        val replay = service.parseClaudeReplayState(service.encodeClaudeStreamReplayState(blocks))
+        assertEquals(listOf("thinking", "redacted_thinking", "text"), replay.map {
+            it.getValue("type").jsonPrimitive.content
+        })
+        assertEquals(TEST_CLAUDE_SIGNATURE, replay[0].getValue("signature").jsonPrimitive.content)
+        assertEquals(TEST_CLAUDE_REDACTED_DATA, replay[1].getValue("data").jsonPrimitive.content)
+        assertEquals(CLAUDE_ANSWER, replay[2].getValue("text").jsonPrimitive.content)
     }
 
     @Test
