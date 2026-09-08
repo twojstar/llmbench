@@ -38,6 +38,8 @@ private const val TEST_GEMINI_ROLE = "model"
 private const val TEST_OPAQUE_SIGNATURE = "opaque-signature"
 private const val TEST_THOUGHT_SIGNATURE_KEY = "thoughtSignature"
 private const val TEST_CLAUDE_MAX_TOKENS = 128000
+private const val TEST_CLAUDE_MAX_TOKENS_TEXT = "128000"
+private const val TEST_CLAUDE_SAME_KEY = "same-key"
 private const val TEST_CLAUDE_OUTAGE_MODEL = "claude-outage"
 private const val TEST_CLAUDE_MODEL = "claude-sonnet-5"
 private const val TEST_CLAUDE_LEGACY_MODEL = "claude-haiku-4-5-20251001"
@@ -109,29 +111,39 @@ class AiChatServiceTest {
     }
 
     @Test
-    fun claudeMetadataLookupUsesShortTimeoutAndDoesNotPinFailureFallback() {
-        val metadataClient = buildClaudeMetadataHttpClient(okhttp3.OkHttpClient())
-        assertEquals(2_000L, metadataClient.callTimeoutMillis.toLong())
-
-        val service = AiChatService()
-        assertEquals(2048, service.rememberClaudeMaxTokens(TEST_CLAUDE_OUTAGE_MODEL, "bad-key", null))
-        assertEquals(128000, service.rememberClaudeMaxTokens(TEST_CLAUDE_OUTAGE_MODEL, "bad-key", TEST_CLAUDE_MAX_TOKENS))
-        assertEquals(TEST_CLAUDE_MAX_TOKENS, service.rememberClaudeMaxTokens("claude-healthy", "same-key", TEST_CLAUDE_MAX_TOKENS))
-        assertEquals(TEST_CLAUDE_MAX_TOKENS, service.rememberClaudeMaxTokens("claude-healthy", "same-key", null))
-    }
-
-    @Test
-    fun claudeAliasMetadataCachesOnlyTheResolvedConcreteModel() {
+    fun claudeMetadataCacheIsAtomicShortLivedForAliasesAndRecoverableAfterOutage() {
         val service = AiChatService()
         val alias = "claude-sonnet-4-5"
         val concrete = "claude-sonnet-4-5-20250929"
         val apiKey = "alias-key"
+        val now = 10_000L
         val capabilities = ClaudeReasoningCapabilities(supportsEnabled = true)
 
-        service.rememberClaudeMetadata(concrete, apiKey, TEST_CLAUDE_MAX_TOKENS, capabilities)
+        val metadata = service.rememberClaudeMetadata(
+            alias, concrete, apiKey, TEST_CLAUDE_MAX_TOKENS, capabilities, now
+        )
+        assertEquals(concrete, metadata.resolvedModel)
+        assertEquals(
+            concrete,
+            service.readClaudeMetadataCache(alias, apiKey, now + 1)?.resolvedModel
+        )
+        assertEquals(
+            TEST_CLAUDE_MAX_TOKENS,
+            service.readClaudeMetadataCache(concrete, apiKey, now + 301_000)?.maxTokens
+        )
+        assertEquals(null, service.readClaudeMetadataCache(alias, apiKey, now + 301_000))
 
-        assertEquals(2048, service.rememberClaudeMaxTokens(alias, apiKey, null))
-        assertEquals(TEST_CLAUDE_MAX_TOKENS, service.rememberClaudeMaxTokens(concrete, apiKey, null))
+        val failure = service.rememberClaudeMetadataFailure(TEST_CLAUDE_OUTAGE_MODEL, "bad-key", now)
+        assertEquals(2048, failure.maxTokens)
+        assertEquals(ClaudeReasoningCapabilities(), failure.reasoningCapabilities)
+        assertEquals(
+            2048,
+            service.readClaudeMetadataCache(TEST_CLAUDE_OUTAGE_MODEL, "bad-key", now + 29_000)?.maxTokens
+        )
+        assertEquals(
+            null,
+            service.readClaudeMetadataCache(TEST_CLAUDE_OUTAGE_MODEL, "bad-key", now + 31_000)
+        )
         assertEquals(concrete, service.parseClaudeModelId("""{"id":"$concrete"}"""))
         assertEquals(null, service.parseClaudeModelId("""{"model":"$concrete"}"""))
     }
@@ -140,13 +152,20 @@ class AiChatServiceTest {
     fun claudePayloadUsesResolvedOutputLimitInBufferedAndStreamingModes() {
         val service = AiChatService()
         val messages = Json.parseToJsonElement("""[{"role":"user","content":"hello"}]""").jsonArray
-        val buffered = service.buildClaudeRequestPayload(TEST_CLAUDE_MODEL, 128000, false, SYSTEM_PROMPT, messages)
-        val streaming = service.buildClaudeRequestPayload(TEST_CLAUDE_MODEL, 128000, true, null, messages)
+        val noReasoning = ClaudeReasoningCapabilities()
+        val buffered = service.buildClaudeRequestPayload(
+            TEST_CLAUDE_MODEL, TEST_CLAUDE_MAX_TOKENS, false, SYSTEM_PROMPT, messages, noReasoning
+        )
+        val streaming = service.buildClaudeRequestPayload(
+            TEST_CLAUDE_MODEL, TEST_CLAUDE_MAX_TOKENS, true, null, messages, noReasoning
+        )
 
-        assertEquals("128000", buffered.getValue("max_tokens").jsonPrimitive.content)
+        assertEquals(TEST_CLAUDE_MAX_TOKENS_TEXT, buffered.getValue("max_tokens").jsonPrimitive.content)
         assertEquals(SYSTEM_PROMPT, buffered.getValue("system").jsonPrimitive.content)
         assertFalse("stream" in buffered)
-        assertEquals("128000", streaming.getValue("max_tokens").jsonPrimitive.content)
+        assertEquals(TEST_CLAUDE_MAX_TOKENS_TEXT, streaming.getValue("max_tokens").jsonPrimitive.content)
+        assertFalse("thinking" in streaming)
+        assertFalse("output_config" in streaming)
         assertEquals("true", streaming.getValue("stream").jsonPrimitive.content)
         assertFalse("system" in streaming)
     }
@@ -220,7 +239,7 @@ class AiChatServiceTest {
         val service = AiChatService()
         val blocks = mutableMapOf<Int, JsonObject>()
         listOf(
-            """{"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"","signature":""}}""",
+            """{"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}""",
             """{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"reasoning summary"}}""",
             """{"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"$TEST_CLAUDE_SIGNATURE"}}""",
             """{"type":"content_block_start","index":1,"content_block":{"type":"redacted_thinking","data":"$TEST_CLAUDE_REDACTED_DATA"}}""",
@@ -237,6 +256,21 @@ class AiChatServiceTest {
         assertEquals(TEST_CLAUDE_SIGNATURE, replay[0].getValue(TEST_SIGNATURE_KEY).jsonPrimitive.content)
         assertEquals(TEST_CLAUDE_REDACTED_DATA, replay[1].getValue(TEST_DATA_KEY).jsonPrimitive.content)
         assertEquals(CLAUDE_ANSWER, replay[2].getValue(TEST_TEXT_KEY).jsonPrimitive.content)
+    }
+
+    @Test
+    fun claudeMaxTokenStopReasonMarksBufferedAndStreamingResponsesPartial() {
+        val service = AiChatService()
+        val buffered = Json.parseToJsonElement(
+            """{"stop_reason":"max_tokens"}"""
+        ).jsonObject
+        val streamed = Json.parseToJsonElement(
+            """{"type":"message_delta","delta":{"stop_reason":"max_tokens"}}"""
+        ).jsonObject
+
+        assertTrue(service.isClaudePartialStopReason(service.extractClaudeStopReason(buffered)))
+        assertTrue(service.isClaudePartialStopReason(service.extractClaudeStreamStopReason(streamed)))
+        assertFalse(service.isClaudePartialStopReason("end_turn"))
     }
 
     @Test

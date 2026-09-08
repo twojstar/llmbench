@@ -99,19 +99,6 @@ class ProviderRuntimeCapabilitiesTest {
     }
 
     @Test
-    fun claudeReasoningFallbackIsSharedProviderPolicy() {
-        assertEquals(
-            ClaudeReasoningCapabilities(supportsAdaptive = true, supportsHighEffort = true),
-            fallbackClaudeReasoningCapabilities("claude-sonnet-5")
-        )
-        assertEquals(
-            ClaudeReasoningCapabilities(supportsEnabled = true),
-            fallbackClaudeReasoningCapabilities("claude-haiku-4-5-20251001")
-        )
-        assertEquals(ClaudeReasoningCapabilities(), fallbackClaudeReasoningCapabilities("claude-unknown"))
-    }
-
-    @Test
     fun claudeLegacyThinkingBudgetIsBoundedByOutputLimit() {
         assertEquals(4096, resolveClaudeThinkingBudget(64_000))
         assertEquals(1024, resolveClaudeThinkingBudget(2048))

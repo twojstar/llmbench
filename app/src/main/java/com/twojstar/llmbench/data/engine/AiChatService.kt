@@ -5,7 +5,6 @@ import com.twojstar.llmbench.data.model.ApiKeyConfig
 import com.twojstar.llmbench.data.model.CHAT_ROLE_ASSISTANT
 import com.twojstar.llmbench.data.model.CHAT_ROLE_USER
 import com.twojstar.llmbench.data.model.ClaudeReasoningCapabilities
-import com.twojstar.llmbench.data.model.fallbackClaudeReasoningCapabilities
 import com.twojstar.llmbench.data.model.parseClaudeReasoningCapabilities
 import com.twojstar.llmbench.data.model.resolveClaudeThinkingBudget
 import com.twojstar.llmbench.data.model.GatewayModelCatalogEntry
@@ -18,6 +17,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerializationException
@@ -56,6 +56,7 @@ private const val JSON_FINISH_REASON_KEY = "finish_reason"
 private const val JSON_SYSTEM_KEY = "system"
 private const val JSON_MESSAGES_KEY = "messages"
 private const val JSON_MAX_TOKENS_KEY = "max_tokens"
+private const val JSON_STOP_REASON_KEY = "stop_reason"
 private const val JSON_STORE_KEY = "store"
 private const val JSON_STREAM_KEY = "stream"
 private const val JSON_INSTRUCTIONS_KEY = "instructions"
@@ -89,6 +90,7 @@ private const val OPENAI_STATUS_INCOMPLETE = "incomplete"
 private const val OPENAI_INCOMPLETE_DETAILS_KEY = "incomplete_details"
 private const val OPENAI_INCOMPLETE_REASON_KEY = "reason"
 private const val CLAUDE_MESSAGE_START = "message_start"
+private const val CLAUDE_MESSAGE_DELTA = "message_delta"
 private const val CLAUDE_MESSAGE_STOP = "message_stop"
 private const val OPENAI_OUTPUT_TEXT = "output_text"
 private const val OPENAI_OUTPUT_TEXT_DELTA = "response.output_text.delta"
@@ -102,6 +104,7 @@ private const val CLAUDE_THINKING_BLOCK = "thinking"
 private const val CLAUDE_REDACTED_THINKING_BLOCK = "redacted_thinking"
 private const val CLAUDE_FALLBACK_BLOCK = "fallback"
 private const val CLAUDE_UNREPLAYABLE_BLOCK = "__unreplayable__"
+private const val CLAUDE_STOP_MAX_TOKENS = "max_tokens"
 private const val MALFORMED_STREAM_EVENT = "Malformed streaming event"
 private const val CLAUDE_MESSAGES_API_URL = "https://api.anthropic.com/v1/messages"
 private const val CLAUDE_MODELS_API_URL = "https://api.anthropic.com/v1/models"
@@ -110,6 +113,8 @@ private const val HEADER_ANTHROPIC_API_KEY = "x-api-key"
 private const val HEADER_ANTHROPIC_VERSION = "anthropic-version"
 private const val ANTHROPIC_API_VERSION = "2023-06-01"
 private const val CLAUDE_METADATA_TIMEOUT_SECONDS = 2L
+private const val CLAUDE_ALIAS_CACHE_TTL_MILLIS = 5 * 60 * 1000L
+private const val CLAUDE_METADATA_FAILURE_TTL_MILLIS = 30 * 1000L
 
 internal fun buildClaudeMetadataHttpClient(baseClient: OkHttpClient): OkHttpClient =
     baseClient.newBuilder()
@@ -131,16 +136,22 @@ class AiChatService {
     private data class ClaudeGenerationResult(
         val text: String,
         val replayState: String?,
-        val resolvedModel: String
+        val resolvedModel: String,
+        val isPartial: Boolean
     )
 
-    private data class ClaudeRuntimeMetadata(
+    internal data class ClaudeRuntimeMetadata(
         val maxTokens: Int,
         val reasoningCapabilities: ClaudeReasoningCapabilities,
         val resolvedModel: String
     )
 
-    private data class ClaudeMaxTokensCacheKey(
+    private data class ClaudeMetadataCacheEntry(
+        val metadata: ClaudeRuntimeMetadata,
+        val expiresAtMillis: Long?
+    )
+
+    private data class ClaudeMetadataCacheKey(
         val model: String,
         val credentialFingerprint: String
     )
@@ -187,10 +198,9 @@ class AiChatService {
         ignoreUnknownKeys = true
         isLenient = true
     }
-    private val claudeMaxTokensByModelAndCredential =
-        ConcurrentHashMap<ClaudeMaxTokensCacheKey, Int>()
-    private val claudeReasoningByModelAndCredential =
-        ConcurrentHashMap<ClaudeMaxTokensCacheKey, ClaudeReasoningCapabilities>()
+    private val claudeMetadataByModelAndCredential =
+        ConcurrentHashMap<ClaudeMetadataCacheKey, ClaudeMetadataCacheEntry>()
+    private val claudeMetadataMutex = Mutex()
 
     suspend fun fetchFreeGatewayModels(
         provider: AiProvider,
@@ -280,6 +290,7 @@ class AiChatService {
         val effectiveModel = if (modelName == "all" || modelName.isBlank()) provider.defaultModel else modelName
         var resolvedModel = effectiveModel
         var providerReplayState: String? = null
+        var isPartial = false
 
         val (key, isKeyProvided) = when (provider) {
             AiProvider.GEMINI -> Pair(apiKeys.geminiKey.trim(), apiKeys.geminiKey.isNotBlank())
@@ -328,6 +339,7 @@ class AiChatService {
                         }
                         providerReplayState = result.replayState
                         resolvedModel = result.resolvedModel
+                        isPartial = result.isPartial
                         result.text
                     }
                     AiProvider.DEEPSEEK, AiProvider.KIMI, AiProvider.OPENROUTER, AiProvider.AIHUBMIX -> {
@@ -360,6 +372,7 @@ class AiChatService {
                         text = realResult,
                         isError = false,
                         isSimulated = false,
+                        isPartial = isPartial,
                         latencyMs = latency,
                         activeProfileNotes = activeNotes,
                         providerReplayState = providerReplayState
@@ -641,18 +654,11 @@ class AiChatService {
         .get()
         .build()
 
-    private fun claudeMaxTokensCacheKey(model: String, apiKey: String): ClaudeMaxTokensCacheKey {
+    private fun claudeMetadataCacheKey(model: String, apiKey: String): ClaudeMetadataCacheKey {
         val fingerprint = MessageDigest.getInstance("SHA-256")
             .digest(apiKey.toByteArray(Charsets.UTF_8))
             .joinToString(separator = "") { byte -> "%02x".format(byte) }
-        return ClaudeMaxTokensCacheKey(model, fingerprint)
-    }
-
-    internal fun rememberClaudeMaxTokens(model: String, apiKey: String, reported: Int?): Int {
-        val cacheKey = claudeMaxTokensCacheKey(model, apiKey)
-        claudeMaxTokensByModelAndCredential[cacheKey]?.let { return it }
-        val resolved = reported?.takeIf { it > 0 } ?: return CLAUDE_MAX_TOKENS_COMPAT_FALLBACK
-        return claudeMaxTokensByModelAndCredential.putIfAbsent(cacheKey, resolved) ?: resolved
+        return ClaudeMetadataCacheKey(model, fingerprint)
     }
 
     internal fun parseClaudeModelId(rawJson: String): String? = runCatching {
@@ -660,58 +666,94 @@ class AiChatService {
             ?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
     }.getOrNull()
 
+    internal fun readClaudeMetadataCache(
+        model: String,
+        apiKey: String,
+        nowMillis: Long = System.currentTimeMillis()
+    ): ClaudeRuntimeMetadata? {
+        val cacheKey = claudeMetadataCacheKey(model, apiKey)
+        val entry = claudeMetadataByModelAndCredential[cacheKey] ?: return null
+        if (entry.expiresAtMillis != null && nowMillis >= entry.expiresAtMillis) {
+            claudeMetadataByModelAndCredential.remove(cacheKey, entry)
+            return null
+        }
+        return entry.metadata
+    }
+
     internal fun rememberClaudeMetadata(
+        requestedModel: String,
         resolvedModel: String,
         apiKey: String,
         reportedMaxTokens: Int?,
-        reportedReasoning: ClaudeReasoningCapabilities?
-    ) {
-        val cacheKey = claudeMaxTokensCacheKey(resolvedModel, apiKey)
-        reportedMaxTokens?.takeIf { it > 0 }?.let {
-            claudeMaxTokensByModelAndCredential.putIfAbsent(cacheKey, it)
+        reportedReasoning: ClaudeReasoningCapabilities?,
+        nowMillis: Long = System.currentTimeMillis()
+    ): ClaudeRuntimeMetadata {
+        val metadata = ClaudeRuntimeMetadata(
+            maxTokens = reportedMaxTokens?.takeIf { it > 0 } ?: CLAUDE_MAX_TOKENS_COMPAT_FALLBACK,
+            reasoningCapabilities = reportedReasoning ?: ClaudeReasoningCapabilities(),
+            resolvedModel = resolvedModel
+        )
+        val metadataIncomplete = reportedMaxTokens == null || reportedReasoning == null
+        val concreteExpiry = if (metadataIncomplete) nowMillis + CLAUDE_METADATA_FAILURE_TTL_MILLIS else null
+        claudeMetadataByModelAndCredential[claudeMetadataCacheKey(resolvedModel, apiKey)] =
+            ClaudeMetadataCacheEntry(metadata, concreteExpiry)
+
+        val requestedExpiry = when {
+            metadataIncomplete -> nowMillis + CLAUDE_METADATA_FAILURE_TTL_MILLIS
+            requestedModel != resolvedModel -> nowMillis + CLAUDE_ALIAS_CACHE_TTL_MILLIS
+            else -> null
         }
-        reportedReasoning?.let {
-            claudeReasoningByModelAndCredential.putIfAbsent(cacheKey, it)
-        }
+        claudeMetadataByModelAndCredential[claudeMetadataCacheKey(requestedModel, apiKey)] =
+            ClaudeMetadataCacheEntry(metadata, requestedExpiry)
+        return metadata
     }
 
-    private fun invalidateClaudeMetadata(model: String, apiKey: String) {
-        val cacheKey = claudeMaxTokensCacheKey(model, apiKey)
-        claudeMaxTokensByModelAndCredential.remove(cacheKey)
-        claudeReasoningByModelAndCredential.remove(cacheKey)
+    internal fun rememberClaudeMetadataFailure(
+        model: String,
+        apiKey: String,
+        nowMillis: Long = System.currentTimeMillis()
+    ): ClaudeRuntimeMetadata {
+        val metadata = ClaudeRuntimeMetadata(
+            maxTokens = CLAUDE_MAX_TOKENS_COMPAT_FALLBACK,
+            reasoningCapabilities = ClaudeReasoningCapabilities(),
+            resolvedModel = model
+        )
+        claudeMetadataByModelAndCredential[claudeMetadataCacheKey(model, apiKey)] =
+            ClaudeMetadataCacheEntry(metadata, nowMillis + CLAUDE_METADATA_FAILURE_TTL_MILLIS)
+        return metadata
+    }
+
+    private fun invalidateClaudeMetadata(apiKey: String, vararg models: String) {
+        models.distinct().forEach { model ->
+            claudeMetadataByModelAndCredential.remove(claudeMetadataCacheKey(model, apiKey))
+        }
     }
 
     private suspend fun resolveClaudeMetadata(model: String, apiKey: String): ClaudeRuntimeMetadata {
-        val cacheKey = claudeMaxTokensCacheKey(model, apiKey)
-        val cachedMaxTokens = claudeMaxTokensByModelAndCredential[cacheKey]
-        val cachedReasoning = claudeReasoningByModelAndCredential[cacheKey]
-        if (cachedMaxTokens != null && cachedReasoning != null) {
-            return ClaudeRuntimeMetadata(cachedMaxTokens, cachedReasoning, model)
-        }
-
-        return try {
-            val request = buildClaudeModelMetadataRequest(model, apiKey)
-            val responseBody = executeCancellableJson(
-                request,
-                httpErrorContext = "Anthropic model metadata",
-                client = claudeMetadataHttpClient
-            )
-            val resolvedModel = parseClaudeModelId(responseBody) ?: model
-            val reportedMaxTokens = parseClaudeModelMaxTokens(responseBody)
-            val reportedReasoning = parseClaudeReasoningCapabilities(responseBody)
-            rememberClaudeMetadata(resolvedModel, apiKey, reportedMaxTokens, reportedReasoning)
-            ClaudeRuntimeMetadata(
-                maxTokens = reportedMaxTokens ?: CLAUDE_MAX_TOKENS_COMPAT_FALLBACK,
-                reasoningCapabilities = reportedReasoning
-                    ?: fallbackClaudeReasoningCapabilities(resolvedModel),
-                resolvedModel = resolvedModel
-            )
-        } catch (_: IOException) {
-            ClaudeRuntimeMetadata(
-                maxTokens = CLAUDE_MAX_TOKENS_COMPAT_FALLBACK,
-                reasoningCapabilities = fallbackClaudeReasoningCapabilities(model),
-                resolvedModel = model
-            )
+        readClaudeMetadataCache(model, apiKey)?.let { return it }
+        claudeMetadataMutex.lock()
+        try {
+            readClaudeMetadataCache(model, apiKey)?.let { return it }
+            return try {
+                val request = buildClaudeModelMetadataRequest(model, apiKey)
+                val responseBody = executeCancellableJson(
+                    request,
+                    httpErrorContext = "Anthropic model metadata",
+                    client = claudeMetadataHttpClient
+                )
+                val resolvedModel = parseClaudeModelId(responseBody) ?: model
+                rememberClaudeMetadata(
+                    requestedModel = model,
+                    resolvedModel = resolvedModel,
+                    apiKey = apiKey,
+                    reportedMaxTokens = parseClaudeModelMaxTokens(responseBody),
+                    reportedReasoning = parseClaudeReasoningCapabilities(responseBody)
+                )
+            } catch (_: IOException) {
+                rememberClaudeMetadataFailure(model, apiKey)
+            }
+        } finally {
+            claudeMetadataMutex.unlock()
         }
     }
 
@@ -721,7 +763,7 @@ class AiChatService {
         stream: Boolean,
         systemInstruction: String?,
         messages: JsonArray,
-        reasoningCapabilities: ClaudeReasoningCapabilities = fallbackClaudeReasoningCapabilities(model)
+        reasoningCapabilities: ClaudeReasoningCapabilities
     ): JsonObject = buildJsonObject {
         put(JSON_MODEL_KEY, model)
         put(JSON_MAX_TOKENS_KEY, maxTokens)
@@ -761,7 +803,7 @@ class AiChatService {
             prompt, conversationHistory, systemInstruction, metadata.resolvedModel
         )
         val requestPayload = buildClaudeRequestPayload(
-            model, metadata.maxTokens, stream = false, systemInstruction, messagesArray,
+            metadata.resolvedModel, metadata.maxTokens, stream = false, systemInstruction, messagesArray,
             metadata.reasoningCapabilities
         )
 
@@ -777,16 +819,28 @@ class AiChatService {
         val responseBody = executeCancellableJson(request, "Empty response from Anthropic server")
         val parsed = json.parseToJsonElement(responseBody).jsonObject
         val resolvedModel = extractClaudeResponseModel(parsed) ?: metadata.resolvedModel
-        if (resolvedModel != metadata.resolvedModel) invalidateClaudeMetadata(model, apiKey)
+        val isPartial = isClaudePartialStopReason(extractClaudeStopReason(parsed))
+        if (resolvedModel != metadata.resolvedModel) {
+            invalidateClaudeMetadata(apiKey, model, metadata.resolvedModel)
+        }
         return ClaudeGenerationResult(
             text = extractClaudeResponseText(parsed) ?: "Received empty content block from Claude.",
-            replayState = extractClaudeReplayState(parsed),
-            resolvedModel = resolvedModel
+            replayState = if (isPartial) null else extractClaudeReplayState(parsed),
+            resolvedModel = resolvedModel,
+            isPartial = isPartial
         )
     }
 
     private fun JsonObject.hasClaudeStringField(name: String): Boolean =
         (this[name] as? JsonPrimitive)?.isString == true
+
+    private fun isSupportedClaudeReplayBlockStart(block: JsonObject): Boolean =
+        when ((block[STREAM_TYPE_KEY] as? JsonPrimitive)?.contentOrNull) {
+            JSON_TEXT_KEY -> block.hasClaudeStringField(JSON_TEXT_KEY)
+            CLAUDE_THINKING_BLOCK -> block.hasClaudeStringField(JSON_THINKING_KEY)
+            CLAUDE_REDACTED_THINKING_BLOCK -> block.hasClaudeStringField(JSON_DATA_KEY)
+            else -> false
+        }
 
     private fun isValidClaudeReplayBlock(block: JsonObject): Boolean =
         when ((block[STREAM_TYPE_KEY] as? JsonPrimitive)?.contentOrNull) {
@@ -825,6 +879,18 @@ class AiChatService {
     internal fun extractClaudeResponseModel(response: JsonObject): String? =
         response[JSON_MODEL_KEY]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
 
+    internal fun extractClaudeStopReason(response: JsonObject): String? =
+        (response[JSON_STOP_REASON_KEY] as? JsonPrimitive)?.contentOrNull
+
+    internal fun extractClaudeStreamStopReason(event: JsonObject): String? {
+        if (event[STREAM_TYPE_KEY]?.jsonPrimitive?.contentOrNull != CLAUDE_MESSAGE_DELTA) return null
+        return ((event[JSON_DELTA_KEY] as? JsonObject)?.get(JSON_STOP_REASON_KEY) as? JsonPrimitive)
+            ?.contentOrNull
+    }
+
+    internal fun isClaudePartialStopReason(stopReason: String?): Boolean =
+        stopReason == CLAUDE_STOP_MAX_TOKENS
+
     internal fun extractClaudeStreamResolvedModel(event: JsonObject): String? = when (
         event[STREAM_TYPE_KEY]?.jsonPrimitive?.contentOrNull
     ) {
@@ -853,7 +919,7 @@ class AiChatService {
         when (event[STREAM_TYPE_KEY]?.jsonPrimitive?.contentOrNull) {
             CLAUDE_CONTENT_BLOCK_START -> {
                 val block = event[JSON_CONTENT_BLOCK_KEY] as? JsonObject ?: return
-                blocks[index] = if (isValidClaudeReplayBlock(block)) {
+                blocks[index] = if (isSupportedClaudeReplayBlockStart(block)) {
                     block
                 } else {
                     buildJsonObject { put(STREAM_TYPE_KEY, CLAUDE_UNREPLAYABLE_BLOCK) }
@@ -1119,7 +1185,7 @@ class AiChatService {
     ): ClaudeGenerationResult {
         val metadata = resolveClaudeMetadata(model, apiKey)
         val requestPayload = buildClaudeRequestPayload(
-            model, metadata.maxTokens, stream = true, systemInstruction,
+            metadata.resolvedModel, metadata.maxTokens, stream = true, systemInstruction,
             buildClaudeMessages(prompt, conversationHistory, systemInstruction, metadata.resolvedModel),
             metadata.reasoningCapabilities
         )
@@ -1132,6 +1198,7 @@ class AiChatService {
             .build()
         val replayBlocks = mutableMapOf<Int, JsonObject>()
         var resolvedModel = metadata.resolvedModel
+        var stopReason: String? = null
         val text = executeSse(
             request,
             ::extractClaudeStreamText,
@@ -1139,14 +1206,19 @@ class AiChatService {
             onTextDelta,
             onEvent = { event ->
                 extractClaudeStreamResolvedModel(event)?.let { resolvedModel = it }
+                extractClaudeStreamStopReason(event)?.let { stopReason = it }
                 applyClaudeReplayEvent(replayBlocks, event)
             }
         )
-        if (resolvedModel != metadata.resolvedModel) invalidateClaudeMetadata(model, apiKey)
+        val isPartial = isClaudePartialStopReason(stopReason)
+        if (resolvedModel != metadata.resolvedModel) {
+            invalidateClaudeMetadata(apiKey, model, metadata.resolvedModel)
+        }
         return ClaudeGenerationResult(
             text = text.ifEmpty { "Received empty content block from Claude." },
-            replayState = encodeClaudeStreamReplayState(replayBlocks),
-            resolvedModel = resolvedModel
+            replayState = if (isPartial) null else encodeClaudeStreamReplayState(replayBlocks),
+            resolvedModel = resolvedModel,
+            isPartial = isPartial
         )
     }
 

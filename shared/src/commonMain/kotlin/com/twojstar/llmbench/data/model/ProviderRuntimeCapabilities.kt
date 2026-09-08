@@ -76,28 +76,6 @@ private fun JsonObject?.supportsClaudeCapability(name: String): Boolean =
     ((this?.get(name) as? JsonObject)?.get(CLAUDE_SUPPORTED_KEY) as? JsonPrimitive)
         ?.booleanOrNull == true
 
-fun fallbackClaudeReasoningCapabilities(model: String): ClaudeReasoningCapabilities {
-    val normalized = model.lowercase()
-    return when {
-        normalized.startsWith("claude-haiku-4-5") ||
-            normalized.startsWith("claude-sonnet-4-5") ||
-            normalized.startsWith("claude-opus-4-5") -> ClaudeReasoningCapabilities(
-            supportsEnabled = true
-        )
-        normalized.startsWith("claude-sonnet-4-6") ||
-            normalized.startsWith("claude-opus-4-6") ||
-            normalized.startsWith("claude-opus-4-7") ||
-            normalized.startsWith("claude-opus-4-8") ||
-            normalized.startsWith("claude-sonnet-5") ||
-            normalized.startsWith("claude-opus-5") ||
-            normalized.startsWith("claude-fable-5") -> ClaudeReasoningCapabilities(
-            supportsAdaptive = true,
-            supportsHighEffort = true
-        )
-        else -> ClaudeReasoningCapabilities()
-    }
-}
-
 fun resolveClaudeThinkingBudget(maxTokens: Int): Int? {
     val budget = minOf(CLAUDE_DEFAULT_THINKING_BUDGET, maxTokens / 2)
     return budget.takeIf { it >= CLAUDE_MIN_THINKING_BUDGET && it < maxTokens }
