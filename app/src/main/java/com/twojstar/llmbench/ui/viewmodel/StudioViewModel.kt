@@ -508,20 +508,11 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
             return false
         }
 
-        val userMessage = ModelChatMessage(
-            id = "user_${System.currentTimeMillis()}",
-            sender = CHAT_ROLE_USER,
-            text = trimmed,
-            timestamp = System.currentTimeMillis()
-        )
-        val currentMessages = state.chatMessages + userMessage
         val generationId = activeChatGenerationId.incrementAndGet()
-
         _uiState.update {
             it.copy(
-                chatMessages = currentMessages,
                 isChatGenerating = true,
-                activeGeneratingProviders = providersToRun.toSet()
+                activeGeneratingProviders = emptySet()
             )
         }
 
@@ -549,6 +540,22 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
                     _uiState.value.mergedProfile
                 } else {
                     null
+                }
+
+                currentCoroutineContext().ensureActive()
+                if (generationId != activeChatGenerationId.get()) return@launch
+                val userMessage = ModelChatMessage(
+                    id = "user_${System.currentTimeMillis()}",
+                    sender = CHAT_ROLE_USER,
+                    text = trimmed,
+                    timestamp = System.currentTimeMillis()
+                )
+                val currentMessages = _uiState.value.chatMessages + userMessage
+                _uiState.update {
+                    it.copy(
+                        chatMessages = currentMessages,
+                        activeGeneratingProviders = providersToRun.toSet()
+                    )
                 }
 
                 suspend fun runProvider(provider: AiProvider, model: String, allowSimulationFallback: Boolean) {
