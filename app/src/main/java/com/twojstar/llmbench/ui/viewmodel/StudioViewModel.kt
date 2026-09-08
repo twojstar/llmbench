@@ -464,7 +464,7 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
         if (generationId != activeChatGenerationId.get()) return
         _uiState.update { state ->
             if (generationId != activeChatGenerationId.get()) return@update state
-            val finalMessage = response.copy(id = messageId, isPartial = false)
+            val finalMessage = response.copy(id = messageId)
             val index = state.chatMessages.indexOfFirst { it.id == messageId }
             val messages = if (index >= 0) {
                 state.chatMessages.toMutableList().apply { this[index] = finalMessage }

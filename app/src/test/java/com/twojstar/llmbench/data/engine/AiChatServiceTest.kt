@@ -41,6 +41,10 @@ private const val TEST_CLAUDE_MAX_TOKENS = 128000
 private const val TEST_CLAUDE_MAX_TOKENS_TEXT = "128000"
 private const val TEST_CLAUDE_SAME_KEY = "same-key"
 private const val TEST_CLAUDE_OUTAGE_MODEL = "claude-outage"
+private const val TEST_CLAUDE_CONCRETE_MODEL = "claude-sonnet-4-5-20250929"
+private const val TEST_BAD_API_KEY = "bad-key"
+private const val TEST_CLAUDE_USER_MESSAGES_JSON = "[{\"role\":\"user\",\"content\":\"hello\"}]"
+private const val TEST_CLAUDE_CONTEXT_STOP = "model_context_window_exceeded"
 private const val TEST_CLAUDE_MODEL = "claude-sonnet-5"
 private const val TEST_CLAUDE_LEGACY_MODEL = "claude-haiku-4-5-20251001"
 private const val TEST_CLAUDE_SIGNATURE = "claude-signature"
@@ -114,7 +118,7 @@ class AiChatServiceTest {
     fun claudeMetadataCacheIsAtomicShortLivedForAliasesAndRecoverableAfterOutage() {
         val service = AiChatService()
         val alias = "claude-sonnet-4-5"
-        val concrete = "claude-sonnet-4-5-20250929"
+        val concrete = TEST_CLAUDE_CONCRETE_MODEL
         val apiKey = "alias-key"
         val now = 10_000L
         val capabilities = ClaudeReasoningCapabilities(supportsEnabled = true)
@@ -133,16 +137,16 @@ class AiChatServiceTest {
         )
         assertEquals(null, service.readClaudeMetadataCache(alias, apiKey, now + 301_000))
 
-        val failure = service.rememberClaudeMetadataFailure(TEST_CLAUDE_OUTAGE_MODEL, "bad-key", now)
+        val failure = service.rememberClaudeMetadataFailure(TEST_CLAUDE_OUTAGE_MODEL, TEST_BAD_API_KEY, now)
         assertEquals(2048, failure.maxTokens)
         assertEquals(ClaudeReasoningCapabilities(), failure.reasoningCapabilities)
         assertEquals(
             2048,
-            service.readClaudeMetadataCache(TEST_CLAUDE_OUTAGE_MODEL, "bad-key", now + 29_000)?.maxTokens
+            service.readClaudeMetadataCache(TEST_CLAUDE_OUTAGE_MODEL, TEST_BAD_API_KEY, now + 29_000)?.maxTokens
         )
         assertEquals(
             null,
-            service.readClaudeMetadataCache(TEST_CLAUDE_OUTAGE_MODEL, "bad-key", now + 31_000)
+            service.readClaudeMetadataCache(TEST_CLAUDE_OUTAGE_MODEL, TEST_BAD_API_KEY, now + 31_000)
         )
         assertEquals(concrete, service.parseClaudeModelId("""{"id":"$concrete"}"""))
         assertEquals(null, service.parseClaudeModelId("""{"model":"$concrete"}"""))
@@ -151,7 +155,7 @@ class AiChatServiceTest {
     @Test
     fun claudePayloadUsesResolvedOutputLimitInBufferedAndStreamingModes() {
         val service = AiChatService()
-        val messages = Json.parseToJsonElement("""[{"role":"user","content":"hello"}]""").jsonArray
+        val messages = Json.parseToJsonElement(TEST_CLAUDE_USER_MESSAGES_JSON).jsonArray
         val noReasoning = ClaudeReasoningCapabilities()
         val buffered = service.buildClaudeRequestPayload(
             TEST_CLAUDE_MODEL, TEST_CLAUDE_MAX_TOKENS, false, SYSTEM_PROMPT, messages, noReasoning
@@ -173,7 +177,7 @@ class AiChatServiceTest {
     @Test
     fun claudePayloadUsesModelAwareAdaptiveAndLegacyThinking() {
         val service = AiChatService()
-        val messages = Json.parseToJsonElement("""[{"role":"user","content":"hello"}]""").jsonArray
+        val messages = Json.parseToJsonElement(TEST_CLAUDE_USER_MESSAGES_JSON).jsonArray
         val adaptive = service.buildClaudeRequestPayload(
             TEST_CLAUDE_MODEL,
             TEST_CLAUDE_MAX_TOKENS,
@@ -270,6 +274,7 @@ class AiChatServiceTest {
 
         assertTrue(service.isClaudePartialStopReason(service.extractClaudeStopReason(buffered)))
         assertTrue(service.isClaudePartialStopReason(service.extractClaudeStreamStopReason(streamed)))
+        assertTrue(service.isClaudePartialStopReason(TEST_CLAUDE_CONTEXT_STOP))
         assertFalse(service.isClaudePartialStopReason("end_turn"))
     }
 
@@ -314,7 +319,7 @@ class AiChatServiceTest {
     @Test
     fun claudeResolvedModelComesFromBufferedAndStreamingResponses() {
         val service = AiChatService()
-        val concrete = "claude-sonnet-4-5-20250929"
+        val concrete = TEST_CLAUDE_CONCRETE_MODEL
         val buffered = Json.parseToJsonElement("""{"model":"$concrete"}""").jsonObject
         val streamStart = Json.parseToJsonElement(
             """{"type":"message_start","message":{"model":"$concrete"}}"""

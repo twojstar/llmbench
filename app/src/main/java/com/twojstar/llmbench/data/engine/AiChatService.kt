@@ -105,6 +105,7 @@ private const val CLAUDE_REDACTED_THINKING_BLOCK = "redacted_thinking"
 private const val CLAUDE_FALLBACK_BLOCK = "fallback"
 private const val CLAUDE_UNREPLAYABLE_BLOCK = "__unreplayable__"
 private const val CLAUDE_STOP_MAX_TOKENS = "max_tokens"
+private const val CLAUDE_STOP_CONTEXT_WINDOW_EXCEEDED = "model_context_window_exceeded"
 private const val MALFORMED_STREAM_EVENT = "Malformed streaming event"
 private const val CLAUDE_MESSAGES_API_URL = "https://api.anthropic.com/v1/messages"
 private const val CLAUDE_MODELS_API_URL = "https://api.anthropic.com/v1/models"
@@ -672,12 +673,13 @@ class AiChatService {
         nowMillis: Long = System.currentTimeMillis()
     ): ClaudeRuntimeMetadata? {
         val cacheKey = claudeMetadataCacheKey(model, apiKey)
-        val entry = claudeMetadataByModelAndCredential[cacheKey] ?: return null
-        if (entry.expiresAtMillis != null && nowMillis >= entry.expiresAtMillis) {
-            claudeMetadataByModelAndCredential.remove(cacheKey, entry)
-            return null
+        while (true) {
+            val entry = claudeMetadataByModelAndCredential[cacheKey] ?: return null
+            if (entry.expiresAtMillis == null || nowMillis < entry.expiresAtMillis) {
+                return entry.metadata
+            }
+            if (claudeMetadataByModelAndCredential.remove(cacheKey, entry)) return null
         }
-        return entry.metadata
     }
 
     internal fun rememberClaudeMetadata(
@@ -889,7 +891,7 @@ class AiChatService {
     }
 
     internal fun isClaudePartialStopReason(stopReason: String?): Boolean =
-        stopReason == CLAUDE_STOP_MAX_TOKENS
+        stopReason == CLAUDE_STOP_MAX_TOKENS || stopReason == CLAUDE_STOP_CONTEXT_WINDOW_EXCEEDED
 
     internal fun extractClaudeStreamResolvedModel(event: JsonObject): String? = when (
         event[STREAM_TYPE_KEY]?.jsonPrimitive?.contentOrNull
