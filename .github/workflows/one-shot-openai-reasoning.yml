@@ -1,0 +1,98 @@
+name: One-shot OpenAI stateless reasoning
+
+on: # yamllint disable-line rule:truthy
+  push:
+    branches: [gptomek/openai-stateless-reasoning]
+
+jobs:
+  validate:
+    if: github.event.head_commit.message != 'fix(openai) preserve stateless reasoning state'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      validated_sha: ${{ steps.base.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - id: base
+        name: Capture validated revision
+        run: echo "sha=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Read Gradle version
+        id: gradle
+        run: .github/scripts/gradle-version.sh
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          gradle-version: ${{ steps.gradle.outputs.version }}
+
+      - name: Generate Gradle wrapper if missing
+        env:
+          GRADLE_VERSION: ${{ steps.gradle.outputs.version }}
+        run: |
+          if [ ! -f gradle/wrapper/gradle-wrapper.jar ]; then
+            gradle wrapper --gradle-version "$GRADLE_VERSION"
+            git checkout -- gradle/wrapper/gradle-wrapper.properties
+          fi
+
+      - name: Apply focused patch
+        run: |
+          base64 -d .github/scripts/one-shot-openai-reasoning.py.gz.b64 | gunzip > /tmp/one-shot-openai-reasoning.py
+          python /tmp/one-shot-openai-reasoning.py
+
+      - name: Validate
+        run: ./gradlew :app:assembleDebug :app:testDebugUnitTest :app:lintDebug :shared:desktopTest --stacktrace
+
+      - name: Package validated patch
+        run: |
+          git diff --binary -- \
+            app/src/main/java/com/twojstar/llmbench/data/engine/AiChatService.kt \
+            app/src/test/java/com/twojstar/llmbench/data/engine/AiChatServiceTest.kt \
+            docs/provider-runtime.md \
+            shared/src/commonMain/kotlin/com/twojstar/llmbench/data/model/ProviderRuntimeCapabilities.kt \
+            shared/src/commonTest/kotlin/com/twojstar/llmbench/data/model/ProviderRuntimeCapabilitiesTest.kt > /tmp/openai-reasoning.patch
+          test -s /tmp/openai-reasoning.patch
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: openai-reasoning-patch
+          path: /tmp/openai-reasoning.patch
+          if-no-files-found: error
+
+  commit:
+    needs: validate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.validate.outputs.validated_sha }}
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v7
+        with:
+          name: openai-reasoning-patch
+          path: /tmp/openai-reasoning
+
+      - name: Commit verified product changes
+        env:
+          VALIDATED_SHA: ${{ needs.validate.outputs.validated_sha }}
+        run: |
+          git fetch origin gptomek/openai-stateless-reasoning
+          test "$(git rev-parse origin/gptomek/openai-stateless-reasoning)" = "$VALIDATED_SHA"
+          git apply --index /tmp/openai-reasoning/openai-reasoning.patch
+          git config user.name "GPTomek"
+          git config user.email "314538226+gptomek[bot]@users.noreply.github.com"
+          git commit -m "fix(openai) preserve stateless reasoning state"
+          git push origin HEAD:gptomek/openai-stateless-reasoning
