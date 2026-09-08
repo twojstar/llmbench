@@ -50,7 +50,7 @@ object AgentSkillManifestParser {
     private const val MAX_DESCRIPTION_LENGTH = 1_024
     private const val MAX_COMPATIBILITY_LENGTH = 500
 
-    private val unicodeNameCharacters = Regex("^[\\p{L}\\p{N}-]+$")
+    private val unicodeNameCharacters = Regex("^[\\p{L}\\p{Nd}-]+$")
     private val knownFields = setOf(
         FIELD_NAME,
         FIELD_DESCRIPTION,
@@ -79,11 +79,11 @@ object AgentSkillManifestParser {
         val issues = mutableListOf<AgentSkillValidationIssue>()
         validateKnownFields(frontmatter, issues)
 
-        val name = frontmatter.scalarValue(FIELD_NAME, issues)
-        val description = frontmatter.scalarValue(FIELD_DESCRIPTION, issues)
-        val license = frontmatter.scalarValue(FIELD_LICENSE, issues)
-        val compatibility = frontmatter.scalarValue(FIELD_COMPATIBILITY, issues)
-        val allowedTools = frontmatter.scalarValue(FIELD_ALLOWED_TOOLS, issues)
+        val name = frontmatter.stringValue(FIELD_NAME, issues)
+        val description = frontmatter.stringValue(FIELD_DESCRIPTION, issues)
+        val license = frontmatter.stringValue(FIELD_LICENSE, issues)
+        val compatibility = frontmatter.stringValue(FIELD_COMPATIBILITY, issues)
+        val allowedTools = frontmatter.stringValue(FIELD_ALLOWED_TOOLS, issues)
         val metadata = frontmatter.metadataValues(issues)
 
         validateRequiredFields(frontmatter, name, description, directoryName, issues)
@@ -152,7 +152,7 @@ object AgentSkillManifestParser {
     ) {
         val canonicalName = canonicalSkillName(name)
         when {
-            canonicalName.isEmpty() -> issues += AgentSkillValidationIssue(
+            canonicalName.isBlank() -> issues += AgentSkillValidationIssue(
                 FIELD_NAME,
                 "$FIELD_NAME is required"
             )
@@ -176,7 +176,7 @@ object AgentSkillManifestParser {
             !unicodeNameCharacters.matches(canonicalName) ->
                 issues += AgentSkillValidationIssue(
                     FIELD_NAME,
-                    "$FIELD_NAME may contain only Unicode letters, digits and hyphens"
+                    "$FIELD_NAME may contain only Unicode letters, decimal digits and hyphens"
                 )
         }
 
@@ -226,8 +226,7 @@ object AgentSkillManifestParser {
         }
     }
 
-    private fun canonicalSkillName(name: String): String =
-        name.trim().normalize(Form.NFKC)
+    private fun canonicalSkillName(name: String): String = name.normalize(Form.NFKC)
 
     private fun String.codePointCount(): Int {
         var count = 0
@@ -254,14 +253,14 @@ object AgentSkillManifestParser {
     private fun YamlMap.valueFor(field: String): YamlNode? =
         entries.entries.firstOrNull { it.key.content == field }?.value
 
-    private fun YamlMap.scalarValue(
+    private fun YamlMap.stringValue(
         field: String,
         issues: MutableList<AgentSkillValidationIssue>
     ): String? {
         val value = valueFor(field) ?: return null
-        if (value is YamlScalar) return value.content
+        if (value is YamlScalar && value.representsYamlString()) return value.content
 
-        issues += AgentSkillValidationIssue(field, "$field must be a YAML scalar")
+        issues += AgentSkillValidationIssue(field, "$field must be a YAML string")
         return null
     }
 
@@ -279,16 +278,32 @@ object AgentSkillManifestParser {
 
         val metadata = linkedMapOf<String, String>()
         value.entries.forEach { (key, entry) ->
-            if (entry is YamlScalar) {
-                metadata[key.content] = entry.content
-            } else {
-                issues += AgentSkillValidationIssue(
-                    "$FIELD_METADATA.${key.content}",
-                    "$FIELD_METADATA values must be YAML scalars"
+            val field = "$FIELD_METADATA.${key.content}"
+            when {
+                !key.representsYamlString() -> issues += AgentSkillValidationIssue(
+                    field,
+                    "$FIELD_METADATA keys must be YAML strings"
+                )
+                entry is YamlScalar && entry.representsYamlString() -> {
+                    metadata[key.content] = entry.content
+                }
+                else -> issues += AgentSkillValidationIssue(
+                    field,
+                    "$FIELD_METADATA values must be YAML strings"
                 )
             }
         }
         return metadata
+    }
+
+    private fun YamlScalar.representsYamlString(): Boolean {
+        if (!plain) return true
+        if (content.equals("true", ignoreCase = true) || content.equals("false", ignoreCase = true)) {
+            return false
+        }
+        if (runCatching { toLong() }.isSuccess) return false
+        if (runCatching { toDouble() }.isSuccess) return false
+        return true
     }
 
     private fun extractEnvelope(source: String): EnvelopeResult {
