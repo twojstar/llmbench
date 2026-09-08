@@ -373,13 +373,17 @@ class AiChatService {
     internal fun buildGeminiContents(
         prompt: String,
         conversationHistory: List<ModelChatMessage>,
+        modelName: String,
         systemInstruction: String? = null
     ): JsonArray = buildJsonArray {
         buildBoundedProviderTextTurns(
             prompt, conversationHistory, AiProvider.GEMINI, systemInstruction
         ).forEach { turn ->
             if (turn.role == CHAT_ROLE_ASSISTANT) {
-                val replayContents = parseGeminiReplayState(turn.providerReplayState)
+                val replayContents = turn.providerReplayState
+                    .takeIf { turn.modelName == modelName }
+                    ?.let(::parseGeminiReplayState)
+                    .orEmpty()
                 if (replayContents.isNotEmpty()) {
                     replayContents.forEach(::add)
                 } else {
@@ -440,7 +444,7 @@ class AiChatService {
         conversationHistory: List<ModelChatMessage>
     ): GeminiGenerationResult {
         val url = "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$apiKey"
-        val contentsArray = buildGeminiContents(prompt, conversationHistory, systemInstruction)
+        val contentsArray = buildGeminiContents(prompt, conversationHistory, model, systemInstruction)
 
         val requestPayload = buildJsonObject {
             put("contents", contentsArray)
@@ -696,7 +700,7 @@ class AiChatService {
     ): GeminiGenerationResult {
         val url = "https://generativelanguage.googleapis.com/v1beta/models/$model:streamGenerateContent?alt=sse&key=$apiKey"
         val requestPayload = buildJsonObject {
-            put("contents", buildGeminiContents(prompt, conversationHistory, systemInstruction))
+            put("contents", buildGeminiContents(prompt, conversationHistory, model, systemInstruction))
             if (!systemInstruction.isNullOrBlank()) {
                 putJsonObject("systemInstruction") {
                     putJsonArray(JSON_PARTS_KEY) {

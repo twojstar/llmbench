@@ -10,7 +10,8 @@ const val CHAT_ROLE_ASSISTANT = "assistant"
 data class ProviderTextTurn(
     val role: String,
     val text: String,
-    val providerReplayState: String? = null
+    val providerReplayState: String? = null,
+    val modelName: String? = null
 )
 
 fun ModelChatMessage.isCompletedAssistantResponse(): Boolean =
@@ -64,7 +65,8 @@ fun buildBoundedProviderTextTurns(
                 segments.last() += ProviderTextTurn(
                     CHAT_ROLE_ASSISTANT,
                     message.text,
-                    message.providerReplayState
+                    message.providerReplayState,
+                    message.modelName
                 )
             }
         }
