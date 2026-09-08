@@ -57,6 +57,21 @@ class LocalSkillLibraryStoreTest {
     }
 
     @Test
+    fun invalidTargetDirectoryIsReclaimedOnRetry() = runBlocking {
+        val original = skillSource("retry-skill", "First attempt.")
+        val retry = skillSource("retry-skill", "Retry succeeds.")
+        store.add(original)
+        val storedDirectory = root.listFiles().orEmpty().single()
+        assertTrue(storedDirectory.resolve("SKILL.md").delete())
+
+        val saved = store.add(retry)
+
+        assertEquals("retry-skill", saved.name)
+        assertEquals(retry, store.read("retry-skill")?.source)
+        assertEquals(1, root.listFiles().orEmpty().size)
+    }
+
+    @Test
     fun removesOnlyRequestedSkill() = runBlocking {
         store.add(skillSource("alpha-skill", "Alpha."))
         store.add(skillSource("beta-skill", "Beta."))
