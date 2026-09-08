@@ -12,7 +12,7 @@ private val PORTABLE_SKILL_FILENAMES = setOf("SKILL.md", "skill.md")
 internal fun boundedSkillSourceForDisplay(source: String): String {
     if (source.length <= MAX_SOURCE_PREVIEW_CHARS) return source
     return source.take(MAX_SOURCE_PREVIEW_CHARS) +
-        "\n\n… source preview truncated; the complete stored SKILL.md remains available for copying …"
+        "\n\n… source preview truncated …"
 }
 
 internal data class SkillImportPreview(
