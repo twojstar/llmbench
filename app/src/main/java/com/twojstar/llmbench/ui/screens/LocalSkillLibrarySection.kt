@@ -26,6 +26,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -55,6 +56,12 @@ private sealed interface LocalSkillExportResult {
     data object Missing : LocalSkillExportResult
     data object Exported : LocalSkillExportResult
     data class Failed(val message: String) : LocalSkillExportResult
+}
+
+private sealed interface LocalSkillActivationResult {
+    data object Missing : LocalSkillActivationResult
+    data class Updated(val skill: LocalSkillSummary) : LocalSkillActivationResult
+    data class Failed(val message: String) : LocalSkillActivationResult
 }
 
 private suspend fun exportLocalSkill(
@@ -87,6 +94,18 @@ private suspend fun exportLocalSkill(
     }
 }
 
+private suspend fun updateLocalSkillActivation(
+    store: LocalSkillLibraryStore,
+    skillName: String,
+    enabled: Boolean
+): LocalSkillActivationResult = try {
+    val updated = store.setEnabled(skillName, enabled)
+        ?: return LocalSkillActivationResult.Missing
+    LocalSkillActivationResult.Updated(updated)
+} catch (error: IOException) {
+    LocalSkillActivationResult.Failed(error.message ?: "Could not change local skill activation.")
+}
+
 @Composable
 internal fun LocalSkillLibrarySection(
     store: LocalSkillLibraryStore,
@@ -100,12 +119,42 @@ internal fun LocalSkillLibrarySection(
     val scope = rememberCoroutineScope()
     var skills by remember { mutableStateOf<List<LocalSkillSummary>>(emptyList()) }
     var busySkill by remember { mutableStateOf<String?>(null) }
+    var pendingEnableSkillName by rememberSaveable { mutableStateOf<String?>(null) }
     var pendingExportSkill by rememberSaveable { mutableStateOf<String?>(null) }
     var pendingRemoveSkill by rememberSaveable { mutableStateOf<String?>(null) }
 
     suspend fun reloadSkills() {
         skills = store.load()
         onCountChanged(skills.size)
+    }
+
+    fun requestActivation(skillName: String, enabled: Boolean) {
+        scope.launch {
+            busySkill = skillName
+            try {
+                when (val result = updateLocalSkillActivation(store, skillName, enabled)) {
+                    LocalSkillActivationResult.Missing -> {
+                        reloadSkills()
+                        onMessage("Local skill is no longer available.")
+                    }
+                    is LocalSkillActivationResult.Updated -> {
+                        skills = skills.map { current ->
+                            if (current.name == result.skill.name) result.skill else current
+                        }
+                        onMessage(
+                            if (enabled) {
+                                "Enabled '$skillName' for native/API chats."
+                            } else {
+                                "Disabled '$skillName'."
+                            }
+                        )
+                    }
+                    is LocalSkillActivationResult.Failed -> onMessage(result.message)
+                }
+            } finally {
+                busySkill = null
+            }
+        }
     }
 
     val exportLauncher = rememberLauncherForActivityResult(
@@ -146,6 +195,11 @@ internal fun LocalSkillLibrarySection(
         modifier = Modifier.fillMaxWidth()
     ) {
         LocalSkillLibraryHeader(skills.size)
+        Text(
+            text = "Enabling a skill adds only its Markdown instructions to native/API system prompts. Declared scripts and tools remain inert.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
         LocalSkillLibraryEmptyMessage(
             allSkillsEmpty = skills.isEmpty(),
             filteredSkillsEmpty = filtered.isEmpty()
@@ -153,7 +207,11 @@ internal fun LocalSkillLibrarySection(
         filtered.forEach { skill ->
             LocalSkillCard(
                 skill = skill,
-                enabled = busySkill == null,
+                actionsEnabled = busySkill == null,
+                onActivationChanged = { enabled ->
+                    if (enabled) pendingEnableSkillName = skill.name
+                    else requestActivation(skill.name, enabled = false)
+                },
                 onView = {
                     scope.launch {
                         busySkill = skill.name
@@ -183,6 +241,19 @@ internal fun LocalSkillLibrarySection(
             )
         }
     }
+
+    pendingEnableSkillName
+        ?.let { name -> skills.firstOrNull { it.name == name } }
+        ?.let { skill ->
+            ConfirmEnableLocalSkillDialog(
+                skillName = skill.name,
+                onDismiss = { pendingEnableSkillName = null },
+                onConfirm = {
+                    pendingEnableSkillName = null
+                    requestActivation(skill.name, enabled = true)
+                }
+            )
+        }
 
     pendingRemoveSkill?.let { skillName ->
         ConfirmRemoveLocalSkillDialog(
@@ -242,7 +313,8 @@ private fun LocalSkillLibraryEmptyMessage(
 @Composable
 private fun LocalSkillCard(
     skill: LocalSkillSummary,
-    enabled: Boolean,
+    actionsEnabled: Boolean,
+    onActivationChanged: (Boolean) -> Unit,
     onView: () -> Unit,
     onExport: () -> Unit,
     onRemove: () -> Unit
@@ -269,15 +341,39 @@ private fun LocalSkillCard(
             Spacer(Modifier.height(8.dp))
             Row(
                 modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Use in native/API chats",
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        text = if (skill.enabled) "Enabled" else "Disabled",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Switch(
+                    checked = skill.enabled,
+                    enabled = actionsEnabled,
+                    onCheckedChange = onActivationChanged
+                )
+            }
+            Spacer(Modifier.height(8.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                OutlinedButton(enabled = enabled, onClick = onView) {
+                OutlinedButton(enabled = actionsEnabled, onClick = onView) {
                     Icon(Icons.Default.Visibility, contentDescription = null)
                     Spacer(Modifier.width(6.dp))
                     Text("View")
                 }
-                OutlinedButton(enabled = enabled, onClick = onExport) {
+                OutlinedButton(enabled = actionsEnabled, onClick = onExport) {
                     Icon(Icons.Default.Download, contentDescription = null)
                     Spacer(Modifier.width(6.dp))
                     Text("Export")
@@ -287,7 +383,7 @@ private fun LocalSkillCard(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.End
             ) {
-                TextButton(enabled = enabled, onClick = onRemove) {
+                TextButton(enabled = actionsEnabled, onClick = onRemove) {
                     Icon(Icons.Default.DeleteOutline, contentDescription = null)
                     Spacer(Modifier.width(6.dp))
                     Text("Remove")
@@ -295,6 +391,35 @@ private fun LocalSkillCard(
             }
         }
     }
+}
+
+@Composable
+private fun ConfirmEnableLocalSkillDialog(
+    skillName: String,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Enable '$skillName'?") },
+        text = {
+            Text(
+                "Its Markdown instructions can influence model responses in native/API chats. " +
+                    "LlmBench will not execute scripts or declared tools. Enable only skills you trust, " +
+                    "and keep secrets outside SKILL.md."
+            )
+        },
+        confirmButton = {
+            Button(onClick = onConfirm) {
+                Text("Enable")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
 }
 
 @Composable

@@ -14,7 +14,8 @@ import kotlinx.coroutines.withContext
 
 internal data class LocalSkillSummary(
     val name: String,
-    val description: String
+    val description: String,
+    val enabled: Boolean
 )
 
 internal data class LocalSkillDocument(
@@ -26,13 +27,28 @@ internal class LocalSkillAlreadyExistsException(
     val skillName: String
 ) : IOException("Local skill '$skillName' already exists.")
 
+internal class LocalSkillActivationException(message: String) : IOException(message)
+
 internal class LocalSkillLibraryStore(
     private val rootDirectory: File
 ) {
-    private val mutex = Mutex()
+    private val mutex = PROCESS_MUTEX
 
     suspend fun load(): List<LocalSkillSummary> = mutex.withLock {
         inspectStoredSkills(pruneInvalid = true).sortedBy(LocalSkillSummary::name)
+    }
+
+    suspend fun loadEnabledManifests(): List<AgentSkillManifest> = mutex.withLock {
+        val candidates = readEnabledManifests()
+        val accepted = mutableListOf<AgentSkillManifest>()
+        candidates.sortedBy(AgentSkillManifest::name).forEach { manifest ->
+            if (localSkillRuntimeBudgetError(accepted + manifest) == null) {
+                accepted += manifest
+            } else {
+                removeEnabledMarker(storageDirectory(manifest.name))
+            }
+        }
+        accepted
     }
 
     suspend fun read(name: String): LocalSkillDocument? = mutex.withLock {
@@ -53,7 +69,7 @@ internal class LocalSkillLibraryStore(
         val bytes = source.encodeToByteArray()
         if (bytes.size > MAX_SKILL_BYTES) throw IOException("Skill source exceeds the library size limit.")
 
-        mutex.withLock {
+        return mutex.withLock {
             val skillDirectory = storageDirectory(manifest.name)
             val existing = if (skillDirectory.isDirectory) readStoredDocument(skillDirectory) else null
             if (existing != null && !replaceExisting) {
@@ -67,12 +83,35 @@ internal class LocalSkillLibraryStore(
                 }
             }
             ensureCapacityFor(manifest.name)
+            val enabled = existing != null && isEnabled(skillDirectory)
+            if (enabled) {
+                validateRuntimeBudgetFor(manifest)
+            }
             withContext(Dispatchers.IO) {
                 skillDirectory.mkdirs()
                 writeAtomically(File(skillDirectory, SKILL_FILE_NAME), bytes)
             }
+            manifest.toSummary(enabled)
         }
-        return manifest.toSummary()
+    }
+
+    suspend fun setEnabled(name: String, enabled: Boolean): LocalSkillSummary? = mutex.withLock {
+        val directory = storageDirectory(name)
+        val document = readStoredDocument(directory)
+            ?.takeIf { it.manifest.name == name }
+            ?: return@withLock null
+        if (enabled) {
+            validateRuntimeBudgetFor(document.manifest)
+        }
+        withContext(Dispatchers.IO) {
+            val marker = File(directory, ENABLED_FILE_NAME)
+            if (enabled) {
+                writeAtomically(marker, ByteArray(0))
+            } else if (marker.exists() && !marker.delete()) {
+                throw IOException("Could not disable local skill '$name'.")
+            }
+        }
+        document.manifest.toSummary(enabled)
     }
 
     suspend fun remove(name: String) = mutex.withLock {
@@ -82,6 +121,31 @@ internal class LocalSkillLibraryStore(
                 throw IOException("Could not remove local skill '$name'.")
             }
         }
+    }
+
+    private suspend fun validateRuntimeBudgetFor(candidate: AgentSkillManifest) {
+        val enabledOthers = readEnabledManifests(excludeName = candidate.name)
+        localSkillRuntimeBudgetError(enabledOthers + candidate)?.let { message ->
+            throw LocalSkillActivationException(message)
+        }
+    }
+
+    private suspend fun readEnabledManifests(excludeName: String? = null): List<AgentSkillManifest> {
+        val directories = withContext(Dispatchers.IO) { storageDirectories() }
+        val enabled = ArrayList<AgentSkillManifest>(directories.size)
+        directories.forEach { directory ->
+            val document = readStoredDocument(directory)
+            if (document == null) {
+                withContext(Dispatchers.IO) { directory.deleteRecursively() }
+            } else if (document.manifest.name != excludeName && isEnabled(directory)) {
+                enabled += document.manifest
+            }
+        }
+        return enabled
+    }
+
+    private suspend fun removeEnabledMarker(directory: File) = withContext(Dispatchers.IO) {
+        File(directory, ENABLED_FILE_NAME).delete()
     }
 
     private suspend fun ensureCapacityFor(name: String) {
@@ -106,10 +170,14 @@ internal class LocalSkillLibraryStore(
                     withContext(Dispatchers.IO) { directory.deleteRecursively() }
                 }
             } else {
-                valid += document.manifest.toSummary()
+                valid += document.manifest.toSummary(isEnabled(directory))
             }
         }
         return valid
+    }
+
+    private suspend fun isEnabled(directory: File): Boolean = withContext(Dispatchers.IO) {
+        File(directory, ENABLED_FILE_NAME).isFile
     }
 
     private suspend fun readStoredDocument(directory: File): LocalSkillDocument? {
@@ -160,7 +228,7 @@ internal class LocalSkillLibraryStore(
 
     private fun writeAtomically(destination: File, bytes: ByteArray) {
         destination.parentFile?.mkdirs()
-        val temporary = File(destination.parentFile, "$SKILL_FILE_NAME.tmp")
+        val temporary = File(destination.parentFile, "${destination.name}.tmp")
         FileOutputStream(temporary).use { output ->
             output.write(bytes)
             output.flush()
@@ -184,13 +252,15 @@ internal class LocalSkillLibraryStore(
         }
     }
 
-    private fun AgentSkillManifest.toSummary(): LocalSkillSummary =
-        LocalSkillSummary(name = name, description = description)
+    private fun AgentSkillManifest.toSummary(enabled: Boolean): LocalSkillSummary =
+        LocalSkillSummary(name = name, description = description, enabled = enabled)
 
     companion object {
+        private val PROCESS_MUTEX = Mutex()
         const val MAX_LOCAL_SKILLS = 32
         const val LIBRARY_DIRECTORY_NAME = "local-skills-v1"
         private const val SKILL_FILE_NAME = "SKILL.md"
+        private const val ENABLED_FILE_NAME = ".enabled"
         private const val MAX_SKILL_BYTES = 8 * 1024 * 1024
         private const val STORAGE_PREFIX = "skill-"
         private const val SHA256_HEX_CHARS = 64

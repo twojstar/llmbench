@@ -13,6 +13,8 @@ import com.twojstar.llmbench.data.preferences.StudioStateStore
 import com.twojstar.llmbench.data.preferences.StudioStateWriter
 import com.twojstar.llmbench.data.preferences.WebChatPreferencesStore
 import com.twojstar.llmbench.data.security.ApiKeyStore
+import com.twojstar.llmbench.data.skills.LocalSkillLibraryStore
+import com.twojstar.llmbench.data.skills.composeLocalSkillSystemInstruction
 import com.twojstar.llmbench.share.IncomingSharePayload
 import com.twojstar.llmbench.share.PendingWebShare
 import com.twojstar.llmbench.share.claimText
@@ -25,6 +27,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import java.io.File
 import java.util.concurrent.atomic.AtomicLong
 
 data class ChatMessage(
@@ -87,6 +90,9 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
     private val apiKeyStore = ApiKeyStore(application.applicationContext)
     private val studioStateStore = StudioStateStore(application.applicationContext)
     private val webChatPreferencesStore = WebChatPreferencesStore(application.applicationContext)
+    private val localSkillStore = LocalSkillLibraryStore(
+        File(application.noBackupFilesDir, LocalSkillLibraryStore.LIBRARY_DIRECTORY_NAME)
+    )
     private var studioStateWriter: StudioStateWriter? = null
 
     private val _uiState = MutableStateFlow(
@@ -520,11 +526,15 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
 
         chatGenerationJob = viewModelScope.launch {
             try {
-                val systemPrompt = if (_uiState.value.includeSystemProfileInChat) {
+                val profileSystemPrompt = if (_uiState.value.includeSystemProfileInChat) {
                     _uiState.value.renderedInstructions.ifBlank { null }
                 } else {
                     null
                 }
+                val systemPrompt = composeLocalSkillSystemInstruction(
+                    profileSystemPrompt,
+                    localSkillStore.loadEnabledManifests()
+                )
                 val activeProfile = if (_uiState.value.includeSystemProfileInChat) {
                     _uiState.value.mergedProfile
                 } else {
