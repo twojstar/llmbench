@@ -109,16 +109,30 @@ class AiChatServiceTest {
     }
 
     @Test
-    fun claudeMetadataLookupUsesShortTimeoutAndCachesFallback() {
+    fun claudeMetadataLookupUsesShortTimeoutAndDoesNotPinFailureFallback() {
         val metadataClient = buildClaudeMetadataHttpClient(okhttp3.OkHttpClient())
         assertEquals(2_000L, metadataClient.callTimeoutMillis.toLong())
 
         val service = AiChatService()
         assertEquals(2048, service.rememberClaudeMaxTokens(TEST_CLAUDE_OUTAGE_MODEL, "bad-key", null))
-        assertEquals(2048, service.rememberClaudeMaxTokens(TEST_CLAUDE_OUTAGE_MODEL, "bad-key", TEST_CLAUDE_MAX_TOKENS))
-        assertEquals(128000, service.rememberClaudeMaxTokens(TEST_CLAUDE_OUTAGE_MODEL, "fixed-key", TEST_CLAUDE_MAX_TOKENS))
+        assertEquals(128000, service.rememberClaudeMaxTokens(TEST_CLAUDE_OUTAGE_MODEL, "bad-key", TEST_CLAUDE_MAX_TOKENS))
         assertEquals(TEST_CLAUDE_MAX_TOKENS, service.rememberClaudeMaxTokens("claude-healthy", "same-key", TEST_CLAUDE_MAX_TOKENS))
         assertEquals(TEST_CLAUDE_MAX_TOKENS, service.rememberClaudeMaxTokens("claude-healthy", "same-key", null))
+    }
+
+    @Test
+    fun claudeAliasMetadataCachesOnlyTheResolvedConcreteModel() {
+        val service = AiChatService()
+        val alias = "claude-sonnet-4-5"
+        val concrete = "claude-sonnet-4-5-20250929"
+        val apiKey = "alias-key"
+        val capabilities = ClaudeReasoningCapabilities(supportsEnabled = true)
+
+        service.rememberClaudeMetadata(concrete, apiKey, TEST_CLAUDE_MAX_TOKENS, capabilities)
+
+        assertEquals(2048, service.rememberClaudeMaxTokens(alias, apiKey, null))
+        assertEquals(TEST_CLAUDE_MAX_TOKENS, service.rememberClaudeMaxTokens(concrete, apiKey, null))
+        assertEquals(concrete, service.parseClaudeModelId("""{"model":"$concrete"}"""))
     }
 
     @Test
@@ -222,6 +236,61 @@ class AiChatServiceTest {
         assertEquals(TEST_CLAUDE_SIGNATURE, replay[0].getValue(TEST_SIGNATURE_KEY).jsonPrimitive.content)
         assertEquals(TEST_CLAUDE_REDACTED_DATA, replay[1].getValue(TEST_DATA_KEY).jsonPrimitive.content)
         assertEquals(CLAUDE_ANSWER, replay[2].getValue(TEST_TEXT_KEY).jsonPrimitive.content)
+    }
+
+    @Test
+    fun claudeRefusalBlockDisablesOpaqueReplayAndFallsBackToVisibleText() {
+        val service = AiChatService()
+        val refusalState = """[{"type":"refusal","refusal":"no"}]"""
+        val response = Json.parseToJsonElement(
+            """{"model":"$TEST_CLAUDE_MODEL","content":[{"type":"refusal","refusal":"no"}]}"""
+        ).jsonObject
+        assertEquals(null, service.extractClaudeReplayState(response))
+
+        val history = listOf(
+            ModelChatMessage(id = "u1", sender = CHAT_ROLE_USER, text = FIRST_QUESTION),
+            ModelChatMessage(
+                id = "claude",
+                sender = CHAT_ROLE_ASSISTANT,
+                provider = AiProvider.CLAUDE,
+                modelName = TEST_CLAUDE_MODEL,
+                text = CLAUDE_ANSWER,
+                providerReplayState = refusalState
+            ),
+            ModelChatMessage(id = "u2", sender = CHAT_ROLE_USER, text = FOLLOW_UP)
+        )
+        val messages = service.buildClaudeMessages(FOLLOW_UP, history, modelName = TEST_CLAUDE_MODEL)
+        assertEquals(CLAUDE_ANSWER, messages[1].jsonObject.getValue(TEST_CONTENT_KEY).jsonPrimitive.content)
+    }
+
+    @Test
+    fun claudeStreamingUnsupportedBlockInvalidatesReplay() {
+        val service = AiChatService()
+        val blocks = mutableMapOf<Int, JsonObject>()
+        service.applyClaudeReplayEvent(
+            blocks,
+            Json.parseToJsonElement(
+                """{"type":"content_block_start","index":0,"content_block":{"type":"refusal","refusal":"no"}}"""
+            ).jsonObject
+        )
+        assertEquals(null, service.encodeClaudeStreamReplayState(blocks))
+    }
+
+    @Test
+    fun claudeResolvedModelComesFromBufferedAndStreamingResponses() {
+        val service = AiChatService()
+        val concrete = "claude-sonnet-4-5-20250929"
+        val buffered = Json.parseToJsonElement("""{"model":"$concrete"}""").jsonObject
+        val streamStart = Json.parseToJsonElement(
+            """{"type":"message_start","message":{"model":"$concrete"}}"""
+        ).jsonObject
+        val fallback = Json.parseToJsonElement(
+            """{"type":"content_block_start","index":0,"content_block":{"type":"fallback","to":{"model":"claude-haiku-4-5-20251001"}}}"""
+        ).jsonObject
+
+        assertEquals(concrete, service.extractClaudeResponseModel(buffered))
+        assertEquals(concrete, service.extractClaudeStreamResolvedModel(streamStart))
+        assertEquals(TEST_CLAUDE_LEGACY_MODEL, service.extractClaudeStreamResolvedModel(fallback))
     }
 
     @Test
