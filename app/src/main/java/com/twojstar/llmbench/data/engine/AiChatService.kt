@@ -381,7 +381,8 @@ class AiChatService {
             conversationHistory = conversationHistory,
             provider = AiProvider.GEMINI,
             systemInstruction = systemInstruction,
-            replayStateModelName = modelName
+            replayStateModelName = modelName,
+            replayStateValidator = { state -> parseGeminiReplayState(state).isNotEmpty() }
         ).forEach { turn ->
             if (turn.role == CHAT_ROLE_ASSISTANT) {
                 val replayContents = turn.providerReplayState

@@ -221,6 +221,38 @@ class ConversationHistoryTest {
     }
 
     @Test
+    fun invalidSameModelReplayStateDoesNotConsumeVisibleFallbackBudget() {
+        val prompt = "next"
+        val previous = "previous"
+        val answer = "answer"
+        val history = listOf(
+            ModelChatMessage(id = "u1", sender = CHAT_ROLE_USER, text = previous),
+            ModelChatMessage(
+                id = "a1",
+                sender = CHAT_ROLE_ASSISTANT,
+                provider = AiProvider.GEMINI,
+                modelName = "gemini-current",
+                text = answer,
+                providerReplayState = "broken".repeat(1_024)
+            )
+        )
+        val visibleSegmentCost = previous.length + answer.length + (2 * 32)
+
+        val turns = buildBoundedProviderTextTurns(
+            prompt = prompt,
+            conversationHistory = history,
+            provider = AiProvider.GEMINI,
+            replayStateModelName = "gemini-current",
+            replayStateValidator = { false },
+            maxHistoryCharacters = prompt.length + visibleSegmentCost,
+            maxHistoryTurns = 8
+        )
+
+        assertEquals(listOf(previous, answer, prompt), turns.map { it.text })
+        assertEquals(null, turns[1].providerReplayState)
+    }
+
+    @Test
     fun partialAssistantResponsesAreNotReplayed() {
         val history = listOf(
             ModelChatMessage(id = "u1", sender = CHAT_ROLE_USER, text = "first"),

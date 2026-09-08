@@ -45,6 +45,7 @@ fun buildBoundedProviderTextTurns(
     provider: AiProvider,
     systemInstruction: String? = null,
     replayStateModelName: String? = null,
+    replayStateValidator: ((String) -> Boolean)? = null,
     maxHistoryCharacters: Int = DEFAULT_HISTORY_CHARACTER_BUDGET,
     maxHistoryTurns: Int = DEFAULT_HISTORY_TURN_LIMIT
 ): List<ProviderTextTurn> {
@@ -66,9 +67,9 @@ fun buildBoundedProviderTextTurns(
                 segments.last() += ProviderTextTurn(
                     CHAT_ROLE_ASSISTANT,
                     message.text,
-                    message.providerReplayState.takeIf {
-                        replayStateModelName == null || message.modelName == replayStateModelName
-                    },
+                    message.providerReplayState
+                        .takeIf { replayStateModelName == null || message.modelName == replayStateModelName }
+                        ?.takeIf { state -> replayStateValidator?.invoke(state) != false },
                     message.modelName
                 )
             }
