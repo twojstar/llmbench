@@ -46,7 +46,7 @@ fun AiProvider.runtimeCapabilities(): ProviderRuntimeCapabilities = when (this) 
     AiProvider.CHATGPT -> ProviderRuntimeCapabilities(
         transport = NativeChatTransport.OPENAI_RESPONSES,
         systemInstructionPlacement = SystemInstructionPlacement.NATIVE_FIELD,
-        conversationStateStrategy = ConversationStateStrategy.BOUNDED_PROVIDER_TEXT_REPLAY,
+        conversationStateStrategy = ConversationStateStrategy.BOUNDED_PROVIDER_CONTENT_REPLAY,
         streamsText = true,
         reportsResolvedModel = false
     )

@@ -42,6 +42,7 @@ private const val JSON_MODEL_KEY = "model"
 private const val JSON_PRICING_KEY = "pricing"
 private const val JSON_INPUT_KEY = "input"
 private const val JSON_OUTPUT_KEY = "output"
+private const val JSON_INCLUDE_KEY = "include"
 private const val JSON_CANDIDATES_KEY = "candidates"
 private const val JSON_CHOICES_KEY = "choices"
 private const val JSON_DELTA_KEY = "delta"
@@ -70,6 +71,7 @@ private const val OPENAI_INCOMPLETE_REASON_KEY = "reason"
 private const val CLAUDE_MESSAGE_STOP = "message_stop"
 private const val OPENAI_OUTPUT_TEXT = "output_text"
 private const val OPENAI_OUTPUT_TEXT_DELTA = "response.output_text.delta"
+private const val OPENAI_REASONING_ENCRYPTED_CONTENT = "reasoning.encrypted_content"
 private const val CLAUDE_CONTENT_BLOCK_DELTA = "content_block_delta"
 private const val CLAUDE_TEXT_DELTA = "text_delta"
 private const val MALFORMED_STREAM_EVENT = "Malformed streaming event"
@@ -89,6 +91,11 @@ internal fun buildClaudeMetadataHttpClient(baseClient: OkHttpClient): OkHttpClie
 class AiChatService {
 
     private data class GeminiGenerationResult(
+        val text: String,
+        val replayState: String?
+    )
+
+    private data class OpenAiGenerationResult(
         val text: String,
         val replayState: String?
     )
@@ -258,12 +265,16 @@ class AiChatService {
                         providerReplayState = result.replayState
                         result.text
                     }
-                    AiProvider.CHATGPT -> if (onTextDelta != null) {
-                        callOpenAiStreamApi(
-                            prompt, effectiveModel, key, systemInstruction, conversationHistory, onTextDelta
-                        )
-                    } else {
-                        callOpenAiApi(prompt, effectiveModel, key, systemInstruction, conversationHistory)
+                    AiProvider.CHATGPT -> {
+                        val result = if (onTextDelta != null) {
+                            callOpenAiStreamApi(
+                                prompt, effectiveModel, key, systemInstruction, conversationHistory, onTextDelta
+                            )
+                        } else {
+                            callOpenAiApi(prompt, effectiveModel, key, systemInstruction, conversationHistory)
+                        }
+                        providerReplayState = result.replayState
+                        result.text
                     }
                     AiProvider.CLAUDE -> if (onTextDelta != null) {
                         callClaudeStreamApi(
@@ -413,15 +424,53 @@ class AiChatService {
     internal fun buildOpenAiResponseInput(
         prompt: String,
         conversationHistory: List<ModelChatMessage>,
-        systemInstruction: String? = null
+        systemInstruction: String? = null,
+        modelName: String? = null
     ): JsonArray = buildJsonArray {
         buildBoundedProviderTextTurns(
-            prompt, conversationHistory, AiProvider.CHATGPT, systemInstruction
+            prompt = prompt,
+            conversationHistory = conversationHistory,
+            provider = AiProvider.CHATGPT,
+            systemInstruction = systemInstruction,
+            replayStateModelName = modelName,
+            replayStateValidator = { state -> parseOpenAiReplayState(state).isNotEmpty() }
         ).forEach { turn ->
-            addJsonObject {
-                put(JSON_ROLE_KEY, turn.role)
-                put(JSON_CONTENT_KEY, turn.text)
+            if (turn.role == CHAT_ROLE_ASSISTANT) {
+                val replayItems = turn.providerReplayState
+                    ?.let(::parseOpenAiReplayState)
+                    .orEmpty()
+                if (replayItems.isNotEmpty()) {
+                    replayItems.forEach(::add)
+                } else {
+                    addJsonObject {
+                        put(JSON_ROLE_KEY, CHAT_ROLE_ASSISTANT)
+                        put(JSON_CONTENT_KEY, turn.text)
+                    }
+                }
+            } else {
+                addJsonObject {
+                    put(JSON_ROLE_KEY, CHAT_ROLE_USER)
+                    put(JSON_CONTENT_KEY, turn.text)
+                }
             }
+        }
+    }
+
+    internal fun buildOpenAiRequestPayload(
+        model: String,
+        stream: Boolean,
+        systemInstruction: String?,
+        input: JsonArray
+    ): JsonObject = buildJsonObject {
+        put(JSON_MODEL_KEY, model)
+        put(JSON_INPUT_KEY, input)
+        put(JSON_STORE_KEY, false)
+        putJsonArray(JSON_INCLUDE_KEY) {
+            add(OPENAI_REASONING_ENCRYPTED_CONTENT)
+        }
+        if (stream) put(JSON_STREAM_KEY, true)
+        if (!systemInstruction.isNullOrBlank()) {
+            put(JSON_INSTRUCTIONS_KEY, systemInstruction)
         }
     }
 
@@ -485,17 +534,20 @@ class AiChatService {
         apiKey: String,
         systemInstruction: String?,
         conversationHistory: List<ModelChatMessage>
-    ): String {
+    ): OpenAiGenerationResult {
         val url = "https://api.openai.com/v1/responses"
-
-        val requestPayload = buildJsonObject {
-            put(JSON_MODEL_KEY, model)
-            put(JSON_INPUT_KEY, buildOpenAiResponseInput(prompt, conversationHistory, systemInstruction))
-            put(JSON_STORE_KEY, false)
-            if (!systemInstruction.isNullOrBlank()) {
-                put(JSON_INSTRUCTIONS_KEY, systemInstruction)
-            }
-        }
+        val input = buildOpenAiResponseInput(
+            prompt = prompt,
+            conversationHistory = conversationHistory,
+            systemInstruction = systemInstruction,
+            modelName = model
+        )
+        val requestPayload = buildOpenAiRequestPayload(
+            model = model,
+            stream = false,
+            systemInstruction = systemInstruction,
+            input = input
+        )
 
         val body = requestPayload.toString().toRequestBody(JSON_MEDIA_TYPE.toMediaType())
         val request = Request.Builder()
@@ -507,17 +559,11 @@ class AiChatService {
 
         val responseBody = executeCancellableJson(request, "Empty response from OpenAI server")
         val parsed = json.parseToJsonElement(responseBody).jsonObject
-        val text = parsed[JSON_OUTPUT_KEY]?.jsonArray.orEmpty().asSequence()
-            .mapNotNull { it as? JsonObject }
-            .filter { it[STREAM_TYPE_KEY]?.jsonPrimitive?.contentOrNull == STREAM_MESSAGE_KEY }
-            .flatMap { message -> message[JSON_CONTENT_KEY]?.jsonArray.orEmpty().asSequence() }
-            .mapNotNull { it as? JsonObject }
-            .filter { it[STREAM_TYPE_KEY]?.jsonPrimitive?.contentOrNull == OPENAI_OUTPUT_TEXT }
-            .mapNotNull { it[JSON_TEXT_KEY]?.jsonPrimitive?.contentOrNull }
-            .joinToString(separator = "")
-            .takeIf { it.isNotEmpty() }
-
-        return text ?: "Received empty message content from OpenAI."
+        return OpenAiGenerationResult(
+            text = extractOpenAiResponseText(parsed)
+                ?: "Received empty message content from OpenAI.",
+            replayState = extractOpenAiReplayState(parsed)
+        )
     }
 
     internal fun parseClaudeModelMaxTokens(rawJson: String): Int? = runCatching {
@@ -666,6 +712,55 @@ class AiChatService {
             .joinToString(separator = "")
             .takeIf { it.isNotEmpty() }
 
+    private fun isValidOpenAiReplayItem(item: JsonObject): Boolean =
+        (item[STREAM_TYPE_KEY] as? JsonPrimitive)
+            ?.takeIf { it.isString }
+            ?.contentOrNull
+            ?.isNotBlank() == true
+
+    internal fun parseOpenAiReplayState(state: String?): List<JsonObject> {
+        if (state.isNullOrBlank()) return emptyList()
+        return runCatching {
+            val array = json.parseToJsonElement(state) as? JsonArray
+                ?: return@runCatching emptyList()
+            val items = array.mapNotNull { it as? JsonObject }
+            if (items.size != array.size || items.isEmpty() || items.any { !isValidOpenAiReplayItem(it) }) {
+                emptyList()
+            } else {
+                items
+            }
+        }.getOrDefault(emptyList())
+    }
+
+    private fun encodeOpenAiReplayState(items: List<JsonObject>): String? =
+        items.takeIf { it.isNotEmpty() && it.all(::isValidOpenAiReplayItem) }
+            ?.let { JsonArray(it).toString() }
+
+    internal fun extractOpenAiReplayState(response: JsonObject): String? {
+        val output = response[JSON_OUTPUT_KEY] as? JsonArray ?: return null
+        val items = output.mapNotNull { it as? JsonObject }
+        if (items.size != output.size) return null
+        return encodeOpenAiReplayState(items)
+    }
+
+    internal fun extractOpenAiCompletedReplayState(event: JsonObject): String? =
+        if (event[STREAM_TYPE_KEY]?.jsonPrimitive?.contentOrNull == OPENAI_RESPONSE_COMPLETED) {
+            (event[STREAM_RESPONSE_KEY] as? JsonObject)?.let(::extractOpenAiReplayState)
+        } else {
+            null
+        }
+
+    internal fun extractOpenAiResponseText(response: JsonObject): String? =
+        (response[JSON_OUTPUT_KEY] as? JsonArray).orEmpty().asSequence()
+            .mapNotNull { it as? JsonObject }
+            .filter { it[STREAM_TYPE_KEY]?.jsonPrimitive?.contentOrNull == STREAM_MESSAGE_KEY }
+            .flatMap { message -> (message[JSON_CONTENT_KEY] as? JsonArray).orEmpty().asSequence() }
+            .mapNotNull { it as? JsonObject }
+            .filter { it[STREAM_TYPE_KEY]?.jsonPrimitive?.contentOrNull == OPENAI_OUTPUT_TEXT }
+            .mapNotNull { it[JSON_TEXT_KEY]?.jsonPrimitive?.contentOrNull }
+            .joinToString(separator = "")
+            .takeIf { it.isNotEmpty() }
+
     internal fun extractOpenAiStreamText(event: JsonObject): String? =
         if (event[STREAM_TYPE_KEY]?.jsonPrimitive?.contentOrNull == OPENAI_OUTPUT_TEXT_DELTA) {
             event[JSON_DELTA_KEY]?.jsonPrimitive?.contentOrNull
@@ -741,22 +836,39 @@ class AiChatService {
         systemInstruction: String?,
         conversationHistory: List<ModelChatMessage>,
         onTextDelta: (String) -> Unit
-    ): String {
-        val requestPayload = buildJsonObject {
-            put(JSON_MODEL_KEY, model)
-            put(JSON_INPUT_KEY, buildOpenAiResponseInput(prompt, conversationHistory, systemInstruction))
-            put(JSON_STORE_KEY, false)
-            put(JSON_STREAM_KEY, true)
-            if (!systemInstruction.isNullOrBlank()) put(JSON_INSTRUCTIONS_KEY, systemInstruction)
-        }
+    ): OpenAiGenerationResult {
+        val input = buildOpenAiResponseInput(
+            prompt = prompt,
+            conversationHistory = conversationHistory,
+            systemInstruction = systemInstruction,
+            modelName = model
+        )
+        val requestPayload = buildOpenAiRequestPayload(
+            model = model,
+            stream = true,
+            systemInstruction = systemInstruction,
+            input = input
+        )
         val request = Request.Builder()
             .url("https://api.openai.com/v1/responses")
             .addHeader(HEADER_AUTHORIZATION, bearerToken(apiKey))
             .addHeader(HEADER_CONTENT_TYPE, JSON_MEDIA_TYPE)
             .post(requestPayload.toString().toRequestBody(JSON_MEDIA_TYPE.toMediaType()))
             .build()
-        return executeSse(request, ::extractOpenAiStreamText, ::isOpenAiStreamComplete, onTextDelta)
-            .ifEmpty { "Received empty message content from OpenAI." }
+        var replayState: String? = null
+        val text = executeSse(
+            request = request,
+            extractText = ::extractOpenAiStreamText,
+            isComplete = ::isOpenAiStreamComplete,
+            onTextDelta = onTextDelta,
+            onEvent = { event ->
+                extractOpenAiCompletedReplayState(event)?.let { replayState = it }
+            }
+        )
+        return OpenAiGenerationResult(
+            text = text.ifEmpty { "Received empty message content from OpenAI." },
+            replayState = replayState
+        )
     }
 
     private suspend fun callClaudeStreamApi(
