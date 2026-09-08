@@ -29,7 +29,7 @@ import com.twojstar.llmbench.data.document.MarkdownDocumentFileAccess
 import com.twojstar.llmbench.data.repository.SkillsAndDocsRepository
 import com.twojstar.llmbench.ui.theme.*
 import com.twojstar.llmbench.ui.viewmodel.StudioViewModel
-import kotlinx.coroutines.CancellationException
+import java.io.IOException
 import kotlinx.coroutines.launch
 
 private val SKILL_IMPORT_MIME_TYPES = arrayOf(
@@ -37,6 +37,10 @@ private val SKILL_IMPORT_MIME_TYPES = arrayOf(
     "text/plain",
     "application/octet-stream"
 )
+
+private fun skillPreviewReadErrorMessage(detail: String?): String =
+    detail?.takeIf(String::isNotBlank)?.let { "Could not preview selected skill: $it" }
+        ?: "Could not preview the selected skill file."
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -62,14 +66,10 @@ fun SkillsBrowserScreen(
                         displayName = opened.displayName,
                         source = opened.document.text
                     )
-                } catch (error: CancellationException) {
-                    throw error
-                } catch (error: Exception) {
-                    val detail = error.message?.takeIf(String::isNotBlank)
-                    viewModel.showSnackbar(
-                        detail?.let { "Could not preview selected skill: $it" }
-                            ?: "Could not preview the selected skill file."
-                    )
+                } catch (error: IOException) {
+                    viewModel.showSnackbar(skillPreviewReadErrorMessage(error.message))
+                } catch (error: SecurityException) {
+                    viewModel.showSnackbar(skillPreviewReadErrorMessage(error.message))
                 } finally {
                     skillImportLoading = false
                 }
