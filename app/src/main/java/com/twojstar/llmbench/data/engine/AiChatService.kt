@@ -619,8 +619,19 @@ class AiChatService {
         return content.takeIf(::isValidGeminiReplayContent)
     }
 
+    internal fun mergeGeminiReplayContents(contents: List<JsonObject>): JsonObject? {
+        if (contents.isEmpty() || contents.any { !isValidGeminiReplayContent(it) }) return null
+        val parts = contents.flatMap { content ->
+            (content[JSON_PARTS_KEY] as JsonArray).toList()
+        }
+        return buildJsonObject {
+            put(JSON_ROLE_KEY, JSON_MODEL_KEY)
+            put(JSON_PARTS_KEY, JsonArray(parts))
+        }
+    }
+
     private fun encodeGeminiReplayState(contents: List<JsonObject>): String? =
-        contents.takeIf { it.isNotEmpty() }?.let { JsonArray(it).toString() }
+        mergeGeminiReplayContents(contents)?.let { JsonArray(listOf(it)).toString() }
 
     private fun parseGeminiReplayState(state: String?): List<JsonObject> {
         if (state.isNullOrBlank()) return emptyList()
@@ -628,10 +639,10 @@ class AiChatService {
             val array = json.parseToJsonElement(state) as? JsonArray
                 ?: return@runCatching emptyList()
             val contents = array.mapNotNull { it as? JsonObject }
-            if (contents.size != array.size || contents.any { !isValidGeminiReplayContent(it) }) {
+            if (contents.size != array.size) {
                 emptyList()
             } else {
-                contents
+                mergeGeminiReplayContents(contents)?.let(::listOf).orEmpty()
             }
         }.getOrDefault(emptyList())
     }

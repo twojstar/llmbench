@@ -306,10 +306,12 @@ class AiChatServiceTest {
 
         val contents = AiChatService().buildGeminiContents(FOLLOW_UP, history)
 
-        assertEquals(listOf(CHAT_ROLE_USER, "model", "model", CHAT_ROLE_USER), contents.map {
+        assertEquals(listOf(CHAT_ROLE_USER, "model", CHAT_ROLE_USER), contents.map {
             it.jsonObject.getValue(TEST_ROLE_KEY).jsonPrimitive.content
         })
-        val signaturePart = contents[2].jsonObject.getValue("parts").jsonArray.single().jsonObject
+        val replayParts = contents[1].jsonObject.getValue("parts").jsonArray
+        assertEquals(2, replayParts.size)
+        val signaturePart = replayParts[1].jsonObject
         assertEquals("", signaturePart.getValue("text").jsonPrimitive.content)
         assertEquals("opaque-signature", signaturePart.getValue("thoughtSignature").jsonPrimitive.content)
     }
@@ -341,7 +343,11 @@ class AiChatServiceTest {
 
         assertEquals(STREAM_HELLO, text)
         assertEquals(2, replayContents.size)
-        val signaturePart = replayContents.last().getValue("parts").jsonArray.single().jsonObject
+        val merged = service.mergeGeminiReplayContents(replayContents)
+        val replayParts = requireNotNull(merged).getValue("parts").jsonArray
+        assertEquals(2, replayParts.size)
+        assertEquals("hello", replayParts[0].jsonObject.getValue("text").jsonPrimitive.content)
+        val signaturePart = replayParts[1].jsonObject
         assertEquals("", signaturePart.getValue("text").jsonPrimitive.content)
         assertEquals("opaque-signature", signaturePart.getValue("thoughtSignature").jsonPrimitive.content)
     }
