@@ -30,6 +30,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -42,6 +43,8 @@ import com.twojstar.llmbench.data.document.TextDocumentCodec
 import com.twojstar.llmbench.data.skills.LocalSkillLibraryStore
 import com.twojstar.llmbench.data.skills.LocalSkillSummary
 import java.io.IOException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 
 @Composable
@@ -57,7 +60,7 @@ internal fun LocalSkillLibrarySection(
     val scope = rememberCoroutineScope()
     var skills by remember { mutableStateOf<List<LocalSkillSummary>>(emptyList()) }
     var busySkill by remember { mutableStateOf<String?>(null) }
-    var pendingExportSkill by remember { mutableStateOf<String?>(null) }
+    var pendingExportSkill by rememberSaveable { mutableStateOf<String?>(null) }
 
     val exportLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("text/markdown")
@@ -86,10 +89,9 @@ internal fun LocalSkillLibrarySection(
                         )
                         onMessage("Exported '$skillName' as SKILL.md.")
                     }
-                } catch (error: IOException) {
+                } catch (error: Exception) {
+                    currentCoroutineContext().ensureActive()
                     onMessage(error.message ?: "Could not export local skill.")
-                } catch (_: SecurityException) {
-                    onMessage("The selected export destination is no longer accessible.")
                 } finally {
                     busySkill = null
                 }
