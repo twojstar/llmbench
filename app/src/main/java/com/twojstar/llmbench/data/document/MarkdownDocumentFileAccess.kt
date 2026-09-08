@@ -11,7 +11,8 @@ import java.io.IOException
 
 internal data class OpenedMarkdownDocument(
     val document: TextDocument,
-    val displayName: String
+    val displayName: String,
+    val hasProviderDisplayName: Boolean
 )
 
 private data class MarkdownDocumentMetadata(
@@ -29,10 +30,12 @@ internal object MarkdownDocumentFileAccess {
     suspend fun import(context: Context, uri: Uri): OpenedMarkdownDocument = withContext(Dispatchers.IO) {
         val resolver = context.contentResolver
         val metadata = queryMetadata(resolver, uri)
+        val providerDisplayName = metadata.displayName?.trim()?.takeIf(String::isNotEmpty)
         val bytes = readBoundedBytes(resolver, uri, metadata.size)
         OpenedMarkdownDocument(
             document = TextDocumentCodec.decodeUtf8(bytes),
-            displayName = resolveDisplayName(metadata.displayName)
+            displayName = resolveDisplayName(providerDisplayName),
+            hasProviderDisplayName = providerDisplayName != null
         )
     }
 
