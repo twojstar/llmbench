@@ -180,6 +180,37 @@ class AgentSkillManifestTest {
     }
 
     @Test
+    fun acceptsSupplementaryPlaneLetterAndCountsNameCodePoints() {
+        val supplementaryLetter = "\uD801\uDC28"
+        val validName = supplementaryLetter.repeat(64)
+        val tooLongName = supplementaryLetter.repeat(65)
+        val valid = AgentSkillManifestParser.parse(
+            """
+                ---
+                name: $validName
+                description: Accept a 64-code-point portable name.
+                ---
+                Instructions.
+            """.trimIndent(),
+            directoryName = validName
+        )
+        val tooLong = AgentSkillManifestParser.parse(
+            """
+                ---
+                name: $tooLongName
+                description: Reject a 65-code-point portable name.
+                ---
+                Instructions.
+            """.trimIndent()
+        )
+
+        assertTrue(valid.isValid)
+        assertEquals(validName, valid.manifest?.name)
+        assertFalse(tooLong.isValid)
+        assertTrue(tooLong.issues.any { it.field == "name" && it.message.contains("at most 64") })
+    }
+
+    @Test
     fun rejectsUnicodeUppercaseNames() {
         val result = AgentSkillManifestParser.parse(
             """
@@ -212,6 +243,74 @@ class AgentSkillManifestTest {
 
         assertTrue(result.isValid)
         assertEquals(composedName, result.manifest?.name)
+    }
+
+    @Test
+    fun countsDescriptionLimitByUnicodeCodePoint() {
+        val supplementary = "😀"
+        val validDescription = supplementary.repeat(1_024)
+        val tooLongDescription = supplementary.repeat(1_025)
+        val valid = AgentSkillManifestParser.parse(
+            """
+                ---
+                name: description-boundary
+                description: $validDescription
+                ---
+                Instructions.
+            """.trimIndent()
+        )
+        val tooLong = AgentSkillManifestParser.parse(
+            """
+                ---
+                name: description-overflow
+                description: $tooLongDescription
+                ---
+                Instructions.
+            """.trimIndent()
+        )
+
+        assertTrue(valid.isValid)
+        assertFalse(tooLong.isValid)
+        assertTrue(
+            tooLong.issues.any {
+                it.field == "description" && it.message.contains("at most 1024")
+            }
+        )
+    }
+
+    @Test
+    fun countsCompatibilityLimitByUnicodeCodePoint() {
+        val supplementary = "😀"
+        val validCompatibility = supplementary.repeat(500)
+        val tooLongCompatibility = supplementary.repeat(501)
+        val valid = AgentSkillManifestParser.parse(
+            """
+                ---
+                name: compatibility-boundary
+                description: Validate supplementary compatibility text.
+                compatibility: $validCompatibility
+                ---
+                Instructions.
+            """.trimIndent()
+        )
+        val tooLong = AgentSkillManifestParser.parse(
+            """
+                ---
+                name: compatibility-overflow
+                description: Reject compatibility beyond the code-point limit.
+                compatibility: $tooLongCompatibility
+                ---
+                Instructions.
+            """.trimIndent()
+        )
+
+        assertTrue(valid.isValid)
+        assertFalse(tooLong.isValid)
+        assertTrue(
+            tooLong.issues.any {
+                it.field == "compatibility" && it.message.contains("at most 500")
+            }
+        )
     }
 
     @Test
