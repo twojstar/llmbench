@@ -49,7 +49,11 @@ jobs:
           escaped = payload.replace('"', '\\"')
           new = '        val replayState = "' + escaped + '"'
           assert text.count(old) == 1
-          path.write_text(text.replace(old, new))
+          text = text.replace(old, new)
+          marker = '    """    @Test\n    fun geminiHistoryReplaysOpaqueModelContentsIncludingSignatureOnlyChunk() {'
+          raw_marker = '    r"""    @Test\n    fun geminiHistoryReplaysOpaqueModelContentsIncludingSignatureOnlyChunk() {'
+          assert text.count(marker) == 1
+          path.write_text(text.replace(marker, raw_marker))
           PY
           python .github/scripts/one-shot-gemini-replay.py
 
