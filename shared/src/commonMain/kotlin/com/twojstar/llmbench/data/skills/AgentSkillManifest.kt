@@ -151,6 +151,7 @@ object AgentSkillManifestParser {
     ): ParsedFrontmatter {
         val scalars = linkedMapOf<String, String>()
         val metadata = linkedMapOf<String, String>()
+        val seenFields = mutableSetOf<String>()
         var index = 0
 
         while (index < lines.size) {
@@ -180,7 +181,7 @@ object AgentSkillManifestParser {
 
             val key = match.groupValues[1]
             val rawValue = match.groupValues[2].trim()
-            if (key in scalars || key == "metadata" && metadata.isNotEmpty()) {
+            if (!seenFields.add(key)) {
                 issues += AgentSkillValidationIssue(key, "Duplicate frontmatter field '$key'")
                 index++
                 continue
@@ -246,7 +247,11 @@ object AgentSkillManifestParser {
             if (key in metadata) {
                 issues += AgentSkillValidationIssue("metadata.$key", "Duplicate metadata key '$key'")
             } else if (rawValue.isBlockScalarIndicator()) {
-                val block = collectIndentedBlock(lines, index + 1, minimumIndent = leadingWhitespace(line) + 1)
+                val block = collectIndentedBlock(
+                    lines,
+                    index + 1,
+                    minimumIndent = leadingWhitespace(line) + 1
+                )
                 metadata[key] = decodeBlockScalar(rawValue, block.lines)
                 index = block.nextIndex
                 continue
