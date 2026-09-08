@@ -29,8 +29,19 @@ class ChatUsageMetadataTest {
     }
 
     @Test
+    fun preservesTinyPositiveReportedCosts() {
+        val message = ModelChatMessage(
+            id = "m2",
+            sender = "assistant",
+            text = "answer",
+            usage = ProviderUsage(costUsd = 0.0000004)
+        )
+        assertEquals("<$0.000001", formatChatResponseDiagnostics(message))
+    }
+
+    @Test
     fun keepsLatencyOnlyResponsesCompact() {
-        val message = ModelChatMessage(id = "m2", sender = "assistant", text = "answer", latencyMs = 120)
+        val message = ModelChatMessage(id = "m3", sender = "assistant", text = "answer", latencyMs = 120)
         assertEquals("120ms", formatChatResponseDiagnostics(message))
     }
 }

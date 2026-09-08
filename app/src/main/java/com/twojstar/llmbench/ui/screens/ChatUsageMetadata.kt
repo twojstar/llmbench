@@ -18,6 +18,7 @@ internal fun formatChatResponseDiagnostics(message: ModelChatMessage): String? =
 private fun formatTokenCount(tokens: Long): String = String.format(Locale.US, "%,d", tokens)
 
 private fun formatReportedCost(costUsd: Double): String {
+    if (costUsd > 0.0 && costUsd < 0.0000005) return "<\$0.000001"
     val fixed = String.format(Locale.US, "%.6f", costUsd).trimEnd('0').trimEnd('.')
     return "$$fixed"
 }
