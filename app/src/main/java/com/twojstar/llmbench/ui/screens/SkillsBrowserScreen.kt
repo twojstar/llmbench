@@ -27,6 +27,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.twojstar.llmbench.data.document.MarkdownDocumentFileAccess
 import com.twojstar.llmbench.data.repository.SkillsAndDocsRepository
+import com.twojstar.llmbench.data.skills.LocalSkillAlreadyExistsException
 import com.twojstar.llmbench.data.skills.LocalSkillLibraryStore
 import com.twojstar.llmbench.ui.theme.*
 import com.twojstar.llmbench.ui.viewmodel.StudioViewModel
@@ -62,6 +63,7 @@ fun SkillsBrowserScreen(
     var searchQuery by remember { mutableStateOf("") }
     var selectedItemContent by remember { mutableStateOf<Pair<String, String>?>(null) } // Title to Content dialog
     var skillImportPreview by remember { mutableStateOf<SkillImportPreview?>(null) }
+    var pendingSkillReplacement by remember { mutableStateOf<SkillImportPreview?>(null) }
     var skillImportLoading by remember { mutableStateOf(false) }
     var skillImportSaving by remember { mutableStateOf(false) }
     var localSkillCount by remember { mutableIntStateOf(0) }
@@ -473,6 +475,9 @@ fun SkillsBrowserScreen(
                         localSkillsRefreshToken += 1
                         skillImportPreview = null
                         viewModel.showSnackbar("Saved '${saved.name}' to local skills.")
+                    } catch (_: LocalSkillAlreadyExistsException) {
+                        pendingSkillReplacement = preview
+                        skillImportPreview = null
                     } catch (error: IOException) {
                         viewModel.showSnackbar(error.message ?: "Could not save local skill.")
                     } finally {
@@ -481,6 +486,34 @@ fun SkillsBrowserScreen(
                 }
             },
             onDismiss = { if (!skillImportSaving) skillImportPreview = null }
+        )
+    }
+
+    pendingSkillReplacement?.let { preview ->
+        SkillReplacementConfirmationDialog(
+            preview = preview,
+            saving = skillImportSaving,
+            onReplace = {
+                scope.launch {
+                    skillImportSaving = true
+                    try {
+                        val saved = localSkillStore.add(preview.source, replaceExisting = true)
+                        localSkillsRefreshToken += 1
+                        pendingSkillReplacement = null
+                        viewModel.showSnackbar("Replaced '${saved.name}' in local skills.")
+                    } catch (error: IOException) {
+                        viewModel.showSnackbar(error.message ?: "Could not replace local skill.")
+                    } finally {
+                        skillImportSaving = false
+                    }
+                }
+            },
+            onCancel = {
+                if (!skillImportSaving) {
+                    pendingSkillReplacement = null
+                    skillImportPreview = preview
+                }
+            }
         )
     }
 }
@@ -701,6 +734,43 @@ private fun SkillImportPreviewDialog(
                 TextButton(onClick = onDismiss, enabled = !saving) {
                     Text("Close")
                 }
+            }
+        }
+    )
+}
+
+@Composable
+private fun SkillReplacementConfirmationDialog(
+    preview: SkillImportPreview,
+    saving: Boolean,
+    onReplace: () -> Unit,
+    onCancel: () -> Unit
+) {
+    val skillName = preview.manifest?.name ?: preview.displayName
+    AlertDialog(
+        onDismissRequest = { if (!saving) onCancel() },
+        title = { Text("Replace '$skillName'?") },
+        text = {
+            Text(
+                "A local skill with this name already exists. Replacing it overwrites the stored SKILL.md source. " +
+                    "Export the current copy first if you may need it later."
+            )
+        },
+        confirmButton = {
+            Button(onClick = onReplace, enabled = !saving) {
+                if (saving) {
+                    CircularProgressIndicator(
+                        strokeWidth = 2.dp,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(Modifier.width(8.dp))
+                }
+                Text(if (saving) "Replacing…" else "Replace")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onCancel, enabled = !saving) {
+                Text("Cancel")
             }
         }
     )
