@@ -3,6 +3,8 @@ package com.twojstar.llmbench.ui.screens
 import com.twojstar.llmbench.data.skills.AgentSkillManifest
 import com.twojstar.llmbench.data.skills.AgentSkillManifestParser
 import com.twojstar.llmbench.data.skills.AgentSkillValidationIssue
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 private const val MAX_SOURCE_PREVIEW_CHARS = 24 * 1024
 private val PORTABLE_SKILL_FILENAMES = setOf("SKILL.md", "skill.md")
@@ -23,16 +25,20 @@ internal data class SkillImportPreview(
     }
 }
 
-internal fun buildSkillImportPreview(displayName: String, source: String): SkillImportPreview {
+internal suspend fun buildSkillImportPreview(
+    displayName: String,
+    source: String,
+    validateFilename: Boolean = true
+): SkillImportPreview = withContext(Dispatchers.Default) {
     val parsed = AgentSkillManifestParser.parse(source)
     val issues = parsed.issues.toMutableList()
-    if (displayName !in PORTABLE_SKILL_FILENAMES) {
+    if (validateFilename && displayName !in PORTABLE_SKILL_FILENAMES) {
         issues += AgentSkillValidationIssue(
             field = null,
             message = "Portable skills must be named SKILL.md (skill.md is also accepted)."
         )
     }
-    return SkillImportPreview(
+    SkillImportPreview(
         displayName = displayName,
         source = source,
         manifest = parsed.manifest,
