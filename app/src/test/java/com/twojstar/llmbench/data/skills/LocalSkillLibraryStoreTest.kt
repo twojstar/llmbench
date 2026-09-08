@@ -22,7 +22,7 @@ class LocalSkillLibraryStoreTest {
 
     @Test
     fun storesSourceAsCanonicalSkillDocumentAndLoadsSummary() = runBlocking {
-        val source = skillSource(RELEASE_SKILL, "First version.")
+        val source = skillSource(RELEASE_SKILL, FIRST_VERSION)
 
         val added = store.add(source)
         val loaded = store.load()
@@ -30,7 +30,7 @@ class LocalSkillLibraryStoreTest {
         val opened = store.read(RELEASE_SKILL)
 
         assertEquals(RELEASE_SKILL, added.name)
-        assertEquals("First version.", added.description)
+        assertEquals(FIRST_VERSION, added.description)
         assertNotEquals(RELEASE_SKILL, storedDirectory.name)
         assertEquals(source, storedDirectory.resolve(SKILL_FILE_NAME).readText())
         assertEquals(listOf(RELEASE_SKILL), loaded.map(LocalSkillSummary::name))
@@ -39,7 +39,7 @@ class LocalSkillLibraryStoreTest {
 
     @Test
     fun addingSameSkillNameRequiresExplicitReplacement() = runBlocking {
-        val original = skillSource(RELEASE_SKILL, "First version.")
+        val original = skillSource(RELEASE_SKILL, FIRST_VERSION)
         val replacement = skillSource(RELEASE_SKILL, "Second version.")
         store.add(original)
 
@@ -170,5 +170,6 @@ class LocalSkillLibraryStoreTest {
         const val BETA_SKILL = "beta-skill"
         const val REPLACEMENT_SLOT = "replacement-slot"
         const val SKILL_FILE_NAME = "SKILL.md"
+        const val FIRST_VERSION = "First version."
     }
 }
