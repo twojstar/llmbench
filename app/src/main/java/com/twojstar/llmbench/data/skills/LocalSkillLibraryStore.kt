@@ -145,7 +145,10 @@ internal class LocalSkillLibraryStore(
     }
 
     private suspend fun removeEnabledMarker(directory: File) = withContext(Dispatchers.IO) {
-        File(directory, ENABLED_FILE_NAME).delete()
+        val marker = File(directory, ENABLED_FILE_NAME)
+        if (marker.exists() && !marker.delete()) {
+            throw IOException("Could not disable an over-budget local skill.")
+        }
     }
 
     private suspend fun ensureCapacityFor(name: String) {
