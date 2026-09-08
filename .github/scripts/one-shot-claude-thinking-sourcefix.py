@@ -1,7 +1,8 @@
 from pathlib import Path
 
 path = Path(".github/scripts/one-shot-claude-thinking.py")
-lines = path.read_text().splitlines()
+source = path.read_text().replace("| Claude | `Messages API` |", "| Claude | Messages API |")
+lines = source.splitlines()
 bad_sonnet = """test = test.replace('"claude-sonnet-5"', 'TEST_CLAUDE_MODEL)"""
 good_sonnet = """test = test.replace('"claude-sonnet-5"', 'TEST_CLAUDE_MODEL')"""
 bad_legacy = """test = test.replace('"claude-haiku-4-5-20251001"', 'TEST_CLAUDE_LEGACY_MODEL)"""
