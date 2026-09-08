@@ -33,7 +33,7 @@ Generation and gateway model-catalog requests are coroutine-cancellable: cancell
 - replay a prior user prompt only when that provider produced a replayable response to that turn;
 - bound history by both turn count and approximate character budget;
 - reserve history budget for the current prompt and system instruction;
-- keep provider-owned replay state opaque, provider-scoped, budgeted and out of UI/export/log output.
+- keep provider-owned replay state opaque, provider/model-scoped, budgeted only when replayable, and out of serialization/UI/export/log output.
 
 This isolation matters in compare/switch-provider flows: a provider should not receive user turns it never answered unless that behavior is explicitly redesigned.
 
@@ -53,7 +53,7 @@ Example: Gemini 3 documentation recommends keeping temperature at the default `1
 
 The REST path remains stateless, but LlmBench now retains the full model `Content` chunks returned by Gemini alongside visible text. Subsequent Gemini turns replay those model-owned chunks unchanged, including an empty-text final part when it carries `thoughtSignature`. This mirrors the GenerateContent SDK behavior while preserving the existing local/provider-scoped history boundary.
 
-`providerReplayState` is opaque transport state: it is never rendered as chat text, exported to Markdown, logged, or rewritten. Invalid/legacy replay state falls back to the existing visible-text reconstruction instead of making the chat unusable. Streaming capture runs through the terminal `STOP` event so signature-only final chunks are not dropped.
+`providerReplayState` is ephemeral opaque transport state: it is excluded from `ModelChatMessage` serialization and is never rendered as chat text, exported to Markdown, logged, or rewritten. It is replayed and charged against the history budget only for the exact model that produced it; model switches and invalid/legacy state fall back to the existing visible-text reconstruction instead of making the chat unusable. Streaming capture runs through the terminal `STOP` event so signature-only final chunks are not dropped.
 
 A future move to Gemini Interactions can still be evaluated, but only with an explicit privacy/storage decision because that would change the current client-managed stateless model.
 

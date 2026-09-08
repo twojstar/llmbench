@@ -377,7 +377,11 @@ class AiChatService {
         systemInstruction: String? = null
     ): JsonArray = buildJsonArray {
         buildBoundedProviderTextTurns(
-            prompt, conversationHistory, AiProvider.GEMINI, systemInstruction
+            prompt = prompt,
+            conversationHistory = conversationHistory,
+            provider = AiProvider.GEMINI,
+            systemInstruction = systemInstruction,
+            replayStateModelName = modelName
         ).forEach { turn ->
             if (turn.role == CHAT_ROLE_ASSISTANT) {
                 val replayContents = turn.providerReplayState

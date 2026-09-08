@@ -34,6 +34,7 @@ private const val TEST_EVENT_STREAM_TYPE = "text/event-stream"
 private const val TEST_GEMINI_MODEL = "gemini-test-model"
 private const val TEST_GEMINI_ROLE = "model"
 private const val TEST_OPAQUE_SIGNATURE = "opaque-signature"
+private const val TEST_THOUGHT_SIGNATURE_KEY = "thoughtSignature"
 private const val TEST_CLAUDE_MAX_TOKENS = 128000
 private const val TEST_CLAUDE_OUTAGE_MODEL = "claude-outage"
 
@@ -317,7 +318,7 @@ class AiChatServiceTest {
         assertEquals(2, replayParts.size)
         val signaturePart = replayParts[1].jsonObject
         assertEquals("", signaturePart.getValue("text").jsonPrimitive.content)
-        assertEquals(TEST_OPAQUE_SIGNATURE, signaturePart.getValue("thoughtSignature").jsonPrimitive.content)
+        assertEquals(TEST_OPAQUE_SIGNATURE, signaturePart.getValue(TEST_THOUGHT_SIGNATURE_KEY).jsonPrimitive.content)
     }
 
     @Test
@@ -345,7 +346,7 @@ class AiChatServiceTest {
         assertEquals(1, replayParts.size)
         val visiblePart = replayParts.single().jsonObject
         assertEquals(GEMINI_ANSWER, visiblePart.getValue("text").jsonPrimitive.content)
-        assertFalse("thoughtSignature" in visiblePart)
+        assertFalse(TEST_THOUGHT_SIGNATURE_KEY in visiblePart)
     }
 
     @Test
@@ -381,7 +382,7 @@ class AiChatServiceTest {
         assertEquals("hello", replayParts[0].jsonObject.getValue("text").jsonPrimitive.content)
         val signaturePart = replayParts[1].jsonObject
         assertEquals("", signaturePart.getValue("text").jsonPrimitive.content)
-        assertEquals(TEST_OPAQUE_SIGNATURE, signaturePart.getValue("thoughtSignature").jsonPrimitive.content)
+        assertEquals(TEST_OPAQUE_SIGNATURE, signaturePart.getValue(TEST_THOUGHT_SIGNATURE_KEY).jsonPrimitive.content)
     }
 
     @Test

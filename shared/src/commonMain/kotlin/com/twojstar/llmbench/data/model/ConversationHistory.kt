@@ -44,6 +44,7 @@ fun buildBoundedProviderTextTurns(
     conversationHistory: List<ModelChatMessage>,
     provider: AiProvider,
     systemInstruction: String? = null,
+    replayStateModelName: String? = null,
     maxHistoryCharacters: Int = DEFAULT_HISTORY_CHARACTER_BUDGET,
     maxHistoryTurns: Int = DEFAULT_HISTORY_TURN_LIMIT
 ): List<ProviderTextTurn> {
@@ -65,7 +66,9 @@ fun buildBoundedProviderTextTurns(
                 segments.last() += ProviderTextTurn(
                     CHAT_ROLE_ASSISTANT,
                     message.text,
-                    message.providerReplayState,
+                    message.providerReplayState.takeIf {
+                        replayStateModelName == null || message.modelName == replayStateModelName
+                    },
                     message.modelName
                 )
             }
