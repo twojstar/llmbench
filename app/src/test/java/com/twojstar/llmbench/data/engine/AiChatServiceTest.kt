@@ -513,6 +513,29 @@ class AiChatServiceTest {
     }
 
     @Test
+    fun openAiBufferedTerminalFailuresAreRejectedBeforeReplayCapture() {
+        val service = AiChatService()
+        val incomplete = Json.parseToJsonElement(
+            """{"status":"incomplete","incomplete_details":{"reason":"max_output_tokens"},"output":${openAiReplayStateJson()}}"""
+        ).jsonObject
+        val failed = Json.parseToJsonElement(
+            """{"status":"failed","error":{"message":"server exploded"},"output":${openAiReplayStateJson()}}"""
+        ).jsonObject
+
+        val incompleteFailure = runCatching {
+            service.ensureOpenAiBufferedResponseCompleted(incomplete)
+        }.exceptionOrNull()
+        val failedFailure = runCatching {
+            service.ensureOpenAiBufferedResponseCompleted(failed)
+        }.exceptionOrNull()
+
+        assertTrue(incompleteFailure is java.io.IOException)
+        assertEquals("OpenAI response incomplete: max_output_tokens", incompleteFailure?.message)
+        assertTrue(failedFailure is java.io.IOException)
+        assertEquals("server exploded", failedFailure?.message)
+    }
+
+    @Test
     fun openAiStreamingCapturesCompletedEncryptedReasoningOutput() {
         val service = AiChatService()
         var replayState: String? = null

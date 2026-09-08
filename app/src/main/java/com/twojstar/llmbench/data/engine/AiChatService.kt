@@ -42,6 +42,7 @@ private const val JSON_MODEL_KEY = "model"
 private const val JSON_PRICING_KEY = "pricing"
 private const val JSON_INPUT_KEY = "input"
 private const val JSON_OUTPUT_KEY = "output"
+private const val JSON_STATUS_KEY = "status"
 private const val JSON_INCLUDE_KEY = "include"
 private const val JSON_CANDIDATES_KEY = "candidates"
 private const val JSON_CHOICES_KEY = "choices"
@@ -66,6 +67,8 @@ private const val STREAM_RESPONSE_KEY = "response"
 private const val OPENAI_RESPONSE_FAILED = "response.failed"
 private const val OPENAI_RESPONSE_COMPLETED = "response.completed"
 private const val OPENAI_RESPONSE_INCOMPLETE = "response.incomplete"
+private const val OPENAI_STATUS_FAILED = "failed"
+private const val OPENAI_STATUS_INCOMPLETE = "incomplete"
 private const val OPENAI_INCOMPLETE_DETAILS_KEY = "incomplete_details"
 private const val OPENAI_INCOMPLETE_REASON_KEY = "reason"
 private const val CLAUDE_MESSAGE_STOP = "message_stop"
@@ -559,6 +562,7 @@ class AiChatService {
 
         val responseBody = executeCancellableJson(request, "Empty response from OpenAI server")
         val parsed = json.parseToJsonElement(responseBody).jsonObject
+        ensureOpenAiBufferedResponseCompleted(parsed)
         return OpenAiGenerationResult(
             text = extractOpenAiResponseText(parsed)
                 ?: "Received empty message content from OpenAI.",
@@ -749,6 +753,25 @@ class AiChatService {
         } else {
             null
         }
+
+    internal fun ensureOpenAiBufferedResponseCompleted(response: JsonObject) {
+        when (response[JSON_STATUS_KEY]?.jsonPrimitive?.contentOrNull) {
+            OPENAI_STATUS_FAILED -> {
+                val message = (response[STREAM_ERROR_KEY] as? JsonObject)
+                    ?.get(STREAM_MESSAGE_KEY)?.jsonPrimitive?.contentOrNull
+                    ?: "OpenAI response failed"
+                throw IOException(message)
+            }
+            OPENAI_STATUS_INCOMPLETE -> {
+                val reason = (response[OPENAI_INCOMPLETE_DETAILS_KEY] as? JsonObject)
+                    ?.get(OPENAI_INCOMPLETE_REASON_KEY)?.jsonPrimitive?.contentOrNull
+                throw IOException(
+                    reason?.let { "OpenAI response incomplete: $it" }
+                        ?: "OpenAI response incomplete"
+                )
+            }
+        }
+    }
 
     internal fun extractOpenAiResponseText(response: JsonObject): String? =
         (response[JSON_OUTPUT_KEY] as? JsonArray).orEmpty().asSequence()
