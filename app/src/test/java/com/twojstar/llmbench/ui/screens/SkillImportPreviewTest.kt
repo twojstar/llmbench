@@ -1,5 +1,6 @@
 package com.twojstar.llmbench.ui.screens
 
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -9,7 +10,7 @@ import org.junit.Test
 
 class SkillImportPreviewTest {
     @Test
-    fun buildsValidReadOnlyPreview() {
+    fun buildsValidReadOnlyPreview() = runBlocking {
         val source = """
             ---
             name: release-checklist
@@ -32,7 +33,7 @@ class SkillImportPreviewTest {
     }
 
     @Test
-    fun keepsInvalidSourceAvailableForInspection() {
+    fun keepsInvalidSourceAvailableForInspection() = runBlocking {
         val source = """
             ---
             name: Bad--Skill
@@ -51,7 +52,7 @@ class SkillImportPreviewTest {
     }
 
     @Test
-    fun flagsNonPortableFilenameWithoutDiscardingParsedPreview() {
+    fun flagsNonPortableFilenameWithoutDiscardingParsedPreview() = runBlocking {
         val source = """
             ---
             name: release-checklist
@@ -69,7 +70,28 @@ class SkillImportPreviewTest {
     }
 
     @Test
-    fun boundsRenderedSourcePreviewWithoutChangingSource() {
+    fun skipsFilenameValidationWhenProviderNameIsUnavailable() = runBlocking {
+        val source = """
+            ---
+            name: release-checklist
+            description: Do not reject a valid skill when the provider omits its filename.
+            ---
+            Instructions.
+        """.trimIndent()
+
+        val preview = buildSkillImportPreview(
+            displayName = "document.md",
+            source = source,
+            validateFilename = false
+        )
+
+        assertTrue(preview.isValid)
+        assertNotNull(preview.manifest)
+        assertTrue(preview.issues.isEmpty())
+    }
+
+    @Test
+    fun boundsRenderedSourcePreviewWithoutChangingSource() = runBlocking {
         val source = "x".repeat(30 * 1024)
         val preview = buildSkillImportPreview("SKILL.md", source)
 
