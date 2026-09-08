@@ -6,8 +6,14 @@ import com.twojstar.llmbench.data.skills.AgentSkillValidationIssue
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-private const val MAX_SOURCE_PREVIEW_CHARS = 24 * 1024
+internal const val MAX_SOURCE_PREVIEW_CHARS = 24 * 1024
 private val PORTABLE_SKILL_FILENAMES = setOf("SKILL.md", "skill.md")
+
+internal fun boundedSkillSourceForDisplay(source: String): String {
+    if (source.length <= MAX_SOURCE_PREVIEW_CHARS) return source
+    return source.take(MAX_SOURCE_PREVIEW_CHARS) +
+        "\n\n… source preview truncated; the complete stored SKILL.md remains available for copying …"
+}
 
 internal data class SkillImportPreview(
     val displayName: String,
@@ -18,11 +24,7 @@ internal data class SkillImportPreview(
     val isValid: Boolean
         get() = manifest != null && issues.isEmpty()
 
-    fun sourceForDisplay(): String {
-        if (source.length <= MAX_SOURCE_PREVIEW_CHARS) return source
-        return source.take(MAX_SOURCE_PREVIEW_CHARS) +
-            "\n\n… source preview truncated; the selected file remains unchanged …"
-    }
+    fun sourceForDisplay(): String = boundedSkillSourceForDisplay(source)
 }
 
 internal suspend fun buildSkillImportPreview(
