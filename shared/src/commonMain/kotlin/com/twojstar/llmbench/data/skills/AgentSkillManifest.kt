@@ -5,6 +5,8 @@ import com.charleskorn.kaml.YamlException
 import com.charleskorn.kaml.YamlMap
 import com.charleskorn.kaml.YamlNode
 import com.charleskorn.kaml.YamlScalar
+import doist.x.normalize.Form
+import doist.x.normalize.normalize
 
 data class AgentSkillManifest(
     val name: String,
@@ -13,8 +15,7 @@ data class AgentSkillManifest(
     val license: String? = null,
     val compatibility: String? = null,
     val metadata: Map<String, String> = emptyMap(),
-    val allowedTools: String? = null,
-    val extraFrontmatter: Map<String, String> = emptyMap()
+    val allowedTools: String? = null
 )
 
 data class AgentSkillValidationIssue(
@@ -49,7 +50,6 @@ object AgentSkillManifestParser {
     private const val MAX_DESCRIPTION_LENGTH = 1_024
     private const val MAX_COMPATIBILITY_LENGTH = 500
 
-    private val validName = Regex("^[a-z0-9]+(?:-[a-z0-9]+)*$")
     private val knownFields = setOf(
         FIELD_NAME,
         FIELD_DESCRIPTION,
@@ -60,28 +60,23 @@ object AgentSkillManifestParser {
     )
 
     fun parse(source: String, directoryName: String? = null): AgentSkillParseResult {
-        val normalized = source
-            .removePrefix("\uFEFF")
-            .replace("\r\n", "\n")
-            .replace('\r', '\n')
-        val lines = normalized.split('\n')
+        val envelopeResult = extractEnvelope(source)
+        val envelope = envelopeResult.envelope
+            ?: return invalid(requireNotNull(envelopeResult.error))
+        val yamlResult = parseFrontmatter(envelope.frontmatter)
+        val frontmatter = yamlResult.frontmatter
+            ?: return invalid(requireNotNull(yamlResult.error))
 
-        if (lines.firstOrNull() != FRONTMATTER_DELIMITER) {
-            return invalid("SKILL.md must start with YAML frontmatter")
-        }
+        return buildManifest(frontmatter, envelope.instructions, directoryName)
+    }
 
-        val closingIndex = (1 until lines.size)
-            .firstOrNull { lines[it] == FRONTMATTER_DELIMITER }
-            ?: return invalid("SKILL.md frontmatter is missing its closing --- delimiter")
-        val yamlSource = lines.subList(1, closingIndex).joinToString("\n")
-        val root = try {
-            Yaml.default.parseToYamlNode(yamlSource)
-        } catch (error: YamlException) {
-            return invalid("Invalid YAML frontmatter: ${error.message}")
-        }
-        val frontmatter = root as? YamlMap
-            ?: return invalid("SKILL.md frontmatter must be a YAML mapping")
+    private fun buildManifest(
+        frontmatter: YamlMap,
+        instructions: String,
+        directoryName: String?
+    ): AgentSkillParseResult {
         val issues = mutableListOf<AgentSkillValidationIssue>()
+        validateKnownFields(frontmatter, issues)
 
         val name = frontmatter.scalarValue(FIELD_NAME, issues)
         val description = frontmatter.scalarValue(FIELD_DESCRIPTION, issues)
@@ -90,6 +85,34 @@ object AgentSkillManifestParser {
         val allowedTools = frontmatter.scalarValue(FIELD_ALLOWED_TOOLS, issues)
         val metadata = frontmatter.metadataValues(issues)
 
+        validateRequiredFields(frontmatter, name, description, directoryName, issues)
+        validateCompatibility(compatibility, issues)
+
+        if (issues.isNotEmpty() || name == null || description == null) {
+            return AgentSkillParseResult(manifest = null, issues = issues)
+        }
+
+        return AgentSkillParseResult(
+            manifest = AgentSkillManifest(
+                name = canonicalSkillName(name),
+                description = description,
+                instructions = instructions,
+                license = license?.takeIf(String::isNotBlank),
+                compatibility = compatibility,
+                metadata = metadata,
+                allowedTools = allowedTools?.takeIf(String::isNotBlank)
+            ),
+            issues = emptyList()
+        )
+    }
+
+    private fun validateRequiredFields(
+        frontmatter: YamlMap,
+        name: String?,
+        description: String?,
+        directoryName: String?,
+        issues: MutableList<AgentSkillValidationIssue>
+    ) {
         if (!frontmatter.containsField(FIELD_NAME)) {
             issues += AgentSkillValidationIssue(FIELD_NAME, "$FIELD_NAME is required")
         } else if (name != null) {
@@ -104,43 +127,21 @@ object AgentSkillManifestParser {
         } else if (description != null) {
             validateDescription(description, issues)
         }
+    }
 
-        compatibility?.let { value ->
-            if (value.length > MAX_COMPATIBILITY_LENGTH) {
+    private fun validateKnownFields(
+        frontmatter: YamlMap,
+        issues: MutableList<AgentSkillValidationIssue>
+    ) {
+        frontmatter.entries.keys
+            .map(YamlScalar::content)
+            .filterNot(knownFields::contains)
+            .forEach { field ->
                 issues += AgentSkillValidationIssue(
-                    field = FIELD_COMPATIBILITY,
-                    message = "$FIELD_COMPATIBILITY must be at most $MAX_COMPATIBILITY_LENGTH characters"
+                    field,
+                    "Unexpected frontmatter field '$field'"
                 )
             }
-        }
-
-        if (issues.isNotEmpty() || name == null || description == null) {
-            return AgentSkillParseResult(manifest = null, issues = issues)
-        }
-
-        val extraFrontmatter = linkedMapOf<String, String>()
-        frontmatter.entries.forEach { (key, value) ->
-            if (key.content !in knownFields && value is YamlScalar) {
-                extraFrontmatter[key.content] = value.content
-            }
-        }
-        val instructions = lines.drop(closingIndex + 1)
-            .joinToString("\n")
-            .trimStart('\n')
-
-        return AgentSkillParseResult(
-            manifest = AgentSkillManifest(
-                name = name,
-                description = description,
-                instructions = instructions,
-                license = license?.takeIf(String::isNotBlank),
-                compatibility = compatibility?.takeIf(String::isNotBlank),
-                metadata = metadata,
-                allowedTools = allowedTools?.takeIf(String::isNotBlank),
-                extraFrontmatter = extraFrontmatter
-            ),
-            issues = emptyList()
-        )
     }
 
     private fun validateName(
@@ -148,20 +149,39 @@ object AgentSkillManifestParser {
         directoryName: String?,
         issues: MutableList<AgentSkillValidationIssue>
     ) {
+        val canonicalName = canonicalSkillName(name)
         when {
-            name.isBlank() -> issues += AgentSkillValidationIssue(FIELD_NAME, "$FIELD_NAME is required")
-            name.length > MAX_NAME_LENGTH -> issues += AgentSkillValidationIssue(
+            canonicalName.isEmpty() -> issues += AgentSkillValidationIssue(
+                FIELD_NAME,
+                "$FIELD_NAME is required"
+            )
+            canonicalName.length > MAX_NAME_LENGTH -> issues += AgentSkillValidationIssue(
                 FIELD_NAME,
                 "$FIELD_NAME must be at most $MAX_NAME_LENGTH characters"
             )
-            !validName.matches(name) -> issues += AgentSkillValidationIssue(
+            canonicalName != canonicalName.lowercase() -> issues += AgentSkillValidationIssue(
                 FIELD_NAME,
-                "$FIELD_NAME must use lowercase letters, numbers and single hyphens only"
+                "$FIELD_NAME must be lowercase"
             )
+            canonicalName.startsWith('-') || canonicalName.endsWith('-') ->
+                issues += AgentSkillValidationIssue(
+                    FIELD_NAME,
+                    "$FIELD_NAME must not start or end with a hyphen"
+                )
+            "--" in canonicalName -> issues += AgentSkillValidationIssue(
+                FIELD_NAME,
+                "$FIELD_NAME must not contain consecutive hyphens"
+            )
+            !canonicalName.all { character -> character.isLetterOrDigit() || character == '-' } ->
+                issues += AgentSkillValidationIssue(
+                    FIELD_NAME,
+                    "$FIELD_NAME may contain only Unicode letters, digits and hyphens"
+                )
         }
 
-        directoryName?.trim()?.takeIf(String::isNotEmpty)?.let { expectedDirectory ->
-            if (name.isNotBlank() && name != expectedDirectory) {
+        directoryName?.takeIf(String::isNotEmpty)?.let { expectedDirectory ->
+            val canonicalDirectory = expectedDirectory.normalize(Form.NFKC)
+            if (canonicalName.isNotEmpty() && canonicalName != canonicalDirectory) {
                 issues += AgentSkillValidationIssue(
                     FIELD_NAME,
                     "$FIELD_NAME must match the parent skill directory '$expectedDirectory'"
@@ -185,6 +205,27 @@ object AgentSkillManifestParser {
             )
         }
     }
+
+    private fun validateCompatibility(
+        compatibility: String?,
+        issues: MutableList<AgentSkillValidationIssue>
+    ) {
+        compatibility ?: return
+        when {
+            compatibility.isBlank() -> issues += AgentSkillValidationIssue(
+                FIELD_COMPATIBILITY,
+                "$FIELD_COMPATIBILITY must not be blank"
+            )
+            compatibility.length > MAX_COMPATIBILITY_LENGTH ->
+                issues += AgentSkillValidationIssue(
+                    FIELD_COMPATIBILITY,
+                    "$FIELD_COMPATIBILITY must be at most $MAX_COMPATIBILITY_LENGTH characters"
+                )
+        }
+    }
+
+    private fun canonicalSkillName(name: String): String =
+        name.trim().normalize(Form.NFKC)
 
     private fun YamlMap.containsField(field: String): Boolean =
         entries.keys.any { it.content == field }
@@ -229,8 +270,61 @@ object AgentSkillManifestParser {
         return metadata
     }
 
+    private fun extractEnvelope(source: String): EnvelopeResult {
+        val normalized = source
+            .removePrefix("\uFEFF")
+            .replace("\r\n", "\n")
+            .replace('\r', '\n')
+        val lines = normalized.split('\n')
+        if (lines.firstOrNull() != FRONTMATTER_DELIMITER) {
+            return EnvelopeResult(error = "SKILL.md must start with YAML frontmatter")
+        }
+
+        val closingIndex = (1 until lines.size)
+            .firstOrNull { lines[it] == FRONTMATTER_DELIMITER }
+            ?: return EnvelopeResult(
+                error = "SKILL.md frontmatter is missing its closing --- delimiter"
+            )
+
+        return EnvelopeResult(
+            envelope = SkillEnvelope(
+                frontmatter = lines.subList(1, closingIndex).joinToString("\n"),
+                instructions = lines.drop(closingIndex + 1)
+                    .joinToString("\n")
+                    .trimStart('\n')
+            )
+        )
+    }
+
+    private fun parseFrontmatter(source: String): FrontmatterResult = try {
+        val root = Yaml.default.parseToYamlNode(source)
+        val frontmatter = root as? YamlMap
+        if (frontmatter == null) {
+            FrontmatterResult(error = "SKILL.md frontmatter must be a YAML mapping")
+        } else {
+            FrontmatterResult(frontmatter = frontmatter)
+        }
+    } catch (error: YamlException) {
+        FrontmatterResult(error = "Invalid YAML frontmatter: ${error.message}")
+    }
+
     private fun invalid(message: String): AgentSkillParseResult = AgentSkillParseResult(
         manifest = null,
         issues = listOf(AgentSkillValidationIssue(field = null, message = message))
+    )
+
+    private data class SkillEnvelope(
+        val frontmatter: String,
+        val instructions: String
+    )
+
+    private data class EnvelopeResult(
+        val envelope: SkillEnvelope? = null,
+        val error: String? = null
+    )
+
+    private data class FrontmatterResult(
+        val frontmatter: YamlMap? = null,
+        val error: String? = null
     )
 }
