@@ -24,6 +24,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -45,8 +46,8 @@ internal fun LocalSkillLibrarySection(
     onMessage: (String) -> Unit
 ) {
     val scope = rememberCoroutineScope()
-    var skills by mutableStateOfRememberedSummaries()
-    var busySkill by mutableStateOfRememberedBusySkill()
+    var skills by remember { mutableStateOf<List<LocalSkillSummary>>(emptyList()) }
+    var busySkill by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(store, refreshToken) {
         skills = store.load()
@@ -167,11 +168,3 @@ internal fun LocalSkillLibrarySection(
         }
     }
 }
-
-@Composable
-private fun mutableStateOfRememberedSummaries() =
-    androidx.compose.runtime.remember { mutableStateOf<List<LocalSkillSummary>>(emptyList()) }
-
-@Composable
-private fun mutableStateOfRememberedBusySkill() =
-    androidx.compose.runtime.remember { mutableStateOf<String?>(null) }
