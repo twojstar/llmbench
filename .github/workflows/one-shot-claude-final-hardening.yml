@@ -37,7 +37,7 @@ jobs:
             gradle wrapper --gradle-version "${{ steps.gradle-version.outputs.version }}"
             git checkout -- gradle/wrapper/gradle-wrapper.properties
           fi
-      - name: Normalize embedded test fixture delimiters
+      - name: Normalize hardening patcher
         shell: bash
         run: |
           python - <<'PY'
@@ -58,10 +58,29 @@ jobs:
 
           switch_block('metadata_tests', 'replace_section')
           switch_block('stop_test', 'replace_once')
+
           old_assert = 'assert app_path.read_text().count("isPartial = isPartial") == 1'
           new_assert = 'assert app_path.read_text().count("isPartial = isPartial") == 3'
           assert text.count(old_assert) == 1
           text = text.replace(old_assert, new_assert, 1)
+
+          cache_anchor = '''        return ClaudeMetadataCacheKey(model, fingerprint)
+    }
+
+    internal fun readClaudeMetadataCache(
+'''
+          cache_with_parser = '''        return ClaudeMetadataCacheKey(model, fingerprint)
+    }
+
+    internal fun parseClaudeModelId(rawJson: String): String? = runCatching {
+        json.parseToJsonElement(rawJson).jsonObject[JSON_MODEL_ID_KEY]
+            ?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
+    }.getOrNull()
+
+    internal fun readClaudeMetadataCache(
+'''
+          assert text.count(cache_anchor) == 1
+          text = text.replace(cache_anchor, cache_with_parser, 1)
           path.write_text(text)
           PY
       - name: Apply final Claude hardening
