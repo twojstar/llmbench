@@ -55,8 +55,16 @@ internal class LocalSkillLibraryStore(
 
         mutex.withLock {
             val skillDirectory = storageDirectory(manifest.name)
-            if (skillDirectory.isDirectory && !replaceExisting) {
+            val existing = if (skillDirectory.isDirectory) readStoredDocument(skillDirectory) else null
+            if (existing != null && !replaceExisting) {
                 throw LocalSkillAlreadyExistsException(manifest.name)
+            }
+            if (skillDirectory.exists() && existing == null) {
+                withContext(Dispatchers.IO) {
+                    if (!skillDirectory.deleteRecursively()) {
+                        throw IOException("Could not reclaim invalid local skill storage for '${manifest.name}'.")
+                    }
+                }
             }
             ensureCapacityFor(manifest.name)
             withContext(Dispatchers.IO) {
