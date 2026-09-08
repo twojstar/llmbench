@@ -1,0 +1,149 @@
+name: One-shot OpenAI buffered status handling
+
+on: # yamllint disable-line rule:truthy
+  push:
+    branches: [gptomek/openai-stateless-reasoning]
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Read Gradle version
+        id: gradle
+        run: .github/scripts/gradle-version.sh
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          gradle-version: ${{ steps.gradle.outputs.version }}
+
+      - name: Generate Gradle wrapper if missing
+        env:
+          GRADLE_VERSION: ${{ steps.gradle.outputs.version }}
+        run: |
+          if [ ! -f gradle/wrapper/gradle-wrapper.jar ]; then
+            gradle wrapper --gradle-version "$GRADLE_VERSION"
+            git checkout -- gradle/wrapper/gradle-wrapper.properties
+          fi
+
+      - name: Apply buffered terminal-status fix
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          service_path = Path('app/src/main/java/com/twojstar/llmbench/data/engine/AiChatService.kt')
+          service = service_path.read_text()
+
+          replacements = [
+              (
+                  'private const val JSON_OUTPUT_KEY = "output"\n',
+                  'private const val JSON_OUTPUT_KEY = "output"\nprivate const val JSON_STATUS_KEY = "status"\n',
+              ),
+              (
+                  'private const val OPENAI_RESPONSE_INCOMPLETE = "response.incomplete"\n',
+                  'private const val OPENAI_RESPONSE_INCOMPLETE = "response.incomplete"\nprivate const val OPENAI_STATUS_FAILED = "failed"\nprivate const val OPENAI_STATUS_INCOMPLETE = "incomplete"\n',
+              ),
+              (
+                  '        val parsed = json.parseToJsonElement(responseBody).jsonObject\n        return OpenAiGenerationResult(\n',
+                  '        val parsed = json.parseToJsonElement(responseBody).jsonObject\n        ensureOpenAiBufferedResponseCompleted(parsed)\n        return OpenAiGenerationResult(\n',
+              ),
+          ]
+          for old, new in replacements:
+              assert service.count(old) == 1, f'unexpected service anchor count for {old!r}: {service.count(old)}'
+              service = service.replace(old, new, 1)
+
+          anchor = '''    internal fun extractOpenAiCompletedReplayState(event: JsonObject): String? =
+        if (event[STREAM_TYPE_KEY]?.jsonPrimitive?.contentOrNull == OPENAI_RESPONSE_COMPLETED) {
+            (event[STREAM_RESPONSE_KEY] as? JsonObject)?.let(::extractOpenAiReplayState)
+        } else {
+            null
+        }
+
+'''
+          helper = '''    internal fun ensureOpenAiBufferedResponseCompleted(response: JsonObject) {
+        when (response[JSON_STATUS_KEY]?.jsonPrimitive?.contentOrNull) {
+            OPENAI_STATUS_FAILED -> {
+                val message = (response[STREAM_ERROR_KEY] as? JsonObject)
+                    ?.get(STREAM_MESSAGE_KEY)?.jsonPrimitive?.contentOrNull
+                    ?: "OpenAI response failed"
+                throw IOException(message)
+            }
+            OPENAI_STATUS_INCOMPLETE -> {
+                val reason = (response[OPENAI_INCOMPLETE_DETAILS_KEY] as? JsonObject)
+                    ?.get(OPENAI_INCOMPLETE_REASON_KEY)?.jsonPrimitive?.contentOrNull
+                throw IOException(
+                    reason?.let { "OpenAI response incomplete: $it" }
+                        ?: "OpenAI response incomplete"
+                )
+            }
+        }
+    }
+
+'''
+          assert service.count(anchor) == 1, f'unexpected helper anchor count: {service.count(anchor)}'
+          service = service.replace(anchor, anchor + helper, 1)
+          service_path.write_text(service)
+
+          test_path = Path('app/src/test/java/com/twojstar/llmbench/data/engine/AiChatServiceTest.kt')
+          test = test_path.read_text()
+          test_anchor = '''    @Test
+    fun openAiStreamingCapturesCompletedEncryptedReasoningOutput() {
+'''
+          regression = '''    @Test
+    fun openAiBufferedTerminalFailuresAreRejectedBeforeReplayCapture() {
+        val service = AiChatService()
+        val incomplete = Json.parseToJsonElement(
+            """{"status":"incomplete","incomplete_details":{"reason":"max_output_tokens"},"output":${openAiReplayStateJson()}}"""
+        ).jsonObject
+        val failed = Json.parseToJsonElement(
+            """{"status":"failed","error":{"message":"server exploded"},"output":${openAiReplayStateJson()}}"""
+        ).jsonObject
+
+        val incompleteFailure = runCatching {
+            service.ensureOpenAiBufferedResponseCompleted(incomplete)
+        }.exceptionOrNull()
+        val failedFailure = runCatching {
+            service.ensureOpenAiBufferedResponseCompleted(failed)
+        }.exceptionOrNull()
+
+        assertTrue(incompleteFailure is java.io.IOException)
+        assertEquals("OpenAI response incomplete: max_output_tokens", incompleteFailure?.message)
+        assertTrue(failedFailure is java.io.IOException)
+        assertEquals("server exploded", failedFailure?.message)
+    }
+
+'''
+          assert test.count(test_anchor) == 1, f'unexpected test anchor count: {test.count(test_anchor)}'
+          test = test.replace(test_anchor, regression + test_anchor, 1)
+          test_path.write_text(test)
+          PY
+
+      - name: Validate full gate
+        run: ./gradlew :app:assembleDebug :app:testDebugUnitTest :app:lintDebug :shared:desktopTest --stacktrace
+
+      - name: Commit verified fix as GPTomek and remove helper
+        env:
+          VALIDATED_SHA: ${{ github.sha }}
+        run: |
+          git fetch origin gptomek/openai-stateless-reasoning
+          test "$(git rev-parse origin/gptomek/openai-stateless-reasoning)" = "$VALIDATED_SHA"
+          git add app/src/main/java/com/twojstar/llmbench/data/engine/AiChatService.kt \
+                  app/src/test/java/com/twojstar/llmbench/data/engine/AiChatServiceTest.kt
+          git rm .github/workflows/one-shot-openai-buffered-status.yml
+          git diff --cached --quiet && exit 1 || true
+          git config user.name "GPTomek"
+          git config user.email "314538226+gptomek[bot]@users.noreply.github.com"
+          git commit -m "fix(openai) reject incomplete buffered responses"
+          git push origin HEAD:gptomek/openai-stateless-reasoning
