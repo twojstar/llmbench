@@ -46,6 +46,7 @@ private const val TEST_BAD_API_KEY = "bad-key"
 private const val TEST_CLAUDE_USER_MESSAGES_JSON = "[{\"role\":\"user\",\"content\":\"hello\"}]"
 private const val TEST_CLAUDE_CONTEXT_STOP = "model_context_window_exceeded"
 private const val TEST_CLAUDE_MODEL = "claude-sonnet-5"
+private const val TEST_CLAUDE_MESSAGE_ID = "claude"
 private const val TEST_CLAUDE_LEGACY_MODEL = "claude-haiku-4-5-20251001"
 private const val TEST_CLAUDE_SIGNATURE = "claude-signature"
 private const val TEST_CLAUDE_REDACTED_DATA = "redacted-data"
@@ -206,7 +207,7 @@ class AiChatServiceTest {
         val history = listOf(
             ModelChatMessage(id = "u1", sender = CHAT_ROLE_USER, text = FIRST_QUESTION),
             ModelChatMessage(
-                id = "claude",
+                id = TEST_CLAUDE_MESSAGE_ID,
                 sender = CHAT_ROLE_ASSISTANT,
                 provider = AiProvider.CLAUDE,
                 modelName = TEST_CLAUDE_MODEL,
@@ -290,7 +291,7 @@ class AiChatServiceTest {
         val history = listOf(
             ModelChatMessage(id = "u1", sender = CHAT_ROLE_USER, text = FIRST_QUESTION),
             ModelChatMessage(
-                id = "claude",
+                id = TEST_CLAUDE_MESSAGE_ID,
                 sender = CHAT_ROLE_ASSISTANT,
                 provider = AiProvider.CLAUDE,
                 modelName = TEST_CLAUDE_MODEL,
@@ -430,7 +431,7 @@ class AiChatServiceTest {
                 id = "gpt", sender = CHAT_ROLE_ASSISTANT, provider = AiProvider.CHATGPT, text = OPENAI_ANSWER
             ),
             ModelChatMessage(
-                id = "claude", sender = CHAT_ROLE_ASSISTANT, provider = AiProvider.CLAUDE, text = CLAUDE_ANSWER
+                id = TEST_CLAUDE_MESSAGE_ID, sender = CHAT_ROLE_ASSISTANT, provider = AiProvider.CLAUDE, text = CLAUDE_ANSWER
             ),
             ModelChatMessage(
                 id = "gemini", sender = CHAT_ROLE_ASSISTANT, provider = AiProvider.GEMINI, text = GEMINI_ANSWER
