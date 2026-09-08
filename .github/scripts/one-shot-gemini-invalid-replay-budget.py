@@ -30,7 +30,7 @@ replace(
 """,
     """                    message.providerReplayState
                         .takeIf { replayStateModelName == null || message.modelName == replayStateModelName }
-                        .takeIf { state -> replayStateValidator?.invoke(state) != false },
+                        ?.takeIf { state -> replayStateValidator?.invoke(state) != false },
 """,
 )
 
