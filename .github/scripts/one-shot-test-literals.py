@@ -3,21 +3,23 @@ from pathlib import Path
 path = Path("app/src/test/java/com/twojstar/llmbench/data/engine/AiChatServiceTest.kt")
 text = path.read_text()
 
-replacements = {
-    '"gemini-test-model"': "TEST_GEMINI_MODEL",
-    '"model"': "TEST_GEMINI_ROLE",
-    '"opaque-signature"': "TEST_OPAQUE_SIGNATURE",
-}
-minimum_counts = {
-    '"gemini-test-model"': 2,
-    '"model"': 2,
-    '"opaque-signature"': 2,
-}
+model_name_literal = '"gemini-test-model"'
+model_name_count = text.count(model_name_literal)
+assert model_name_count >= 2, f"expected repeated Gemini test model, found {model_name_count}"
+text = text.replace(model_name_literal, "TEST_GEMINI_MODEL")
 
-for old, new in replacements.items():
-    count = text.count(old)
-    assert count >= minimum_counts[old], f"{old}: expected at least {minimum_counts[old]} matches, found {count}"
-    text = text.replace(old, new)
+role_pattern = 'listOf(CHAT_ROLE_USER, "model", CHAT_ROLE_USER)'
+role_count = text.count(role_pattern)
+assert role_count >= 2, f"expected repeated Gemini role assertion, found {role_count}"
+text = text.replace(role_pattern, 'listOf(CHAT_ROLE_USER, TEST_GEMINI_ROLE, CHAT_ROLE_USER)')
+
+signature_pattern = 'assertEquals("opaque-signature", signaturePart.getValue("thoughtSignature").jsonPrimitive.content)'
+signature_count = text.count(signature_pattern)
+assert signature_count >= 2, f"expected repeated opaque signature assertion, found {signature_count}"
+text = text.replace(
+    signature_pattern,
+    'assertEquals(TEST_OPAQUE_SIGNATURE, signaturePart.getValue("thoughtSignature").jsonPrimitive.content)'
+)
 
 marker = 'private const val TEST_EVENT_STREAM_TYPE = "text/event-stream"\n'
 assert text.count(marker) == 1
