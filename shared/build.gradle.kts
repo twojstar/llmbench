@@ -27,6 +27,7 @@ kotlin {
     sourceSets {
         commonMain.dependencies {
             implementation(libs.kotlinx.serialization.json)
+            implementation(libs.kotaml)
         }
         androidMain.dependencies {
             implementation(libs.jtokkit)
