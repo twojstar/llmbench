@@ -22,65 +22,65 @@ class LocalSkillLibraryStoreTest {
 
     @Test
     fun storesSourceAsCanonicalSkillDocumentAndLoadsSummary() = runBlocking {
-        val source = skillSource("release-checklist", "First version.")
+        val source = skillSource(RELEASE_SKILL, "First version.")
 
         val added = store.add(source)
         val loaded = store.load()
         val storedDirectory = root.listFiles().orEmpty().single()
-        val opened = store.read("release-checklist")
+        val opened = store.read(RELEASE_SKILL)
 
-        assertEquals("release-checklist", added.name)
+        assertEquals(RELEASE_SKILL, added.name)
         assertEquals("First version.", added.description)
-        assertNotEquals("release-checklist", storedDirectory.name)
-        assertEquals(source, storedDirectory.resolve("SKILL.md").readText())
-        assertEquals(listOf("release-checklist"), loaded.map(LocalSkillSummary::name))
+        assertNotEquals(RELEASE_SKILL, storedDirectory.name)
+        assertEquals(source, storedDirectory.resolve(SKILL_FILE_NAME).readText())
+        assertEquals(listOf(RELEASE_SKILL), loaded.map(LocalSkillSummary::name))
         assertEquals(source, opened?.source)
     }
 
     @Test
     fun addingSameSkillNameRequiresExplicitReplacement() = runBlocking {
-        val original = skillSource("release-checklist", "First version.")
-        val replacement = skillSource("release-checklist", "Second version.")
+        val original = skillSource(RELEASE_SKILL, "First version.")
+        val replacement = skillSource(RELEASE_SKILL, "Second version.")
         store.add(original)
 
         val conflict = assertThrows(LocalSkillAlreadyExistsException::class.java) {
             runBlocking { store.add(replacement) }
         }
 
-        assertEquals("release-checklist", conflict.skillName)
-        assertEquals(original, store.read("release-checklist")?.source)
+        assertEquals(RELEASE_SKILL, conflict.skillName)
+        assertEquals(original, store.read(RELEASE_SKILL)?.source)
 
         store.add(replacement, replaceExisting = true)
 
         assertEquals(1, store.load().size)
-        assertEquals(replacement, store.read("release-checklist")?.source)
+        assertEquals(replacement, store.read(RELEASE_SKILL)?.source)
     }
 
     @Test
     fun invalidTargetDirectoryIsReclaimedOnRetry() = runBlocking {
-        val original = skillSource("retry-skill", "First attempt.")
-        val retry = skillSource("retry-skill", "Retry succeeds.")
+        val original = skillSource(RETRY_SKILL, "First attempt.")
+        val retry = skillSource(RETRY_SKILL, "Retry succeeds.")
         store.add(original)
         val storedDirectory = root.listFiles().orEmpty().single()
-        assertTrue(storedDirectory.resolve("SKILL.md").delete())
+        assertTrue(storedDirectory.resolve(SKILL_FILE_NAME).delete())
 
         val saved = store.add(retry)
 
-        assertEquals("retry-skill", saved.name)
-        assertEquals(retry, store.read("retry-skill")?.source)
+        assertEquals(RETRY_SKILL, saved.name)
+        assertEquals(retry, store.read(RETRY_SKILL)?.source)
         assertEquals(1, root.listFiles().orEmpty().size)
     }
 
     @Test
     fun removesOnlyRequestedSkill() = runBlocking {
-        store.add(skillSource("alpha-skill", "Alpha."))
-        store.add(skillSource("beta-skill", "Beta."))
+        store.add(skillSource(ALPHA_SKILL, "Alpha."))
+        store.add(skillSource(BETA_SKILL, "Beta."))
 
-        store.remove("alpha-skill")
+        store.remove(ALPHA_SKILL)
 
-        assertNull(store.read("alpha-skill"))
-        assertNotNull(store.read("beta-skill"))
-        assertEquals(listOf("beta-skill"), store.load().map(LocalSkillSummary::name))
+        assertNull(store.read(ALPHA_SKILL))
+        assertNotNull(store.read(BETA_SKILL))
+        assertEquals(listOf(BETA_SKILL), store.load().map(LocalSkillSummary::name))
     }
 
     @Test
@@ -102,7 +102,7 @@ class LocalSkillLibraryStoreTest {
     @Test
     fun prunesStoredDocumentWhenManifestIdentityChanges() = runBlocking {
         store.add(skillSource("stable-name", "Original."))
-        val storedFile = root.listFiles().orEmpty().single().resolve("SKILL.md")
+        val storedFile = root.listFiles().orEmpty().single().resolve(SKILL_FILE_NAME)
         storedFile.writeText(skillSource("different-name", "Tampered."))
 
         assertTrue(store.load().isEmpty())
@@ -128,13 +128,13 @@ class LocalSkillLibraryStoreTest {
         repeat(LocalSkillLibraryStore.MAX_LOCAL_SKILLS) { index ->
             store.add(skillSource("skill-$index", "Entry $index."))
         }
-        root.listFiles().orEmpty().first().resolve("SKILL.md").writeText("not a skill")
+        root.listFiles().orEmpty().first().resolve(SKILL_FILE_NAME).writeText("not a skill")
 
-        store.add(skillSource("replacement-slot", "Uses reclaimed capacity."))
+        store.add(skillSource(REPLACEMENT_SLOT, "Uses reclaimed capacity."))
 
         val loaded = store.load()
         assertEquals(LocalSkillLibraryStore.MAX_LOCAL_SKILLS, loaded.size)
-        assertTrue(loaded.any { it.name == "replacement-slot" })
+        assertTrue(loaded.any { it.name == REPLACEMENT_SLOT })
     }
 
     @Test
@@ -162,4 +162,13 @@ class LocalSkillLibraryStoreTest {
         # Instructions
         $instructions
     """.trimIndent()
+
+    private companion object {
+        const val RELEASE_SKILL = "release-checklist"
+        const val RETRY_SKILL = "retry-skill"
+        const val ALPHA_SKILL = "alpha-skill"
+        const val BETA_SKILL = "beta-skill"
+        const val REPLACEMENT_SLOT = "replacement-slot"
+        const val SKILL_FILE_NAME = "SKILL.md"
+    }
 }
