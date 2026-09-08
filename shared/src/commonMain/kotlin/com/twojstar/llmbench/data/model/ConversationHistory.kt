@@ -9,7 +9,8 @@ const val CHAT_ROLE_ASSISTANT = "assistant"
 
 data class ProviderTextTurn(
     val role: String,
-    val text: String
+    val text: String,
+    val providerReplayState: String? = null
 )
 
 fun ModelChatMessage.isCompletedAssistantResponse(): Boolean =
@@ -60,7 +61,11 @@ fun buildBoundedProviderTextTurns(
                 segments += mutableListOf(ProviderTextTurn(CHAT_ROLE_USER, message.text))
             }
             message.isReplayableAssistantFor(provider) && segments.isNotEmpty() -> {
-                segments.last() += ProviderTextTurn(CHAT_ROLE_ASSISTANT, message.text)
+                segments.last() += ProviderTextTurn(
+                    CHAT_ROLE_ASSISTANT,
+                    message.text,
+                    message.providerReplayState
+                )
             }
         }
     }
@@ -75,7 +80,9 @@ fun buildBoundedProviderTextTurns(
 
     for (segment in completeSegments.asReversed()) {
         if (remainingTurns == 0) break
-        val segmentCost = segment.sumOf { it.text.length + MESSAGE_OVERHEAD_CHARACTERS }
+        val segmentCost = segment.sumOf {
+            maxOf(it.text.length, it.providerReplayState?.length ?: 0) + MESSAGE_OVERHEAD_CHARACTERS
+        }
         if (segmentCost > remainingCharacters) break
         retainedSegments.add(0, segment)
         remainingCharacters -= segmentCost

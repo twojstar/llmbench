@@ -329,5 +329,6 @@ data class ModelChatMessage(
     val isSimulated: Boolean = false,
     val isPartial: Boolean = false,
     val latencyMs: Long? = null,
-    val activeProfileNotes: List<String> = emptyList()
+    val activeProfileNotes: List<String> = emptyList(),
+    val providerReplayState: String? = null
 )

@@ -290,6 +290,63 @@ class AiChatServiceTest {
         assertFalse(entries.last().supportsTextOutput)
     }
     @Test
+    fun geminiHistoryReplaysOpaqueModelContentsIncludingSignatureOnlyChunk() {
+        val replayState = "[{\"role\":\"model\",\"parts\":[{\"text\":\"gemini answer\"}]},{\"role\":\"model\",\"parts\":[{\"text\":\"\",\"thoughtSignature\":\"opaque-signature\"}]}]"
+        val history = listOf(
+            ModelChatMessage(id = "u1", sender = CHAT_ROLE_USER, text = FIRST_QUESTION),
+            ModelChatMessage(
+                id = "gemini",
+                sender = CHAT_ROLE_ASSISTANT,
+                provider = AiProvider.GEMINI,
+                text = GEMINI_ANSWER,
+                providerReplayState = replayState
+            ),
+            ModelChatMessage(id = "u2", sender = CHAT_ROLE_USER, text = FOLLOW_UP)
+        )
+
+        val contents = AiChatService().buildGeminiContents(FOLLOW_UP, history)
+
+        assertEquals(listOf(CHAT_ROLE_USER, "model", "model", CHAT_ROLE_USER), contents.map {
+            it.jsonObject.getValue(TEST_ROLE_KEY).jsonPrimitive.content
+        })
+        val signaturePart = contents[2].jsonObject.getValue("parts").jsonArray.single().jsonObject
+        assertEquals("", signaturePart.getValue("text").jsonPrimitive.content)
+        assertEquals("opaque-signature", signaturePart.getValue("thoughtSignature").jsonPrimitive.content)
+    }
+
+    @Test
+    fun geminiStreamingKeepsEmptyTextSignatureCarrier() {
+        val service = AiChatService()
+        val replayContents = mutableListOf<kotlinx.serialization.json.JsonObject>()
+        val response = Response.Builder()
+            .request(Request.Builder().url(TEST_STREAM_URL).build())
+            .protocol(Protocol.HTTP_1_1)
+            .code(200)
+            .message("OK")
+            .body((
+                "data: {\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[{\"text\":\"hello\"}]}}]}\n\n" +
+                    "data: {\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[{\"text\":\"\",\"thoughtSignature\":\"opaque-signature\"}]},\"finishReason\":\"STOP\"}]}\n\n"
+                ).toResponseBody(TEST_EVENT_STREAM_TYPE.toMediaType()))
+            .build()
+
+        val text = service.readSseResponse(
+            response = response,
+            extractText = service::extractGeminiStreamText,
+            isComplete = service::isGeminiStreamComplete,
+            onTextDelta = {},
+            onEvent = { event ->
+                service.extractGeminiReplayContent(event)?.let(replayContents::add)
+            }
+        )
+
+        assertEquals(STREAM_HELLO, text)
+        assertEquals(2, replayContents.size)
+        val signaturePart = replayContents.last().getValue("parts").jsonArray.single().jsonObject
+        assertEquals("", signaturePart.getValue("text").jsonPrimitive.content)
+        assertEquals("opaque-signature", signaturePart.getValue("thoughtSignature").jsonPrimitive.content)
+    }
+
+    @Test
     fun extractsNativeStreamingTextDeltas() {
         val service = AiChatService()
         val gemini = Json.parseToJsonElement(

@@ -42,6 +42,14 @@ class ProviderRuntimeCapabilitiesTest {
     }
 
     @Test
+    fun geminiPreservesOpaqueProviderContentState() {
+        assertEquals(
+            ConversationStateStrategy.BOUNDED_PROVIDER_CONTENT_REPLAY,
+            AiProvider.GEMINI.runtimeCapabilities().conversationStateStrategy
+        )
+    }
+
+    @Test
     fun compareModeIsFanOutRatherThanAProviderTransport() {
         val capabilities = AiProvider.ALL.runtimeCapabilities()
 

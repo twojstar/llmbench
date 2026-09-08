@@ -16,7 +16,8 @@ enum class SystemInstructionPlacement {
 
 enum class ConversationStateStrategy {
     PROVIDER_FAN_OUT,
-    BOUNDED_PROVIDER_TEXT_REPLAY
+    BOUNDED_PROVIDER_TEXT_REPLAY,
+    BOUNDED_PROVIDER_CONTENT_REPLAY
 }
 
 data class ProviderRuntimeCapabilities(
@@ -38,7 +39,7 @@ fun AiProvider.runtimeCapabilities(): ProviderRuntimeCapabilities = when (this) 
     AiProvider.GEMINI -> ProviderRuntimeCapabilities(
         transport = NativeChatTransport.GEMINI_GENERATE_CONTENT,
         systemInstructionPlacement = SystemInstructionPlacement.NATIVE_FIELD,
-        conversationStateStrategy = ConversationStateStrategy.BOUNDED_PROVIDER_TEXT_REPLAY,
+        conversationStateStrategy = ConversationStateStrategy.BOUNDED_PROVIDER_CONTENT_REPLAY,
         streamsText = true,
         reportsResolvedModel = false
     )
