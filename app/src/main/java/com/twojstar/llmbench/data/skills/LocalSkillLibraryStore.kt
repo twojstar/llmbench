@@ -22,6 +22,10 @@ internal data class LocalSkillDocument(
     val source: String
 )
 
+internal class LocalSkillAlreadyExistsException(
+    val skillName: String
+) : IOException("Local skill '$skillName' already exists.")
+
 internal class LocalSkillLibraryStore(
     private val rootDirectory: File
 ) {
@@ -37,7 +41,10 @@ internal class LocalSkillLibraryStore(
             ?.takeIf { it.manifest.name == name }
     }
 
-    suspend fun add(source: String): LocalSkillSummary {
+    suspend fun add(
+        source: String,
+        replaceExisting: Boolean = false
+    ): LocalSkillSummary {
         val parsed = withContext(Dispatchers.Default) {
             AgentSkillManifestParser.parse(source)
         }
@@ -47,9 +54,12 @@ internal class LocalSkillLibraryStore(
         if (bytes.size > MAX_SKILL_BYTES) throw IOException("Skill source exceeds the library size limit.")
 
         mutex.withLock {
+            val skillDirectory = storageDirectory(manifest.name)
+            if (skillDirectory.isDirectory && !replaceExisting) {
+                throw LocalSkillAlreadyExistsException(manifest.name)
+            }
             ensureCapacityFor(manifest.name)
             withContext(Dispatchers.IO) {
-                val skillDirectory = storageDirectory(manifest.name)
                 skillDirectory.mkdirs()
                 writeAtomically(File(skillDirectory, SKILL_FILE_NAME), bytes)
             }
