@@ -1,6 +1,7 @@
 package com.twojstar.llmbench.data.tokenizer
 
 import com.twojstar.llmbench.data.model.ProviderUsage
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 /** How a token count was obtained. Never collapse these modes into one unlabeled number. */
@@ -107,37 +108,46 @@ data class TokenArenaResponseObservation(
 /**
  * Portable, serializable record for one reproducible Token Arena experiment.
  *
- * Public construction snapshots every collection so callers cannot mutate an experiment through a
- * retained MutableList alias. Prompt fingerprints bind recorded results to the exact variant text.
- * Manual value equality keeps decoded experiments usable as stable state and collection keys without
- * reintroducing a data-class `copy()` path that could bypass the defensive snapshots.
+ * Construction snapshots every collection. Public collection access returns defensive snapshots so
+ * callers cannot mutate validated state through JVM/Java collection casts. Prompt fingerprints bind
+ * recorded results to the exact UTF-16 prompt contents. Manual value equality keeps decoded
+ * experiments usable as stable state and collection keys without reintroducing data-class `copy()`.
  */
 @Serializable
 class TokenArenaExperiment private constructor(
     val id: String,
     val intentLabel: String,
-    val variants: List<TokenArenaVariant>,
-    val tokenMeasurements: List<TokenArenaTokenMeasurement>,
-    val responseObservations: List<TokenArenaResponseObservation>
+    @SerialName("variants") private val variantSnapshot: List<TokenArenaVariant>,
+    @SerialName("tokenMeasurements") private val tokenMeasurementSnapshot: List<TokenArenaTokenMeasurement>,
+    @SerialName("responseObservations") private val responseObservationSnapshot: List<TokenArenaResponseObservation>
 ) {
+    val variants: List<TokenArenaVariant>
+        get() = variantSnapshot.toList()
+
+    val tokenMeasurements: List<TokenArenaTokenMeasurement>
+        get() = tokenMeasurementSnapshot.toList()
+
+    val responseObservations: List<TokenArenaResponseObservation>
+        get() = responseObservationSnapshot.toList()
+
     init {
         require(id.isNotBlank()) { "Token Arena experiment id must not be blank" }
         require(intentLabel.isNotBlank()) { "Token Arena intent label must not be blank" }
-        require(variants.isNotEmpty()) { "Token Arena experiment needs at least one variant" }
+        require(variantSnapshot.isNotEmpty()) { "Token Arena experiment needs at least one variant" }
 
-        val variantIds = variants.map(TokenArenaVariant::id)
+        val variantIds = variantSnapshot.map(TokenArenaVariant::id)
         require(variantIds.toSet().size == variantIds.size) {
             "Token Arena variant ids must be unique"
         }
-        val promptFingerprints = variants.associate { variant ->
+        val promptFingerprints = variantSnapshot.associate { variant ->
             variant.id to variant.promptFingerprint
         }
-        require(tokenMeasurements.all { measurement ->
+        require(tokenMeasurementSnapshot.all { measurement ->
             promptFingerprints[measurement.variantId] == measurement.promptFingerprint
         }) {
             "Every token measurement must reference the current prompt version of a known variant"
         }
-        require(responseObservations.all { observation ->
+        require(responseObservationSnapshot.all { observation ->
             promptFingerprints[observation.variantId] == observation.promptFingerprint
         }) {
             "Every response observation must reference the current prompt version of a known variant"
@@ -149,23 +159,23 @@ class TokenArenaExperiment private constructor(
         if (other !is TokenArenaExperiment) return false
         return id == other.id &&
             intentLabel == other.intentLabel &&
-            variants == other.variants &&
-            tokenMeasurements == other.tokenMeasurements &&
-            responseObservations == other.responseObservations
+            variantSnapshot == other.variantSnapshot &&
+            tokenMeasurementSnapshot == other.tokenMeasurementSnapshot &&
+            responseObservationSnapshot == other.responseObservationSnapshot
     }
 
     override fun hashCode(): Int {
         var result = id.hashCode()
         result = 31 * result + intentLabel.hashCode()
-        result = 31 * result + variants.hashCode()
-        result = 31 * result + tokenMeasurements.hashCode()
-        result = 31 * result + responseObservations.hashCode()
+        result = 31 * result + variantSnapshot.hashCode()
+        result = 31 * result + tokenMeasurementSnapshot.hashCode()
+        result = 31 * result + responseObservationSnapshot.hashCode()
         return result
     }
 
     override fun toString(): String =
-        "TokenArenaExperiment(id=$id, intentLabel=$intentLabel, variants=$variants, " +
-            "tokenMeasurements=$tokenMeasurements, responseObservations=$responseObservations)"
+        "TokenArenaExperiment(id=$id, intentLabel=$intentLabel, variants=$variantSnapshot, " +
+            "tokenMeasurements=$tokenMeasurementSnapshot, responseObservations=$responseObservationSnapshot)"
 
     companion object {
         fun create(
@@ -177,9 +187,9 @@ class TokenArenaExperiment private constructor(
         ): TokenArenaExperiment = TokenArenaExperiment(
             id = id,
             intentLabel = intentLabel,
-            variants = variants.toList(),
-            tokenMeasurements = tokenMeasurements.toList(),
-            responseObservations = responseObservations.toList()
+            variantSnapshot = variants.toList(),
+            tokenMeasurementSnapshot = tokenMeasurements.toList(),
+            responseObservationSnapshot = responseObservations.toList()
         )
     }
 }
@@ -202,11 +212,13 @@ fun TokenCounter.measureForArena(
 
 /** Stable non-security fingerprint used only to detect accidental stale prompt/result associations. */
 internal fun stablePromptFingerprint(prompt: String): String {
-    val bytes = prompt.encodeToByteArray()
     var hash = -3750763034362895579L // FNV-1a 64-bit offset basis in signed Long form.
-    bytes.forEach { byte ->
-        hash = hash xor (byte.toLong() and 0xffL)
+    prompt.forEach { codeUnit ->
+        val code = codeUnit.code
+        hash = hash xor (code.toLong() and 0xffL)
+        hash *= 1099511628211L
+        hash = hash xor ((code ushr 8).toLong() and 0xffL)
         hash *= 1099511628211L
     }
-    return "${bytes.size}:${hash.toULong().toString(16).padStart(16, '0')}"
+    return "${prompt.length}:${hash.toULong().toString(16).padStart(16, '0')}"
 }
