@@ -9,6 +9,10 @@ class TextDocumentFileAccessTest {
     fun genericAndMarkdownFallbacksStayDistinct() {
         assertEquals("document.txt", TextDocumentFileAccess.normalizeDisplayName("   "))
         assertEquals("document.md", MarkdownDocumentFileAccess.normalizeDisplayName("   "))
+        assertEquals(
+            "document.md",
+            MarkdownDocumentFileAccess.normalizeDisplayName("   ", fallback = "   ")
+        )
     }
 
     @Test
