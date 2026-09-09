@@ -23,11 +23,17 @@ class ProviderOnboardingTest {
     }
 
     @Test
-    fun doesNotInventIdentityPathsForUnverifiedProviders() {
+    fun doesNotInventIdentityPathsForUnsupportedProviders() {
         val verified = setOf(WebAiService.QWEN, WebAiService.COPILOT, WebAiService.ZAI)
 
         WebAiService.entries.filterNot { it in verified }.forEach { service ->
-            assertFalse(service.onboardingCapabilities().hasIdentityAssistedPath, service.name)
+            val capabilities = service.onboardingCapabilities()
+            assertFalse(capabilities.hasIdentityAssistedPath, service.name)
+            assertEquals(
+                EmbeddedSessionHandoff.UNSUPPORTED,
+                capabilities.embeddedSessionHandoff,
+                service.name
+            )
         }
     }
 
