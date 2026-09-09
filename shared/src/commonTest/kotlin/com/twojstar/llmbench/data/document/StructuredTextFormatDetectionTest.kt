@@ -22,6 +22,10 @@ class StructuredTextFormatDetectionTest {
             detectStructuredTextFormat(null, "application/ld+json; charset=utf-8")
         )
         assertEquals(
+            StructuredTextFormat.JSON,
+            detectStructuredTextFormat(null, "application/json; charset=\"utf-8\"")
+        )
+        assertEquals(
             StructuredTextFormat.YAML,
             detectStructuredTextFormat(null, APPLICATION_YAML)
         )
@@ -54,7 +58,11 @@ class StructuredTextFormatDetectionTest {
             "/+xml",
             "application/+json",
             "application/json/extra",
-            "application /json"
+            "application /json",
+            "application/xml;",
+            "application/xml;garbage",
+            "application/xml;charset=",
+            "application/xml;charset=\"unterminated"
         ).forEach { mimeType ->
             assertEquals(
                 StructuredTextFormat.YAML,
@@ -64,6 +72,19 @@ class StructuredTextFormatDetectionTest {
         }
         assertNull(detectStructuredTextFormat(null, "application/+json"))
         assertNull(detectStructuredTextFormat(null, "application/xml/extra"))
+        assertNull(detectStructuredTextFormat(null, "application/xml;garbage"))
+    }
+
+    @Test
+    fun malformedParameterizedHintDoesNotSuppressRecognizedFileName() {
+        assertEquals(
+            StructuredTextFormat.JSON,
+            detectStructuredTextFormat(SETTINGS_JSON, "application/xml;")
+        )
+        assertEquals(
+            StructuredTextFormat.JSON,
+            detectStructuredTextFormat(SETTINGS_JSON, "application/xml;garbage")
+        )
     }
 
     @Test
