@@ -4,8 +4,10 @@ import com.twojstar.llmbench.data.document.LineEnding
 import com.twojstar.llmbench.data.document.LineEndingStyle
 import com.twojstar.llmbench.data.document.MarkdownDocumentFileAccess
 import com.twojstar.llmbench.data.document.MarkdownWorkspaceRecoverySnapshot
+import com.twojstar.llmbench.data.document.MarkdownWorkspaceRecoverySource
 import com.twojstar.llmbench.data.document.TextDocument
 import com.twojstar.llmbench.data.document.TextDocumentCodec
+import com.twojstar.llmbench.data.skills.localSkillSourceDigest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -96,21 +98,20 @@ class MarkdownWorkspaceViewModelTest {
     @Test
     fun boundLocalSkillStartsCleanAndTracksSourceIdentity() {
         val viewModel = MarkdownWorkspaceViewModel()
-        val origin = MarkdownWorkspaceOrigin.LocalSkill(LOCAL_SKILL_NAME)
 
         assertEquals(
             ExternalMarkdownOpenResult.OPENED,
             viewModel.openExternalText(
                 text = EXTERNAL_TEXT,
                 displayName = SKILL_FILE_NAME,
-                origin = origin,
+                origin = MarkdownWorkspaceOrigin.LocalSkill(LOCAL_SKILL_NAME),
                 markDirty = false
             )
         )
 
         val state = viewModel.uiState.value
         assertFalse(state.isDirty)
-        assertEquals(origin, state.origin)
+        assertEquals(localSkillOrigin(EXTERNAL_TEXT), state.origin)
         assertEquals(SKILL_FILE_NAME, state.displayName)
     }
 
@@ -126,36 +127,41 @@ class MarkdownWorkspaceViewModelTest {
         assertTrue(state.isDirty)
         assertFalse(state.isExporting)
         assertEquals(SKILL_FILE_NAME, state.displayName)
-        assertEquals(MarkdownWorkspaceOrigin.LocalSkill(LOCAL_SKILL_NAME), state.origin)
+        assertEquals(localSkillOrigin(EXTERNAL_TEXT), state.origin)
     }
 
     @Test
-    fun successfulBoundSourceSaveClearsDirtyForMatchingRevision() {
+    fun successfulBoundSourceSaveClearsDirtyAndAdvancesSourceDigest() {
         val viewModel = boundSkillWorkspace()
-        viewModel.updateText("edited skill")
+        val savedText = "edited skill"
+        viewModel.updateText(savedText)
         val snapshot = requireNotNull(viewModel.beginExport())
+        val persistedOrigin = localSkillOrigin(savedText)
 
-        assertTrue(viewModel.completeSourceSave(snapshot))
+        assertTrue(viewModel.completeSourceSave(snapshot, persistedOrigin))
 
         val state = viewModel.uiState.value
         assertFalse(state.isDirty)
         assertFalse(state.isExporting)
-        assertEquals(MarkdownWorkspaceOrigin.LocalSkill(LOCAL_SKILL_NAME), state.origin)
+        assertEquals(persistedOrigin, state.origin)
     }
 
     @Test
-    fun boundSourceSaveDoesNotClearNewerEdit() {
+    fun boundSourceSaveAdvancesBaselineWithoutClearingNewerEdit() {
         val viewModel = boundSkillWorkspace()
-        viewModel.updateText("version one")
+        val savedText = "version one"
+        viewModel.updateText(savedText)
         val snapshot = requireNotNull(viewModel.beginExport())
         viewModel.updateText("version two")
+        val persistedOrigin = localSkillOrigin(savedText)
 
-        assertFalse(viewModel.completeSourceSave(snapshot))
+        assertFalse(viewModel.completeSourceSave(snapshot, persistedOrigin))
 
         val state = viewModel.uiState.value
         assertTrue(state.isDirty)
         assertFalse(state.isExporting)
         assertEquals("version two", state.text)
+        assertEquals(persistedOrigin, state.origin)
     }
 
     @Test
@@ -235,7 +241,7 @@ class MarkdownWorkspaceViewModelTest {
     }
 
     @Test
-    fun recoveryRestoresOnlyTheLocalWorkspaceCopy() {
+    fun recoveryRestoresOrdinaryMarkdownWithoutSourceIdentity() {
         val viewModel = MarkdownWorkspaceViewModel()
         val recovered = MarkdownWorkspaceRecoverySnapshot(
             text = "# recovered",
@@ -252,6 +258,29 @@ class MarkdownWorkspaceViewModelTest {
         assertTrue(state.isDirty)
         assertEquals(PROMPT_NAME, state.displayName)
         assertNull(state.origin)
+    }
+
+    @Test
+    fun recoveryRestoresBoundLocalSkillSourceIdentity() {
+        val viewModel = MarkdownWorkspaceViewModel()
+        val digest = localSkillSourceDigest(EXTERNAL_TEXT)
+        val recovered = MarkdownWorkspaceRecoverySnapshot(
+            text = EXTERNAL_TEXT,
+            hadUtf8Bom = false,
+            displayName = SKILL_FILE_NAME,
+            isDirty = true,
+            source = MarkdownWorkspaceRecoverySource(
+                localSkillName = LOCAL_SKILL_NAME,
+                sourceDigest = digest
+            )
+        )
+
+        assertTrue(viewModel.restoreRecovery(recovered))
+
+        assertEquals(
+            MarkdownWorkspaceOrigin.LocalSkill(LOCAL_SKILL_NAME, digest),
+            viewModel.uiState.value.origin
+        )
     }
 
     @Test
@@ -315,6 +344,12 @@ class MarkdownWorkspaceViewModelTest {
         assertFalse(state.isDirty)
         assertNull(state.origin)
     }
+
+    private fun localSkillOrigin(source: String): MarkdownWorkspaceOrigin.LocalSkill =
+        MarkdownWorkspaceOrigin.LocalSkill(
+            name = LOCAL_SKILL_NAME,
+            sourceDigest = localSkillSourceDigest(source)
+        )
 
     private fun boundSkillWorkspace(): MarkdownWorkspaceViewModel =
         MarkdownWorkspaceViewModel().also { viewModel ->
