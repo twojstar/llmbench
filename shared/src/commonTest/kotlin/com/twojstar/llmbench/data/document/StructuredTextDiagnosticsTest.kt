@@ -77,19 +77,25 @@ class StructuredTextDiagnosticsTest {
     }
 
     @Test
-    fun validatesYamlAnchorsAndAliasesWithoutHeuristicRepair() {
-        assertTrue(
-            StructuredTextDiagnostics.validate(
-                "name: LlmBench\nitems:\n  - one\n  - two\n",
-                StructuredTextFormat.YAML
-            ).isValid
-        )
-        assertTrue(
-            StructuredTextDiagnostics.validate(
-                "base: &defaults\n  model: fast\ncopy: *defaults\n",
-                StructuredTextFormat.YAML
-            ).isValid
-        )
+    fun yamlSyntaxValidationAcceptsAnchorsEmptyDocumentsAndComplexKeys() {
+        listOf(
+            "name: LlmBench\nitems:\n  - one\n  - two\n",
+            "base: &defaults\n  model: fast\ncopy: *defaults\n",
+            "",
+            "---\n...\n",
+            "?\n: null-key\n",
+            "? [one, two]\n: sequence-key\n",
+            "? {one: 1, two: 2}\n: mapping-key\n"
+        ).forEach { source ->
+            assertTrue(
+                StructuredTextDiagnostics.validate(source, StructuredTextFormat.YAML).isValid,
+                source
+            )
+        }
+    }
+
+    @Test
+    fun malformedYamlStillFailsSyntaxValidation() {
         assertFalse(
             StructuredTextDiagnostics.validate(
                 "name: \"unterminated\n",
