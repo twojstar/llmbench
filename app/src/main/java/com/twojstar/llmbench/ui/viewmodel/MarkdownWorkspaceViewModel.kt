@@ -30,6 +30,10 @@ private const val SHARED_MARKDOWN_NAME = "shared-text.md"
 private const val RECOVERY_DEBOUNCE_MS = 650L
 internal const val MAX_EDITABLE_MARKDOWN_CHARS = 1_000_000
 
+sealed interface MarkdownWorkspaceOrigin {
+    data class LocalSkill(val name: String) : MarkdownWorkspaceOrigin
+}
+
 data class MarkdownWorkspaceUiState(
     val text: String = "",
     val hadUtf8Bom: Boolean = false,
@@ -39,7 +43,8 @@ data class MarkdownWorkspaceUiState(
     val isExporting: Boolean = false,
     val isImporting: Boolean = false,
     val isRecoveryLoading: Boolean = false,
-    val openMarkdownRequestId: Long = 0L
+    val openMarkdownRequestId: Long = 0L,
+    val origin: MarkdownWorkspaceOrigin? = null
 ) {
     val isBusy: Boolean
         get() = isRecoveryLoading || isExporting || isImporting
@@ -55,7 +60,8 @@ data class MarkdownExportSnapshot(
     val operationId: Long,
     val revision: Long,
     val document: TextDocument,
-    val displayName: String
+    val displayName: String,
+    val origin: MarkdownWorkspaceOrigin?
 )
 
 enum class ExternalMarkdownOpenResult {
@@ -177,7 +183,9 @@ class MarkdownWorkspaceViewModel : ViewModel() {
     fun openExternalText(
         text: String,
         displayName: String = SHARED_MARKDOWN_NAME,
-        allowDiscardDirty: Boolean = false
+        allowDiscardDirty: Boolean = false,
+        origin: MarkdownWorkspaceOrigin? = null,
+        markDirty: Boolean = true
     ): ExternalMarkdownOpenResult {
         if (text.encodeToByteArray().size > MarkdownDocumentFileAccess.MAX_DOCUMENT_BYTES) {
             return ExternalMarkdownOpenResult.TOO_LARGE
@@ -192,9 +200,10 @@ class MarkdownWorkspaceViewModel : ViewModel() {
                     _uiState.value = MarkdownWorkspaceUiState(
                         text = text,
                         displayName = MarkdownDocumentFileAccess.normalizeDisplayName(displayName),
-                        isDirty = true,
+                        isDirty = markDirty,
                         revision = state.revision + 1,
-                        openMarkdownRequestId = nextOpenMarkdownRequestId++
+                        openMarkdownRequestId = nextOpenMarkdownRequestId++,
+                        origin = origin
                     )
                     ExternalMarkdownOpenResult.OPENED
                 }
@@ -263,7 +272,8 @@ class MarkdownWorkspaceViewModel : ViewModel() {
             operationId = operationId,
             revision = state.revision,
             document = documentFrom(state),
-            displayName = state.displayName
+            displayName = state.displayName,
+            origin = state.origin
         )
         _uiState.value = state.copy(isExporting = true)
         snapshot
@@ -275,12 +285,32 @@ class MarkdownWorkspaceViewModel : ViewModel() {
             if (!state.isExporting || activeExportOperationId != snapshot.operationId) return@synchronized false
             activeExportOperationId = null
             val current = state.revision == snapshot.revision
-            _uiState.value = if (current) {
-                state.copy(
+            _uiState.value = when {
+                !current -> state.copy(isExporting = false)
+                snapshot.origin != null -> state.copy(isExporting = false)
+                else -> state.copy(
                     displayName = MarkdownDocumentFileAccess.normalizeDisplayName(displayName),
                     isDirty = false,
                     isExporting = false
                 )
+            }
+            current
+        }
+        if (stillCurrent) scheduleRecovery(delayMs = 0L)
+        return stillCurrent
+    }
+
+    fun completeSourceSave(snapshot: MarkdownExportSnapshot): Boolean {
+        val stillCurrent = synchronized(this) {
+            val state = _uiState.value
+            if (!state.isExporting || activeExportOperationId != snapshot.operationId) return@synchronized false
+            activeExportOperationId = null
+            val current =
+                snapshot.origin != null &&
+                    state.origin == snapshot.origin &&
+                    state.revision == snapshot.revision
+            _uiState.value = if (current) {
+                state.copy(isDirty = false, isExporting = false)
             } else {
                 state.copy(isExporting = false)
             }
@@ -346,6 +376,7 @@ class MarkdownWorkspaceViewModel : ViewModel() {
             !isExporting &&
             !isImporting &&
             openMarkdownRequestId == 0L &&
+            origin == null &&
             (includeLoading || !isRecoveryLoading)
 
     private fun recoveredState(snapshot: MarkdownWorkspaceRecoverySnapshot): MarkdownWorkspaceUiState =

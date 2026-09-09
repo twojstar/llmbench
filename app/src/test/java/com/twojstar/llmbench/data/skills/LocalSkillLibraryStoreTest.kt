@@ -72,7 +72,7 @@ class LocalSkillLibraryStoreTest {
     @Test
     fun replacingSameSkillRequiresExplicitFlagAndPreservesActivation() = runBlocking {
         val original = skillSource(RELEASE_SKILL, FIRST_VERSION)
-        val replacement = skillSource(RELEASE_SKILL, "Second version.")
+        val replacement = skillSource(RELEASE_SKILL, SECOND_VERSION)
         store.add(original)
         store.setEnabled(RELEASE_SKILL, true)
 
@@ -87,6 +87,63 @@ class LocalSkillLibraryStoreTest {
         assertEquals(1, store.load().size)
         assertEquals(replacement, store.read(RELEASE_SKILL)?.source)
         assertEquals(listOf(RELEASE_SKILL), store.loadEnabledManifests().map(AgentSkillManifest::name))
+    }
+
+    @Test
+    fun boundReplacementUpdatesExistingSkillAndPreservesActivation() = runBlocking {
+        val original = skillSource(RELEASE_SKILL, FIRST_VERSION)
+        val replacement = skillSource(RELEASE_SKILL, SECOND_VERSION)
+        store.add(original)
+        store.setEnabled(RELEASE_SKILL, true)
+
+        val replaced = store.replace(RELEASE_SKILL, replacement)
+
+        assertTrue(replaced.enabled)
+        assertEquals(SECOND_VERSION, replaced.description)
+        assertEquals(replacement, store.read(RELEASE_SKILL)?.source)
+        assertEquals(listOf(RELEASE_SKILL), store.loadEnabledManifests().map(AgentSkillManifest::name))
+    }
+
+    @Test
+    fun boundReplacementRejectsManifestRenameWithoutCreatingAnotherSkill() = runBlocking {
+        val original = skillSource(RELEASE_SKILL, FIRST_VERSION)
+        val renamed = skillSource(RENAMED_SKILL, SECOND_VERSION)
+        store.add(original)
+
+        val error = runCatching { store.replace(RELEASE_SKILL, renamed) }.exceptionOrNull()
+
+        assertTrue(error is LocalSkillRenameRequiredException)
+        assertEquals(original, store.read(RELEASE_SKILL)?.source)
+        assertNull(store.read(RENAMED_SKILL))
+        assertEquals(listOf(RELEASE_SKILL), store.load().map(LocalSkillSummary::name))
+    }
+
+    @Test
+    fun boundReplacementRequiresExistingSkill() = runBlocking {
+        val replacement = skillSource(RELEASE_SKILL, SECOND_VERSION)
+
+        val error = runCatching { store.replace(RELEASE_SKILL, replacement) }.exceptionOrNull()
+
+        assertTrue(error is LocalSkillNotFoundException)
+        assertTrue(root.listFiles().isNullOrEmpty())
+    }
+
+    @Test
+    fun boundReplacementRejectsOverBudgetEditBeforeTouchingEnabledSource() = runBlocking {
+        val original = skillSource(RELEASE_SKILL, FIRST_VERSION)
+        store.add(original)
+        store.setEnabled(RELEASE_SKILL, true)
+        val oversized = skillSource(
+            RELEASE_SKILL,
+            SECOND_VERSION,
+            "x".repeat(MAX_RUNTIME_SKILL_INSTRUCTION_CHARS)
+        )
+
+        val error = runCatching { store.replace(RELEASE_SKILL, oversized) }.exceptionOrNull()
+
+        assertTrue(error is LocalSkillActivationException)
+        assertEquals(original, store.read(RELEASE_SKILL)?.source)
+        assertTrue(store.load().single().enabled)
     }
 
     @Test
@@ -256,6 +313,7 @@ class LocalSkillLibraryStoreTest {
     private companion object {
         const val RELEASE_SKILL = "release-checklist"
         const val RETRY_SKILL = "retry-skill"
+        const val RENAMED_SKILL = "renamed-skill"
         const val ALPHA_SKILL = "alpha-skill"
         const val BETA_SKILL = "beta-skill"
         const val GAMMA_SKILL = "gamma-skill"
@@ -266,6 +324,7 @@ class LocalSkillLibraryStoreTest {
         const val SKILL_FILE_NAME = "SKILL.md"
         const val ENABLED_FILE_NAME = ".enabled"
         const val FIRST_VERSION = "First version."
+        const val SECOND_VERSION = "Second version."
         const val ALPHA_DESCRIPTION = "Alpha."
         const val BETA_DESCRIPTION = "Beta."
         const val OVERSIZED_DESCRIPTION = "Too large for runtime."

@@ -17,6 +17,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FolderCopy
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material3.AlertDialog
@@ -168,6 +169,28 @@ private fun CoroutineScope.launchLocalSkillView(
     }
 }
 
+private fun CoroutineScope.launchLocalSkillEdit(
+    store: LocalSkillLibraryStore,
+    skillName: String,
+    onBusySkillChanged: (String?) -> Unit,
+    onSkillsChanged: (List<LocalSkillSummary>) -> Unit,
+    onEditSource: (String, String) -> Unit,
+    onMessage: (String) -> Unit
+) = launch {
+    onBusySkillChanged(skillName)
+    try {
+        val document = store.read(skillName)
+        if (document == null) {
+            onSkillsChanged(store.load())
+            onMessage(LOCAL_SKILL_MISSING_MESSAGE)
+        } else {
+            onEditSource(skillName, document.source)
+        }
+    } finally {
+        onBusySkillChanged(null)
+    }
+}
+
 private fun CoroutineScope.launchLocalSkillExport(
     context: Context,
     uri: Uri,
@@ -218,6 +241,7 @@ internal fun LocalSkillLibrarySection(
     refreshToken: Int,
     onCountChanged: (Int) -> Unit,
     onViewSource: (String, String) -> Unit,
+    onEditSource: (String, String) -> Unit,
     onMessage: (String) -> Unit
 ) {
     val context = LocalContext.current
@@ -285,6 +309,16 @@ internal fun LocalSkillLibrarySection(
                 onMessage = onMessage
             )
         },
+        onEdit = { skill ->
+            scope.launchLocalSkillEdit(
+                store = store,
+                skillName = skill.name,
+                onBusySkillChanged = { busySkill = it },
+                onSkillsChanged = ::applySkills,
+                onEditSource = onEditSource,
+                onMessage = onMessage
+            )
+        },
         onExport = { skill ->
             pendingExportSkill = skill.name
             try {
@@ -335,6 +369,7 @@ private fun LocalSkillLibraryContent(
     actionsEnabled: Boolean,
     onActivationChanged: (LocalSkillSummary, Boolean) -> Unit,
     onView: (LocalSkillSummary) -> Unit,
+    onEdit: (LocalSkillSummary) -> Unit,
     onExport: (LocalSkillSummary) -> Unit,
     onRemove: (LocalSkillSummary) -> Unit
 ) {
@@ -362,6 +397,7 @@ private fun LocalSkillLibraryContent(
                 actionsEnabled = actionsEnabled,
                 onActivationChanged = { enabled -> onActivationChanged(skill, enabled) },
                 onView = { onView(skill) },
+                onEdit = { onEdit(skill) },
                 onExport = { onExport(skill) },
                 onRemove = { onRemove(skill) }
             )
@@ -407,6 +443,7 @@ private fun LocalSkillCard(
     actionsEnabled: Boolean,
     onActivationChanged: (Boolean) -> Unit,
     onView: () -> Unit,
+    onEdit: () -> Unit,
     onExport: () -> Unit,
     onRemove: () -> Unit
 ) {
@@ -464,16 +501,22 @@ private fun LocalSkillCard(
                     Spacer(Modifier.width(6.dp))
                     Text("View")
                 }
+                OutlinedButton(enabled = actionsEnabled, onClick = onEdit) {
+                    Icon(Icons.Default.Edit, contentDescription = null)
+                    Spacer(Modifier.width(6.dp))
+                    Text("Edit")
+                }
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
                 OutlinedButton(enabled = actionsEnabled, onClick = onExport) {
                     Icon(Icons.Default.Download, contentDescription = null)
                     Spacer(Modifier.width(6.dp))
                     Text("Export")
                 }
-            }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.End
-            ) {
                 TextButton(enabled = actionsEnabled, onClick = onRemove) {
                     Icon(Icons.Default.DeleteOutline, contentDescription = null)
                     Spacer(Modifier.width(6.dp))

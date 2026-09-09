@@ -27,7 +27,21 @@ internal class LocalSkillAlreadyExistsException(
     val skillName: String
 ) : IOException("Local skill '$skillName' already exists.")
 
+internal class LocalSkillNotFoundException(
+    val skillName: String
+) : IOException("Local skill '$skillName' is no longer available.")
+
+internal class LocalSkillRenameRequiredException(
+    val existingName: String,
+    val newName: String
+) : IOException("Change the skill name with Rename before saving '$newName' over '$existingName'.")
+
 internal class LocalSkillActivationException(message: String) : IOException(message)
+
+private data class ParsedLocalSkillSource(
+    val manifest: AgentSkillManifest,
+    val bytes: ByteArray
+)
 
 internal class LocalSkillLibraryStore(
     private val rootDirectory: File
@@ -61,37 +75,53 @@ internal class LocalSkillLibraryStore(
         source: String,
         replaceExisting: Boolean = false
     ): LocalSkillSummary {
-        val parsed = withContext(Dispatchers.Default) {
-            AgentSkillManifestParser.parse(source)
-        }
-        val manifest = parsed.manifest?.takeIf { parsed.issues.isEmpty() }
-            ?: throw IllegalArgumentException("Only valid portable SKILL.md content can be added.")
-        val bytes = source.encodeToByteArray()
-        if (bytes.size > MAX_SKILL_BYTES) throw IOException("Skill source exceeds the library size limit.")
+        val parsed = parseLocalSkillSource(source)
 
         return mutex.withLock {
-            val skillDirectory = storageDirectory(manifest.name)
+            val skillDirectory = storageDirectory(parsed.manifest.name)
             val existing = if (skillDirectory.isDirectory) readStoredDocument(skillDirectory) else null
             if (existing != null && !replaceExisting) {
-                throw LocalSkillAlreadyExistsException(manifest.name)
+                throw LocalSkillAlreadyExistsException(parsed.manifest.name)
             }
             if (skillDirectory.exists() && existing == null) {
                 withContext(Dispatchers.IO) {
                     if (!skillDirectory.deleteRecursively()) {
-                        throw IOException("Could not reclaim invalid local skill storage for '${manifest.name}'.")
+                        throw IOException("Could not reclaim invalid local skill storage for '${parsed.manifest.name}'.")
                     }
                 }
             }
-            ensureCapacityFor(manifest.name)
+            ensureCapacityFor(parsed.manifest.name)
             val enabled = existing != null && isEnabled(skillDirectory)
             if (enabled) {
-                validateRuntimeBudgetFor(manifest)
+                validateRuntimeBudgetFor(parsed.manifest)
             }
             withContext(Dispatchers.IO) {
                 skillDirectory.mkdirs()
-                writeAtomically(File(skillDirectory, SKILL_FILE_NAME), bytes)
+                writeAtomically(File(skillDirectory, SKILL_FILE_NAME), parsed.bytes)
             }
-            manifest.toSummary(enabled)
+            parsed.manifest.toSummary(enabled)
+        }
+    }
+
+    suspend fun replace(name: String, source: String): LocalSkillSummary {
+        val parsed = parseLocalSkillSource(source)
+        if (parsed.manifest.name != name) {
+            throw LocalSkillRenameRequiredException(name, parsed.manifest.name)
+        }
+
+        return mutex.withLock {
+            val skillDirectory = storageDirectory(name)
+            val existing = readStoredDocument(skillDirectory)
+                ?.takeIf { it.manifest.name == name }
+                ?: throw LocalSkillNotFoundException(name)
+            val enabled = isEnabled(skillDirectory)
+            if (enabled) {
+                validateRuntimeBudgetFor(parsed.manifest)
+            }
+            withContext(Dispatchers.IO) {
+                writeAtomically(File(skillDirectory, SKILL_FILE_NAME), parsed.bytes)
+            }
+            parsed.manifest.toSummary(enabled)
         }
     }
 
@@ -121,6 +151,17 @@ internal class LocalSkillLibraryStore(
                 throw IOException("Could not remove local skill '$name'.")
             }
         }
+    }
+
+    private suspend fun parseLocalSkillSource(source: String): ParsedLocalSkillSource {
+        val parsed = withContext(Dispatchers.Default) {
+            AgentSkillManifestParser.parse(source)
+        }
+        val manifest = parsed.manifest?.takeIf { parsed.issues.isEmpty() }
+            ?: throw IllegalArgumentException("Only valid portable SKILL.md content can be saved.")
+        val bytes = source.encodeToByteArray()
+        if (bytes.size > MAX_SKILL_BYTES) throw IOException("Skill source exceeds the library size limit.")
+        return ParsedLocalSkillSource(manifest = manifest, bytes = bytes)
     }
 
     private suspend fun validateRuntimeBudgetFor(candidate: AgentSkillManifest) {

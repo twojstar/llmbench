@@ -8,6 +8,7 @@ import com.twojstar.llmbench.data.document.TextDocument
 import com.twojstar.llmbench.data.document.TextDocumentCodec
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -15,6 +16,7 @@ class MarkdownWorkspaceViewModelTest {
     private companion object {
         const val PROMPT_NAME = "prompt.md"
         const val EXTERNAL_TEXT = "shared text"
+        const val LOCAL_SKILL_NAME = "release-checklist"
     }
 
     @Test
@@ -91,6 +93,71 @@ class MarkdownWorkspaceViewModelTest {
     }
 
     @Test
+    fun boundLocalSkillStartsCleanAndTracksSourceIdentity() {
+        val viewModel = MarkdownWorkspaceViewModel()
+        val origin = MarkdownWorkspaceOrigin.LocalSkill(LOCAL_SKILL_NAME)
+
+        assertEquals(
+            ExternalMarkdownOpenResult.OPENED,
+            viewModel.openExternalText(
+                text = EXTERNAL_TEXT,
+                displayName = "SKILL.md",
+                origin = origin,
+                markDirty = false
+            )
+        )
+
+        val state = viewModel.uiState.value
+        assertFalse(state.isDirty)
+        assertEquals(origin, state.origin)
+        assertEquals("SKILL.md", state.displayName)
+    }
+
+    @Test
+    fun exportingBoundLocalSkillWritesCopyWithoutMarkingSourceSaved() {
+        val viewModel = boundSkillWorkspace()
+        viewModel.updateText("edited skill")
+        val snapshot = requireNotNull(viewModel.beginExport())
+
+        assertTrue(viewModel.completeExport(snapshot, "exported-skill.md"))
+
+        val state = viewModel.uiState.value
+        assertTrue(state.isDirty)
+        assertFalse(state.isExporting)
+        assertEquals("SKILL.md", state.displayName)
+        assertEquals(MarkdownWorkspaceOrigin.LocalSkill(LOCAL_SKILL_NAME), state.origin)
+    }
+
+    @Test
+    fun successfulBoundSourceSaveClearsDirtyForMatchingRevision() {
+        val viewModel = boundSkillWorkspace()
+        viewModel.updateText("edited skill")
+        val snapshot = requireNotNull(viewModel.beginExport())
+
+        assertTrue(viewModel.completeSourceSave(snapshot))
+
+        val state = viewModel.uiState.value
+        assertFalse(state.isDirty)
+        assertFalse(state.isExporting)
+        assertEquals(MarkdownWorkspaceOrigin.LocalSkill(LOCAL_SKILL_NAME), state.origin)
+    }
+
+    @Test
+    fun boundSourceSaveDoesNotClearNewerEdit() {
+        val viewModel = boundSkillWorkspace()
+        viewModel.updateText("version one")
+        val snapshot = requireNotNull(viewModel.beginExport())
+        viewModel.updateText("version two")
+
+        assertFalse(viewModel.completeSourceSave(snapshot))
+
+        val state = viewModel.uiState.value
+        assertTrue(state.isDirty)
+        assertFalse(state.isExporting)
+        assertEquals("version two", state.text)
+    }
+
+    @Test
     fun importLocksEditsUntilResultOrCancel() {
         val viewModel = MarkdownWorkspaceViewModel()
         viewModel.updateText("keep me")
@@ -119,6 +186,7 @@ class MarkdownWorkspaceViewModelTest {
         assertFalse(state.isImporting)
         assertEquals("new\r\ntext", state.text)
         assertEquals(PROMPT_NAME, state.displayName)
+        assertNull(state.origin)
     }
 
     @Test
@@ -141,6 +209,7 @@ class MarkdownWorkspaceViewModelTest {
         assertEquals("shared-text.md", state.displayName)
         assertTrue(state.isDirty)
         assertTrue(state.openMarkdownRequestId > 0L)
+        assertNull(state.origin)
     }
 
     @Test
@@ -181,6 +250,7 @@ class MarkdownWorkspaceViewModelTest {
         assertTrue(state.hadUtf8Bom)
         assertTrue(state.isDirty)
         assertEquals(PROMPT_NAME, state.displayName)
+        assertNull(state.origin)
     }
 
     @Test
@@ -233,9 +303,7 @@ class MarkdownWorkspaceViewModelTest {
 
     @Test
     fun newDocumentDropsImportedContentOnlyWhenExplicitlyRequested() {
-        val viewModel = MarkdownWorkspaceViewModel()
-        val document = TextDocumentCodec.decodeUtf8("old".encodeToByteArray())
-        viewModel.completeImportAfterBegin("old.md", document)
+        val viewModel = boundSkillWorkspace()
         viewModel.updateText("changed")
 
         viewModel.newDocument()
@@ -244,7 +312,21 @@ class MarkdownWorkspaceViewModelTest {
         assertEquals("", state.text)
         assertEquals("untitled.md", state.displayName)
         assertFalse(state.isDirty)
+        assertNull(state.origin)
     }
+
+    private fun boundSkillWorkspace(): MarkdownWorkspaceViewModel =
+        MarkdownWorkspaceViewModel().also { viewModel ->
+            assertEquals(
+                ExternalMarkdownOpenResult.OPENED,
+                viewModel.openExternalText(
+                    text = EXTERNAL_TEXT,
+                    displayName = "SKILL.md",
+                    origin = MarkdownWorkspaceOrigin.LocalSkill(LOCAL_SKILL_NAME),
+                    markDirty = false
+                )
+            )
+        }
 
     private fun MarkdownWorkspaceViewModel.completeImportAfterBegin(
         name: String,
