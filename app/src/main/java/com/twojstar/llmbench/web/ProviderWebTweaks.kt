@@ -226,7 +226,7 @@ internal object ProviderWebTweakRegistry {
         WebAiService.ZAI
     )
 
-    private fun identityAuthHostsForNavigation(
+    fun identityAuthHostsForNavigation(
         service: WebAiService,
         navigationVerified: Boolean
     ): Set<String> {
@@ -288,11 +288,6 @@ internal object ProviderWebTweakRegistry {
 
     fun topLevelNavigationAuthHosts(service: WebAiService): Set<String> =
         topLevelNavigationAuthHosts[service].orEmpty()
-
-    fun identityAuthHostsForNavigationTest(
-        service: WebAiService,
-        navigationVerified: Boolean
-    ): Set<String> = identityAuthHostsForNavigation(service, navigationVerified)
 
     fun forProvider(service: WebAiService): List<ProviderWebTweak> =
         providerTweaks[service].orEmpty()
