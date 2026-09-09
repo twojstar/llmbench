@@ -1,0 +1,219 @@
+package com.twojstar.llmbench.data.tokenizer
+
+import com.twojstar.llmbench.data.model.ProviderUsage
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertNull
+import kotlin.test.assertTrue
+
+class TokenArenaMetricsTest {
+    @Test
+    fun tokenDeltasCompareOnlyIdenticalMeasurementSeries() {
+        val reference = variant(REFERENCE_ID, "reference")
+        val candidate = variant(CANDIDATE_ID, "candidate")
+        val experiment = TokenArenaExperiment.create(
+            id = "arena",
+            intentLabel = "Compare prompt representations",
+            variants = listOf(reference, candidate),
+            tokenMeasurements = listOf(
+                localMeasurement(reference, 100, "o200k"),
+                localMeasurement(candidate, 80, "o200k"),
+                localMeasurement(candidate, 55, "other-encoding"),
+                providerMeasurement(reference, 120),
+                providerMeasurement(candidate, 90)
+            )
+        )
+
+        val deltas = experiment.tokenDeltas(REFERENCE_ID)
+
+        assertEquals(2, deltas.size)
+        val local = deltas.single { it.series.mode == TokenMeasurementMode.LOCAL_EXACT_ENCODING }
+        assertEquals(-20, local.deltaTokens)
+        assertEquals(-20.0, local.deltaPercent)
+        val provider = deltas.single { it.series.mode == TokenMeasurementMode.PROVIDER_EXACT }
+        assertEquals(-30, provider.deltaTokens)
+        assertEquals(-25.0, provider.deltaPercent)
+        assertTrue(deltas.none { it.series.encodingLabel == "other-encoding" })
+    }
+
+    @Test
+    fun zeroReferenceTokensDoNotProduceInfinitePercentageDelta() {
+        val reference = variant(REFERENCE_ID, "")
+        val candidate = variant(CANDIDATE_ID, "x")
+        val experiment = TokenArenaExperiment.create(
+            id = "arena",
+            intentLabel = "Zero baseline",
+            variants = listOf(reference, candidate),
+            tokenMeasurements = listOf(
+                localMeasurement(reference, 0, "o200k"),
+                localMeasurement(candidate, 1, "o200k")
+            )
+        )
+
+        val delta = experiment.tokenDeltas(REFERENCE_ID).single()
+        assertEquals(1, delta.deltaTokens)
+        assertNull(delta.deltaPercent)
+    }
+
+    @Test
+    fun responseEfficiencyUsesProviderReportedUsageOnly() {
+        val observation = observation(
+            usage = ProviderUsage(inputTokens = 500, costUsd = 0.01),
+            qualityScore = 0.8
+        )
+
+        val efficiency = observation.efficiencyMetrics()
+
+        assertEquals(1.6, efficiency.qualityPerThousandInputTokens)
+        assertEquals(80.0, efficiency.qualityPerUsd)
+    }
+
+    @Test
+    fun missingProviderUsageDoesNotBorrowLocalTokenMeasurement() {
+        val prompt = variant(REFERENCE_ID, "prompt")
+        val observation = observation(qualityScore = 1.0)
+        val experiment = TokenArenaExperiment.create(
+            id = "arena",
+            intentLabel = "No provider usage",
+            variants = listOf(prompt),
+            tokenMeasurements = listOf(localMeasurement(prompt, 20, "o200k")),
+            responseObservations = listOf(observation)
+        )
+
+        assertNull(observation.efficiencyMetrics().qualityPerThousandInputTokens)
+        assertTrue(
+            experiment.liveEfficiencyRanking(
+                TokenArenaLiveRankingMetric.QUALITY_PER_THOUSAND_INPUT_TOKENS
+            ).isEmpty()
+        )
+    }
+
+    @Test
+    fun liveRankingExcludesCachedSimulatedPartialAndFailedResponses() {
+        val prompt = variant(REFERENCE_ID, "prompt")
+        val liveBetter = observation(
+            variant = prompt,
+            qualityScore = 0.9,
+            usage = ProviderUsage(inputTokens = 300, costUsd = 0.03)
+        )
+        val liveLower = observation(
+            variant = prompt,
+            providerId = "provider-b",
+            qualityScore = 0.7,
+            usage = ProviderUsage(inputTokens = 500, costUsd = 0.02)
+        )
+        val excluded = listOf(
+            observation(
+                variant = prompt,
+                providerId = "cached",
+                provenance = ArenaResponseProvenance.CACHED_REPLAY,
+                qualityScore = 10.0,
+                usage = ProviderUsage(inputTokens = 1, costUsd = 0.0001)
+            ),
+            observation(
+                variant = prompt,
+                providerId = "simulated",
+                provenance = ArenaResponseProvenance.SIMULATED_FALLBACK,
+                qualityScore = 10.0,
+                usage = ProviderUsage(inputTokens = 1, costUsd = 0.0001)
+            ),
+            observation(
+                variant = prompt,
+                providerId = "partial",
+                isPartial = true,
+                qualityScore = 10.0,
+                usage = ProviderUsage(inputTokens = 1, costUsd = 0.0001)
+            ),
+            observation(
+                variant = prompt,
+                providerId = "failed",
+                isError = true,
+                qualityScore = 10.0,
+                usage = ProviderUsage(inputTokens = 1, costUsd = 0.0001)
+            )
+        )
+        val experiment = TokenArenaExperiment.create(
+            id = "arena",
+            intentLabel = "Live ranking",
+            variants = listOf(prompt),
+            responseObservations = listOf(liveBetter, liveLower) + excluded
+        )
+
+        val ranking = experiment.liveEfficiencyRanking(
+            TokenArenaLiveRankingMetric.QUALITY_PER_THOUSAND_INPUT_TOKENS
+        )
+
+        assertEquals(listOf(liveBetter, liveLower), ranking.map { it.observation })
+        assertEquals(listOf(1, 2), ranking.map { it.rank })
+    }
+
+    @Test
+    fun zeroCostDoesNotCreateInfiniteQualityPerUsd() {
+        val efficiency = observation(
+            qualityScore = 1.0,
+            usage = ProviderUsage(inputTokens = 10, costUsd = 0.0)
+        ).efficiencyMetrics()
+
+        assertNull(efficiency.qualityPerUsd)
+    }
+
+    private fun variant(id: String, prompt: String) = TokenArenaVariant(
+        id = id,
+        label = id,
+        prompt = prompt
+    )
+
+    private fun localMeasurement(
+        variant: TokenArenaVariant,
+        tokens: Long,
+        encoding: String
+    ) = TokenArenaTokenMeasurement(
+        variantId = variant.id,
+        promptFingerprint = variant.promptFingerprint,
+        tokens = tokens,
+        mode = TokenMeasurementMode.LOCAL_EXACT_ENCODING,
+        backendLabel = "local-$encoding",
+        encodingLabel = encoding
+    )
+
+    private fun providerMeasurement(
+        variant: TokenArenaVariant,
+        tokens: Long
+    ) = TokenArenaTokenMeasurement(
+        variantId = variant.id,
+        promptFingerprint = variant.promptFingerprint,
+        tokens = tokens,
+        mode = TokenMeasurementMode.PROVIDER_EXACT,
+        backendLabel = PROVIDER_BACKEND,
+        providerId = PROVIDER_ID,
+        modelName = MODEL_NAME
+    )
+
+    private fun observation(
+        variant: TokenArenaVariant = variant(REFERENCE_ID, "prompt"),
+        providerId: String = PROVIDER_ID,
+        provenance: ArenaResponseProvenance = ArenaResponseProvenance.LIVE_PROVIDER,
+        usage: ProviderUsage? = null,
+        qualityScore: Double? = null,
+        isError: Boolean = false,
+        isPartial: Boolean = false
+    ) = TokenArenaResponseObservation(
+        variantId = variant.id,
+        promptFingerprint = variant.promptFingerprint,
+        providerId = providerId,
+        modelName = MODEL_NAME,
+        provenance = provenance,
+        usage = usage,
+        qualityScore = qualityScore,
+        isError = isError,
+        isPartial = isPartial
+    )
+
+    companion object {
+        private const val REFERENCE_ID = "reference"
+        private const val CANDIDATE_ID = "candidate"
+        private const val PROVIDER_ID = "provider"
+        private const val MODEL_NAME = "model"
+        private const val PROVIDER_BACKEND = "provider-count-api"
+    }
+}
