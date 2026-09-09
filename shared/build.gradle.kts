@@ -30,6 +30,7 @@ kotlin {
             implementation(libs.kotaml)
             implementation(libs.snakeyaml.engine.kmp)
             implementation(libs.normalize)
+            implementation(libs.xmlutil.core)
         }
         androidMain.dependencies {
             implementation(libs.jtokkit)
