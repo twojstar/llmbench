@@ -71,33 +71,37 @@ private fun parseMimeType(mimeType: String?): ParsedMimeType? {
 private fun hasValidMimeParameters(source: String, start: Int): Boolean {
     var index = start
     while (index < source.length) {
-        if (source[index] != ';') return false
-        index++
-        index = source.skipMimeWhitespace(index)
-
-        val nameStart = index
-        while (index < source.length && source[index].isMimeTokenChar()) index++
-        if (index == nameStart) return false
-
-        index = source.skipMimeWhitespace(index)
-        if (index >= source.length || source[index] != '=') return false
-        index++
-        index = source.skipMimeWhitespace(index)
-        if (index >= source.length) return false
-
-        index = if (source[index] == '"') {
-            source.skipQuotedMimeValue(index) ?: return false
-        } else {
-            val valueStart = index
-            while (index < source.length && source[index].isMimeTokenChar()) index++
-            if (index == valueStart) return false
-            index
-        }
-
-        index = source.skipMimeWhitespace(index)
-        if (index < source.length && source[index] != ';') return false
+        index = source.parseMimeParameter(index) ?: return false
     }
     return true
+}
+
+private fun String.parseMimeParameter(start: Int): Int? {
+    if (getOrNull(start) != ';') return null
+    var index = skipMimeWhitespace(start + 1)
+
+    val nameEnd = scanMimeToken(index)
+    if (nameEnd == index) return null
+    index = skipMimeWhitespace(nameEnd)
+    if (getOrNull(index) != '=') return null
+    index = skipMimeWhitespace(index + 1)
+
+    index = parseMimeValue(index) ?: return null
+    index = skipMimeWhitespace(index)
+    return if (index == length || this[index] == ';') index else null
+}
+
+private fun String.parseMimeValue(start: Int): Int? {
+    if (start >= length) return null
+    if (this[start] == '"') return skipQuotedMimeValue(start)
+    val end = scanMimeToken(start)
+    return end.takeIf { it > start }
+}
+
+private fun String.scanMimeToken(start: Int): Int {
+    var index = start
+    while (index < length && this[index].isMimeTokenChar()) index++
+    return index
 }
 
 private fun String.skipQuotedMimeValue(start: Int): Int? {
