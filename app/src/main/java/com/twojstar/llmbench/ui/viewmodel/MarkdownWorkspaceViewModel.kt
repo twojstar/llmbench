@@ -12,6 +12,7 @@ import com.twojstar.llmbench.data.document.MarkdownWorkspaceRecoverySource
 import com.twojstar.llmbench.data.document.MarkdownWorkspaceRecoveryStore
 import com.twojstar.llmbench.data.document.TextDocument
 import com.twojstar.llmbench.data.document.TextDocumentCodec
+import com.twojstar.llmbench.data.skills.localSkillSourceDigest
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
@@ -34,7 +35,7 @@ internal const val MAX_EDITABLE_MARKDOWN_CHARS = 1_000_000
 sealed interface MarkdownWorkspaceOrigin {
     data class LocalSkill(
         val name: String,
-        val sourceDigest: String
+        val sourceDigest: String = ""
     ) : MarkdownWorkspaceOrigin
 }
 
@@ -194,6 +195,16 @@ class MarkdownWorkspaceViewModel : ViewModel() {
         if (text.encodeToByteArray().size > MarkdownDocumentFileAccess.MAX_DOCUMENT_BYTES) {
             return ExternalMarkdownOpenResult.TOO_LARGE
         }
+        val resolvedOrigin = when (origin) {
+            is MarkdownWorkspaceOrigin.LocalSkill -> {
+                if (origin.sourceDigest.isBlank()) {
+                    origin.copy(sourceDigest = localSkillSourceDigest(text))
+                } else {
+                    origin
+                }
+            }
+            null -> null
+        }
 
         val result = synchronized(this) {
             val state = _uiState.value
@@ -207,7 +218,7 @@ class MarkdownWorkspaceViewModel : ViewModel() {
                         isDirty = markDirty,
                         revision = state.revision + 1,
                         openMarkdownRequestId = nextOpenMarkdownRequestId++,
-                        origin = origin
+                        origin = resolvedOrigin
                     )
                     ExternalMarkdownOpenResult.OPENED
                 }
