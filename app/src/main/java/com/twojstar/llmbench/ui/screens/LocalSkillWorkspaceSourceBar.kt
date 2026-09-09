@@ -24,6 +24,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.twojstar.llmbench.data.skills.LocalSkillLibraryStore
+import com.twojstar.llmbench.ui.viewmodel.MarkdownExportSnapshot
 import com.twojstar.llmbench.ui.viewmodel.MarkdownWorkspaceOrigin
 import com.twojstar.llmbench.ui.viewmodel.MarkdownWorkspaceViewModel
 import java.io.File
@@ -32,6 +33,48 @@ import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+
+internal sealed interface LocalSkillSourceSaveOutcome {
+    data class Saved(val name: String, val current: Boolean) : LocalSkillSourceSaveOutcome
+    data class Failed(val message: String) : LocalSkillSourceSaveOutcome
+}
+
+internal suspend fun persistLocalSkillSource(
+    store: LocalSkillLibraryStore,
+    workspaceViewModel: MarkdownWorkspaceViewModel,
+    snapshot: MarkdownExportSnapshot,
+    snapshotOrigin: MarkdownWorkspaceOrigin.LocalSkill
+): LocalSkillSourceSaveOutcome = withContext(NonCancellable) {
+    val saveResult = runCatching {
+        store.replace(
+            name = snapshotOrigin.name,
+            expectedSourceDigest = snapshotOrigin.sourceDigest,
+            source = snapshot.document.text
+        )
+    }
+    val failure = saveResult.exceptionOrNull()
+    if (failure != null) {
+        workspaceViewModel.failExport(snapshot)
+        val message = when (failure) {
+            is IllegalArgumentException ->
+                failure.message ?: "SKILL.md is not valid and was not saved."
+            is IOException ->
+                failure.message ?: "Could not save the local skill source."
+            else -> throw failure
+        }
+        return@withContext LocalSkillSourceSaveOutcome.Failed(message)
+    }
+
+    val saved = requireNotNull(saveResult.getOrNull())
+    val persistedOrigin = MarkdownWorkspaceOrigin.LocalSkill(
+        name = snapshotOrigin.name,
+        sourceDigest = saved.sourceDigest
+    )
+    LocalSkillSourceSaveOutcome.Saved(
+        name = snapshotOrigin.name,
+        current = workspaceViewModel.completeSourceSave(snapshot, persistedOrigin)
+    )
+}
 
 @Composable
 internal fun LocalSkillWorkspaceSourceBar(
@@ -75,39 +118,20 @@ internal fun LocalSkillWorkspaceSourceBar(
                         return@Button
                     }
                     scope.launch(start = CoroutineStart.UNDISPATCHED) {
-                        withContext(NonCancellable) {
-                            val saveResult = runCatching {
-                                store.replace(
-                                    name = snapshotOrigin.name,
-                                    expectedSourceDigest = snapshotOrigin.sourceDigest,
-                                    source = snapshot.document.text
-                                )
-                            }
-                            val failure = saveResult.exceptionOrNull()
-                            if (failure != null) {
-                                workspaceViewModel.failExport(snapshot)
-                                val message = when (failure) {
-                                    is IllegalArgumentException ->
-                                        failure.message ?: "SKILL.md is not valid and was not saved."
-                                    is IOException ->
-                                        failure.message ?: "Could not save the local skill source."
-                                    else -> throw failure
-                                }
-                                onMessage(message)
-                                return@withContext
-                            }
-
-                            val saved = requireNotNull(saveResult.getOrNull())
-                            val persistedOrigin = MarkdownWorkspaceOrigin.LocalSkill(
-                                name = snapshotOrigin.name,
-                                sourceDigest = saved.sourceDigest
+                        when (
+                            val outcome = persistLocalSkillSource(
+                                store = store,
+                                workspaceViewModel = workspaceViewModel,
+                                snapshot = snapshot,
+                                snapshotOrigin = snapshotOrigin
                             )
-                            val current = workspaceViewModel.completeSourceSave(snapshot, persistedOrigin)
-                            onMessage(
-                                if (current) {
-                                    "Saved '${snapshotOrigin.name}' to local skills."
+                        ) {
+                            is LocalSkillSourceSaveOutcome.Failed -> onMessage(outcome.message)
+                            is LocalSkillSourceSaveOutcome.Saved -> onMessage(
+                                if (outcome.current) {
+                                    "Saved '${outcome.name}' to local skills."
                                 } else {
-                                    "Saved '${snapshotOrigin.name}' snapshot; newer edits remain unsaved."
+                                    "Saved '${outcome.name}' snapshot; newer edits remain unsaved."
                                 }
                             )
                         }
