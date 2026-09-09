@@ -60,7 +60,7 @@ class StructuredTextFormatDetectionTest {
             "application/json/extra",
             "application /json",
             "application/xml;",
-            "application/xml;garbage",
+            MALFORMED_XML_PARAMETER,
             "application/xml;charset=",
             "application/xml;charset=\"unterminated"
         ).forEach { mimeType ->
@@ -72,7 +72,7 @@ class StructuredTextFormatDetectionTest {
         }
         assertNull(detectStructuredTextFormat(null, "application/+json"))
         assertNull(detectStructuredTextFormat(null, "application/xml/extra"))
-        assertNull(detectStructuredTextFormat(null, "application/xml;garbage"))
+        assertNull(detectStructuredTextFormat(null, MALFORMED_XML_PARAMETER))
     }
 
     @Test
@@ -83,7 +83,7 @@ class StructuredTextFormatDetectionTest {
         )
         assertEquals(
             StructuredTextFormat.JSON,
-            detectStructuredTextFormat(SETTINGS_JSON, "application/xml;garbage")
+            detectStructuredTextFormat(SETTINGS_JSON, MALFORMED_XML_PARAMETER)
         )
     }
 
@@ -131,5 +131,6 @@ class StructuredTextFormatDetectionTest {
         const val APPLICATION_OCTET_STREAM = "application/octet-stream"
         const val APPLICATION_YAML = "application/yaml"
         const val TEXT_PLAIN = "text/plain"
+        const val MALFORMED_XML_PARAMETER = "application/xml;garbage"
     }
 }
