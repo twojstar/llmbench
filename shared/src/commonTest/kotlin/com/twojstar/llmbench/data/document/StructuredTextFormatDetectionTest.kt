@@ -23,7 +23,7 @@ class StructuredTextFormatDetectionTest {
         )
         assertEquals(
             StructuredTextFormat.YAML,
-            detectStructuredTextFormat(null, "application/yaml")
+            detectStructuredTextFormat(null, APPLICATION_YAML)
         )
         assertEquals(
             StructuredTextFormat.YAML,
@@ -39,33 +39,33 @@ class StructuredTextFormatDetectionTest {
     fun genericMimeDoesNotOverrideRecognizedExtension() {
         assertEquals(
             StructuredTextFormat.YAML,
-            detectStructuredTextFormat("settings.yaml", "text/plain")
+            detectStructuredTextFormat("settings.yaml", TEXT_PLAIN)
         )
         assertEquals(
             StructuredTextFormat.JSON,
-            detectStructuredTextFormat("settings.json", "application/octet-stream")
+            detectStructuredTextFormat(SETTINGS_JSON, APPLICATION_OCTET_STREAM)
         )
     }
 
     @Test
     fun conflictingSpecificHintsFailClosed() {
-        assertNull(detectStructuredTextFormat("settings.json", "application/xml"))
-        assertNull(detectStructuredTextFormat("settings.xml", "application/yaml"))
+        assertNull(detectStructuredTextFormat(SETTINGS_JSON, "application/xml"))
+        assertNull(detectStructuredTextFormat("settings.xml", APPLICATION_YAML))
     }
 
     @Test
     fun unsupportedOrAmbiguousNamesAreNotContentSniffed() {
         assertNull(detectStructuredTextFormat("README.md", "text/markdown"))
-        assertNull(detectStructuredTextFormat("settings.jsonc", "text/plain"))
+        assertNull(detectStructuredTextFormat("settings.jsonc", TEXT_PLAIN))
         assertNull(detectStructuredTextFormat("document", null))
-        assertNull(detectStructuredTextFormat(null, "application/octet-stream"))
+        assertNull(detectStructuredTextFormat(null, APPLICATION_OCTET_STREAM))
     }
 
     @Test
     fun validateDocumentUsesDetectedFormatAndSkipsUnsupportedFiles() {
         val validJson = validateStructuredTextDocument(
             text = "{\"enabled\":true}",
-            displayName = "settings.json"
+            displayName = SETTINGS_JSON
         )
         val invalidXml = validateStructuredTextDocument(
             text = "<root>",
@@ -83,5 +83,12 @@ class StructuredTextFormatDetectionTest {
                 mimeType = "text/markdown"
             )
         )
+    }
+
+    private companion object {
+        const val SETTINGS_JSON = "settings.json"
+        const val APPLICATION_OCTET_STREAM = "application/octet-stream"
+        const val APPLICATION_YAML = "application/yaml"
+        const val TEXT_PLAIN = "text/plain"
     }
 }
