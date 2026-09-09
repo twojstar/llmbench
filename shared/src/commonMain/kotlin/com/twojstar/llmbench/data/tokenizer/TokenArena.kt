@@ -30,6 +30,9 @@ data class TokenArenaVariant(
         require(id.isNotBlank()) { "Token Arena variant id must not be blank" }
         require(label.isNotBlank()) { "Token Arena variant label must not be blank" }
     }
+
+    val promptFingerprint: String
+        get() = stablePromptFingerprint(prompt)
 }
 
 /**
@@ -41,6 +44,7 @@ data class TokenArenaVariant(
 @Serializable
 data class TokenArenaTokenMeasurement(
     val variantId: String,
+    val promptFingerprint: String,
     val tokens: Long,
     val mode: TokenMeasurementMode,
     val backendLabel: String,
@@ -50,6 +54,7 @@ data class TokenArenaTokenMeasurement(
 ) {
     init {
         require(variantId.isNotBlank()) { "Token measurement variant id must not be blank" }
+        require(promptFingerprint.isNotBlank()) { "Token measurement prompt fingerprint must not be blank" }
         require(tokens >= 0) { "Token count must not be negative" }
         require(backendLabel.isNotBlank()) { "Token measurement backend label must not be blank" }
         if (mode == TokenMeasurementMode.LOCAL_EXACT_ENCODING) {
@@ -69,6 +74,7 @@ data class TokenArenaTokenMeasurement(
 @Serializable
 data class TokenArenaResponseObservation(
     val variantId: String,
+    val promptFingerprint: String,
     val providerId: String,
     val modelName: String,
     val provenance: ArenaResponseProvenance,
@@ -82,6 +88,7 @@ data class TokenArenaResponseObservation(
 ) {
     init {
         require(variantId.isNotBlank()) { "Arena response variant id must not be blank" }
+        require(promptFingerprint.isNotBlank()) { "Arena response prompt fingerprint must not be blank" }
         require(providerId.isNotBlank()) { "Arena response provider id must not be blank" }
         require(modelName.isNotBlank()) { "Arena response model name must not be blank" }
         require(latencyMs == null || latencyMs >= 0) { "Arena response latency must not be negative" }
@@ -100,16 +107,17 @@ data class TokenArenaResponseObservation(
 /**
  * Portable, serializable record for one reproducible Token Arena experiment.
  *
- * This model does not imply persistence. Callers must make any durable storage/export explicit,
- * because prompt text and provider responses may contain sensitive user data.
+ * Public construction snapshots every collection so callers cannot mutate an experiment through a
+ * retained MutableList alias. Prompt fingerprints bind recorded results to the exact variant text.
+ * This model does not imply persistence; durable storage/export must remain explicit.
  */
 @Serializable
-data class TokenArenaExperiment(
+class TokenArenaExperiment private constructor(
     val id: String,
     val intentLabel: String,
     val variants: List<TokenArenaVariant>,
-    val tokenMeasurements: List<TokenArenaTokenMeasurement> = emptyList(),
-    val responseObservations: List<TokenArenaResponseObservation> = emptyList()
+    val tokenMeasurements: List<TokenArenaTokenMeasurement>,
+    val responseObservations: List<TokenArenaResponseObservation>
 ) {
     init {
         require(id.isNotBlank()) { "Token Arena experiment id must not be blank" }
@@ -120,13 +128,35 @@ data class TokenArenaExperiment(
         require(variantIds.toSet().size == variantIds.size) {
             "Token Arena variant ids must be unique"
         }
-        val knownVariantIds = variantIds.toSet()
-        require(tokenMeasurements.all { it.variantId in knownVariantIds }) {
-            "Every token measurement must reference a known variant"
+        val promptFingerprints = variants.associate { variant ->
+            variant.id to variant.promptFingerprint
         }
-        require(responseObservations.all { it.variantId in knownVariantIds }) {
-            "Every response observation must reference a known variant"
+        require(tokenMeasurements.all { measurement ->
+            promptFingerprints[measurement.variantId] == measurement.promptFingerprint
+        }) {
+            "Every token measurement must reference the current prompt version of a known variant"
         }
+        require(responseObservations.all { observation ->
+            promptFingerprints[observation.variantId] == observation.promptFingerprint
+        }) {
+            "Every response observation must reference the current prompt version of a known variant"
+        }
+    }
+
+    companion object {
+        fun create(
+            id: String,
+            intentLabel: String,
+            variants: List<TokenArenaVariant>,
+            tokenMeasurements: List<TokenArenaTokenMeasurement> = emptyList(),
+            responseObservations: List<TokenArenaResponseObservation> = emptyList()
+        ): TokenArenaExperiment = TokenArenaExperiment(
+            id = id,
+            intentLabel = intentLabel,
+            variants = variants.toList(),
+            tokenMeasurements = tokenMeasurements.toList(),
+            responseObservations = responseObservations.toList()
+        )
     }
 }
 
@@ -139,8 +169,20 @@ fun TokenCounter.measureForArena(
     backendLabel: String
 ): TokenArenaTokenMeasurement = TokenArenaTokenMeasurement(
     variantId = variant.id,
+    promptFingerprint = variant.promptFingerprint,
     tokens = count(variant.prompt).toLong(),
     mode = TokenMeasurementMode.LOCAL_EXACT_ENCODING,
     backendLabel = backendLabel,
     encodingLabel = encodingLabel
 )
+
+/** Stable non-security fingerprint used only to detect accidental stale prompt/result associations. */
+internal fun stablePromptFingerprint(prompt: String): String {
+    val bytes = prompt.encodeToByteArray()
+    var hash = -3750763034362895579L // FNV-1a 64-bit offset basis in signed Long form.
+    bytes.forEach { byte ->
+        hash = hash xor (byte.toLong() and 0xffL)
+        hash *= 1099511628211L
+    }
+    return "${bytes.size}:${hash.toULong().toString(16).padStart(16, '0')}"
+}
