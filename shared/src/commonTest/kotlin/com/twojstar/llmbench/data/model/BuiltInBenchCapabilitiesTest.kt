@@ -3,6 +3,7 @@ package com.twojstar.llmbench.data.model
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNotSame
 import kotlin.test.assertTrue
 
 class BuiltInBenchCapabilitiesTest {
@@ -49,13 +50,13 @@ class BuiltInBenchCapabilitiesTest {
     }
 
     @Test
-    fun capabilityCallsDoNotExposeMutableRegistryState() {
+    fun capabilityCallsReturnIndependentCollectionSnapshots() {
         val first = BuiltInBenchTool.DOCBENCH_DOCUMENT.capabilities()
-        (first.inputs as? MutableSet<BenchToolDataKind>)?.clear()
-        (first.surfaces as? MutableSet<BenchToolSurface>)?.clear()
-
         val second = BuiltInBenchTool.DOCBENCH_DOCUMENT.capabilities()
-        assertTrue(BenchToolDataKind.DOCUMENT in second.inputs)
-        assertTrue(BenchToolSurface.NATIVE_CHAT in second.surfaces)
+
+        assertEquals(first.inputs, second.inputs)
+        assertEquals(first.surfaces, second.surfaces)
+        assertNotSame(first.inputs, second.inputs)
+        assertNotSame(first.surfaces, second.surfaces)
     }
 }
