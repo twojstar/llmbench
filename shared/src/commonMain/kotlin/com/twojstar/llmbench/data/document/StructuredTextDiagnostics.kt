@@ -99,35 +99,37 @@ object StructuredTextDiagnostics {
      * so aliases still have to refer to a previously defined anchor. StreamReader enforces the
      * bounded code-point limit before imported input can consume unbounded parser memory.
      */
-    private fun validateYaml(text: String): StructuredTextValidationResult = try {
-        val settings = LoadSettings(
-            label = "LlmBench document",
-            codePointLimit = MAX_YAML_CODE_POINTS
-        )
-        val parser = ParserImpl(settings, StreamReader(settings, text))
-        val anchors = mutableSetOf<Any>()
-        while (parser.hasNext()) {
-            val event = parser.next()
-            when {
-                event.eventId == Event.ID.DocumentStart -> anchors.clear()
-                event is AliasEvent -> {
-                    val anchor = event.anchor
-                    if (anchor == null || anchor !in anchors) {
-                        return StructuredTextValidationResult(
-                            format = StructuredTextFormat.YAML,
-                            errorMessage = "YAML alias references an undefined anchor."
-                        )
+    private fun validateYaml(text: String): StructuredTextValidationResult {
+        return try {
+            val settings = LoadSettings(
+                label = "LlmBench document",
+                codePointLimit = MAX_YAML_CODE_POINTS
+            )
+            val parser = ParserImpl(settings, StreamReader(settings, text))
+            val anchors = mutableSetOf<Any>()
+            while (parser.hasNext()) {
+                val event = parser.next()
+                when {
+                    event.eventId == Event.ID.DocumentStart -> anchors.clear()
+                    event is AliasEvent -> {
+                        val anchor = event.anchor
+                        if (anchor == null || anchor !in anchors) {
+                            return StructuredTextValidationResult(
+                                format = StructuredTextFormat.YAML,
+                                errorMessage = "YAML alias references an undefined anchor."
+                            )
+                        }
                     }
+                    event is NodeEvent -> event.anchor?.let(anchors::add)
                 }
-                event is NodeEvent -> event.anchor?.let(anchors::add)
             }
+            StructuredTextValidationResult(StructuredTextFormat.YAML)
+        } catch (error: YamlEngineException) {
+            StructuredTextValidationResult(
+                format = StructuredTextFormat.YAML,
+                errorMessage = error.message ?: "Invalid YAML."
+            )
         }
-        StructuredTextValidationResult(StructuredTextFormat.YAML)
-    } catch (error: YamlEngineException) {
-        StructuredTextValidationResult(
-            format = StructuredTextFormat.YAML,
-            errorMessage = error.message ?: "Invalid YAML."
-        )
     }
 
     private data class StrictJsonInspection(
