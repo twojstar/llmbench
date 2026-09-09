@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<full-backup-content>
+    <!--
+        Back up only deliberately non-sensitive continuity preferences on Android 11 and lower.
+        Studio profiles/instructions, encrypted API-key ciphertext, provider sessions, imported files,
+        skills and recovery data stay device-local.
+    -->
+    <include domain="sharedpref" path="web_chat_preferences.xml" />
+</full-backup-content>
