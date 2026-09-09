@@ -175,11 +175,14 @@ internal class LocalSkillLibraryStore(
                 throw LocalSkillSourceConflictException(existingName)
             }
 
+            // Capture ancestry before retiring the destination key from older tombstones.
+            // This keeps rollback valid before the new commit point without allowing the old
+            // target to tombstone a newly committed rename-back destination.
+            val inheritedSources = validCommittedRenameMarker(existingDirectory)
+                ?.sourceDirectoryNames
+                .orEmpty()
             val targetDirectory = storageDirectory(newName)
-            retireTombstoneReservationForReuse(
-                storageDirectoryName = targetDirectory.name,
-                excludingTargetDirectory = existingDirectory
-            )
+            retireTombstoneReservationForReuse(targetDirectory.name)
             if (targetDirectory.exists()) {
                 val target = readStoredDocument(targetDirectory)
                 if (target != null) throw LocalSkillAlreadyExistsException(newName)
@@ -191,9 +194,6 @@ internal class LocalSkillLibraryStore(
                 validateRuntimeBudgetFor(parsed.manifest, excludeName = existingName)
             }
 
-            val inheritedSources = validCommittedRenameMarker(existingDirectory)
-                ?.sourceDirectoryNames
-                .orEmpty()
             val renamedSources = (inheritedSources + existingDirectory.name)
                 .distinct()
                 .filterNot { it == targetDirectory.name }
@@ -384,13 +384,9 @@ internal class LocalSkillLibraryStore(
         }
     }
 
-    private suspend fun retireTombstoneReservationForReuse(
-        storageDirectoryName: String,
-        excludingTargetDirectory: File? = null
-    ) {
+    private suspend fun retireTombstoneReservationForReuse(storageDirectoryName: String) {
         val directories = withContext(Dispatchers.IO) { storageDirectories() }
         directories.forEach { candidate ->
-            if (candidate == excludingTargetDirectory) return@forEach
             val marker = validCommittedRenameMarker(candidate) ?: return@forEach
             if (storageDirectoryName !in marker.sourceDirectoryNames) return@forEach
             if (candidate.name == storageDirectoryName) {
