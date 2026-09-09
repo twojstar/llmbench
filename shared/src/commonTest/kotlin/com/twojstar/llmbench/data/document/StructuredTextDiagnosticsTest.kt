@@ -77,6 +77,18 @@ class StructuredTextDiagnosticsTest {
     }
 
     @Test
+    fun jsonFormattingStopsBeforeIndentationCanBalloonOutput() {
+        val payload = List(35_000) { "0" }.joinToString(",")
+        val source = "[".repeat(128) + payload + "]".repeat(128)
+        val result = StructuredTextDiagnostics.formatJson(source)
+
+        assertFalse(result.isSuccess)
+        assertFalse(result.changed)
+        assertEquals(source, result.text)
+        assertTrue(result.errorMessage.orEmpty().contains("limit", ignoreCase = true))
+    }
+
+    @Test
     fun yamlSyntaxValidationAcceptsAnchorsEmptyDocumentsAndComplexKeys() {
         listOf(
             "name: LlmBench\nitems:\n  - one\n  - two\n",
@@ -85,13 +97,30 @@ class StructuredTextDiagnosticsTest {
             "---\n...\n",
             "?\n: null-key\n",
             "? [one, two]\n: sequence-key\n",
-            "? {one: 1, two: 2}\n: mapping-key\n"
+            "? {one: 1, two: 2}\n: mapping-key\n",
+            "---\nbase: &item one\ncopy: *item\n---\nbase: &item two\ncopy: *item\n"
         ).forEach { source ->
             assertTrue(
                 StructuredTextDiagnostics.validate(source, StructuredTextFormat.YAML).isValid,
                 source
             )
         }
+    }
+
+    @Test
+    fun yamlAliasesMustReferenceAnchorsFromTheSameDocument() {
+        assertFalse(
+            StructuredTextDiagnostics.validate(
+                "copy: *missing\n",
+                StructuredTextFormat.YAML
+            ).isValid
+        )
+        assertFalse(
+            StructuredTextDiagnostics.validate(
+                "---\nbase: &item one\ncopy: *item\n---\ncopy: *item\n",
+                StructuredTextFormat.YAML
+            ).isValid
+        )
     }
 
     @Test
