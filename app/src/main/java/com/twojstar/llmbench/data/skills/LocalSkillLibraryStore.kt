@@ -247,9 +247,11 @@ internal class LocalSkillLibraryStore(
         val directory = storageDirectory(name)
         cleanupCommittedRenameSources(directory)
         val marker = committedRenameMarker(directory)
-        val hasRemainingSources = marker?.sourceDirectoryNames?.any { sourceName ->
-            File(rootDirectory, sourceName).exists()
-        } == true
+        val hasRemainingSources = withContext(Dispatchers.IO) {
+            marker?.sourceDirectoryNames?.any { sourceName ->
+                File(rootDirectory, sourceName).exists()
+            } == true
+        }
         if (hasRemainingSources) {
             throw IOException("Could not remove local skill '$name' while rename cleanup is pending.")
         }
@@ -336,7 +338,8 @@ internal class LocalSkillLibraryStore(
         val directories = withContext(Dispatchers.IO) { storageDirectories() }
         directories.forEach { targetDirectory ->
             val markerFile = File(targetDirectory, RENAME_FROM_FILE_NAME)
-            if (!markerFile.isFile) return@forEach
+            val markerPresent = withContext(Dispatchers.IO) { markerFile.isFile }
+            if (!markerPresent) return@forEach
             val marker = readRenameMarker(markerFile)
             when {
                 marker == null -> withContext(Dispatchers.IO) { deleteDirectory(targetDirectory) }
@@ -403,7 +406,8 @@ internal class LocalSkillLibraryStore(
     ): LocalSkillDocument? {
         if (!includeRenameTargets) {
             val markerFile = File(directory, RENAME_FROM_FILE_NAME)
-            if (markerFile.isFile) {
+            val markerPresent = withContext(Dispatchers.IO) { markerFile.isFile }
+            if (markerPresent) {
                 val marker = readRenameMarker(markerFile)
                 if (marker == null || !marker.committed) return null
             }
@@ -424,17 +428,22 @@ internal class LocalSkillLibraryStore(
         )
     }
 
-    private fun committedRenameMarker(directory: File): RenameMarker? {
+    private suspend fun committedRenameMarker(directory: File): RenameMarker? = withContext(Dispatchers.IO) {
         val markerFile = File(directory, RENAME_FROM_FILE_NAME)
-        if (!markerFile.isFile) return null
-        return readRenameMarkerSync(markerFile)?.takeIf(RenameMarker::committed)
+        if (!markerFile.isFile) return@withContext null
+        readRenameMarkerSync(markerFile)?.takeIf(RenameMarker::committed)
     }
 
-    private fun isCommittedRenameSourceDirectory(directory: File): Boolean =
-        storageDirectories().any { candidate ->
-            committedRenameMarker(candidate)
-                ?.sourceDirectoryNames
-                ?.contains(directory.name) == true
+    private suspend fun isCommittedRenameSourceDirectory(directory: File): Boolean =
+        withContext(Dispatchers.IO) {
+            storageDirectories().any { candidate ->
+                val markerFile = File(candidate, RENAME_FROM_FILE_NAME)
+                if (!markerFile.isFile) return@any false
+                readRenameMarkerSync(markerFile)
+                    ?.takeIf(RenameMarker::committed)
+                    ?.sourceDirectoryNames
+                    ?.contains(directory.name) == true
+            }
         }
 
     private suspend fun readRenameMarker(markerFile: File): RenameMarker? = withContext(Dispatchers.IO) {
