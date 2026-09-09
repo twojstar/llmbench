@@ -226,12 +226,24 @@ internal object ProviderWebTweakRegistry {
         WebAiService.ZAI
     )
 
-    private val topLevelNavigationAuthHosts = verifiedTopLevelNavigationServices
+    private fun identityAuthHostsForNavigation(
+        service: WebAiService,
+        navigationVerified: Boolean
+    ): Set<String> {
+        if (!navigationVerified) return emptySet()
+        return service.onboardingCapabilities().preferredIdentityMethods
+            .flatMap { method -> identityAuthHosts[method].orEmpty() }
+            .toSet()
+    }
+
+    private val topLevelNavigationAuthHosts = WebAiService.entries
         .associateWith { service ->
-            service.onboardingCapabilities().preferredIdentityMethods
-                .flatMap { method -> identityAuthHosts[method].orEmpty() }
-                .toSet()
+            identityAuthHostsForNavigation(
+                service = service,
+                navigationVerified = service in verifiedTopLevelNavigationServices
+            )
         }
+        .filterValues { it.isNotEmpty() }
 
     private val providerTweaks = WebAiService.entries.associateWith { service ->
         when (service) {
@@ -276,6 +288,11 @@ internal object ProviderWebTweakRegistry {
 
     fun topLevelNavigationAuthHosts(service: WebAiService): Set<String> =
         topLevelNavigationAuthHosts[service].orEmpty()
+
+    fun identityAuthHostsForNavigationTest(
+        service: WebAiService,
+        navigationVerified: Boolean
+    ): Set<String> = identityAuthHostsForNavigation(service, navigationVerified)
 
     fun forProvider(service: WebAiService): List<ProviderWebTweak> =
         providerTweaks[service].orEmpty()
