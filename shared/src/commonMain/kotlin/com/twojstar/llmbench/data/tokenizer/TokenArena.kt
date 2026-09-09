@@ -77,7 +77,8 @@ data class TokenArenaResponseObservation(
     val responseLengthChars: Int? = null,
     val qualityScore: Double? = null,
     val pricingSnapshotLabel: String? = null,
-    val isError: Boolean = false
+    val isError: Boolean = false,
+    val isPartial: Boolean = false
 ) {
     init {
         require(variantId.isNotBlank()) { "Arena response variant id must not be blank" }
@@ -93,7 +94,7 @@ data class TokenArenaResponseObservation(
     }
 
     val canEnterLiveEfficiencyRanking: Boolean
-        get() = provenance == ArenaResponseProvenance.LIVE_PROVIDER && !isError
+        get() = provenance == ArenaResponseProvenance.LIVE_PROVIDER && !isError && !isPartial
 }
 
 /**
@@ -129,14 +130,16 @@ data class TokenArenaExperiment(
     }
 }
 
-/** Convert any exact local [TokenCounter] into an explicitly encoding-scoped Arena measurement. */
+/**
+ * Convert an exact local [TokenCounter] into an explicitly encoding-scoped Arena measurement.
+ * The recorded variant and counted prompt are one object so stale text cannot be attributed to it.
+ */
 fun TokenCounter.measureForArena(
-    variantId: String,
-    text: String,
+    variant: TokenArenaVariant,
     backendLabel: String
 ): TokenArenaTokenMeasurement = TokenArenaTokenMeasurement(
-    variantId = variantId,
-    tokens = count(text).toLong(),
+    variantId = variant.id,
+    tokens = count(variant.prompt).toLong(),
     mode = TokenMeasurementMode.LOCAL_EXACT_ENCODING,
     backendLabel = backendLabel,
     encodingLabel = encodingLabel
