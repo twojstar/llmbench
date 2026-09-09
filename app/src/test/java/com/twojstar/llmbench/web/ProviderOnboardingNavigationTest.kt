@@ -3,7 +3,6 @@ package com.twojstar.llmbench.web
 import com.twojstar.llmbench.data.model.WebAiService
 import com.twojstar.llmbench.data.model.onboardingCapabilities
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -23,11 +22,11 @@ class ProviderOnboardingNavigationTest {
     @Test
     fun identityMetadataAloneCannotProduceAndroidAuthHosts() {
         assertTrue(WebAiService.QWEN.onboardingCapabilities().hasIdentityAssistedPath)
-        assertFalse(
-            ProviderWebTweakRegistry.identityAuthHostsForNavigationTest(
+        assertTrue(
+            ProviderWebTweakRegistry.identityAuthHostsForNavigation(
                 service = WebAiService.QWEN,
                 navigationVerified = false
-            ).isNotEmpty()
+            ).isEmpty()
         )
     }
 
