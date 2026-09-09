@@ -13,11 +13,17 @@ import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
 
+data class MarkdownWorkspaceRecoverySource(
+    val localSkillName: String,
+    val sourceDigest: String
+)
+
 data class MarkdownWorkspaceRecoverySnapshot(
     val text: String,
     val hadUtf8Bom: Boolean,
     val displayName: String,
-    val isDirty: Boolean
+    val isDirty: Boolean,
+    val source: MarkdownWorkspaceRecoverySource? = null
 )
 
 internal class MarkdownWorkspaceRecoveryStore(
@@ -51,6 +57,12 @@ internal class MarkdownWorkspaceRecoveryStore(
                 data.writeBoolean(snapshot.hadUtf8Bom)
                 data.writeSizedString(snapshot.displayName, MAX_METADATA_BYTES)
                 data.writeBoolean(snapshot.isDirty)
+                val source = snapshot.source
+                data.writeBoolean(source != null)
+                if (source != null) {
+                    data.writeSizedString(source.localSkillName, MAX_METADATA_BYTES)
+                    data.writeSizedString(source.sourceDigest, MAX_DIGEST_BYTES)
+                }
                 data.flush()
                 atomicFile.finishWrite(stream)
                 output = null
@@ -63,12 +75,27 @@ internal class MarkdownWorkspaceRecoveryStore(
 
     private fun decode(bytes: ByteArray): MarkdownWorkspaceRecoverySnapshot? = try {
         DataInputStream(ByteArrayInputStream(bytes)).use { input ->
-            if (input.readInt() != MAGIC || input.readInt() != VERSION) return null
+            if (input.readInt() != MAGIC) return null
+            val version = input.readInt()
+            if (version !in LEGACY_VERSION..VERSION) return null
+            val text = input.readSizedString(MAX_TEXT_BYTES)
+            val hadUtf8Bom = input.readBoolean()
+            val displayName = input.readSizedString(MAX_METADATA_BYTES)
+            val isDirty = input.readBoolean()
+            val source = if (version >= VERSION && input.readBoolean()) {
+                MarkdownWorkspaceRecoverySource(
+                    localSkillName = input.readSizedString(MAX_METADATA_BYTES),
+                    sourceDigest = input.readSizedString(MAX_DIGEST_BYTES)
+                )
+            } else {
+                null
+            }
             MarkdownWorkspaceRecoverySnapshot(
-                text = input.readSizedString(MAX_TEXT_BYTES),
-                hadUtf8Bom = input.readBoolean(),
-                displayName = input.readSizedString(MAX_METADATA_BYTES),
-                isDirty = input.readBoolean()
+                text = text,
+                hadUtf8Bom = hadUtf8Bom,
+                displayName = displayName,
+                isDirty = isDirty,
+                source = source
             )
         }
     } catch (_: IOException) {
@@ -92,9 +119,11 @@ internal class MarkdownWorkspaceRecoveryStore(
 
     private companion object {
         const val MAGIC = 0x4C4D4257
-        const val VERSION = 2
+        const val LEGACY_VERSION = 2
+        const val VERSION = 3
         const val FILE_NAME = "markdown-workspace-recovery-v2.bin"
         const val MAX_TEXT_BYTES = MarkdownDocumentFileAccess.MAX_DOCUMENT_BYTES
         const val MAX_METADATA_BYTES = 256 * 1024
+        const val MAX_DIGEST_BYTES = 128
     }
 }
