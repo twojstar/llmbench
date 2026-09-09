@@ -34,6 +34,7 @@ import com.twojstar.llmbench.ui.viewmodel.MarkdownWorkspaceOrigin
 import com.twojstar.llmbench.ui.viewmodel.MarkdownWorkspaceViewModel
 import java.io.File
 import java.io.IOException
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.launch
@@ -48,6 +49,11 @@ internal sealed interface LocalSkillSourceSaveOutcome {
     ) : LocalSkillSourceSaveOutcome
     data class Failed(val message: String) : LocalSkillSourceSaveOutcome
 }
+
+private data class ConfirmedLocalSkillRename(
+    val snapshot: MarkdownExportSnapshot,
+    val origin: MarkdownWorkspaceOrigin.LocalSkill
+)
 
 internal suspend fun persistLocalSkillSource(
     store: LocalSkillLibraryStore,
@@ -134,6 +140,80 @@ private fun localSkillSaveFailureMessage(failure: Throwable): String = when (fai
     else -> throw failure
 }
 
+private fun routeLocalSkillSourceSaveOutcome(
+    outcome: LocalSkillSourceSaveOutcome,
+    onMessage: (String) -> Unit,
+    onRenameRequired: (LocalSkillSourceSaveOutcome.RenameRequired) -> Unit
+) {
+    when (outcome) {
+        is LocalSkillSourceSaveOutcome.Failed -> onMessage(outcome.message)
+        is LocalSkillSourceSaveOutcome.RenameRequired -> onRenameRequired(outcome)
+        is LocalSkillSourceSaveOutcome.Saved -> onMessage(
+            if (outcome.current) {
+                "Saved '${outcome.name}' to local skills."
+            } else {
+                "Saved '${outcome.name}' snapshot; newer edits remain unsaved."
+            }
+        )
+    }
+}
+
+private fun prepareConfirmedLocalSkillRename(
+    workspaceViewModel: MarkdownWorkspaceViewModel,
+    rename: LocalSkillSourceSaveOutcome.RenameRequired
+): ConfirmedLocalSkillRename? {
+    val snapshot = workspaceViewModel.beginExport() ?: return null
+    val origin = snapshot.origin as? MarkdownWorkspaceOrigin.LocalSkill
+    if (
+        origin == null ||
+        origin.name != rename.existingName ||
+        snapshot.revision != rename.revision
+    ) {
+        workspaceViewModel.failExport(snapshot)
+        return null
+    }
+    return ConfirmedLocalSkillRename(snapshot = snapshot, origin = origin)
+}
+
+private fun CoroutineScope.launchLocalSkillSourceSave(
+    store: LocalSkillLibraryStore,
+    workspaceViewModel: MarkdownWorkspaceViewModel,
+    onOutcome: (LocalSkillSourceSaveOutcome) -> Unit
+) {
+    val snapshot = workspaceViewModel.beginExport() ?: return
+    val origin = snapshot.origin as? MarkdownWorkspaceOrigin.LocalSkill
+    if (origin == null) {
+        workspaceViewModel.failExport(snapshot)
+        return
+    }
+    launch(start = CoroutineStart.UNDISPATCHED) {
+        onOutcome(
+            persistLocalSkillSource(
+                store = store,
+                workspaceViewModel = workspaceViewModel,
+                snapshot = snapshot,
+                snapshotOrigin = origin
+            )
+        )
+    }
+}
+
+private fun CoroutineScope.launchConfirmedLocalSkillRename(
+    store: LocalSkillLibraryStore,
+    workspaceViewModel: MarkdownWorkspaceViewModel,
+    confirmed: ConfirmedLocalSkillRename,
+    onOutcome: (LocalSkillSourceSaveOutcome) -> Unit
+) = launch(start = CoroutineStart.UNDISPATCHED) {
+    onOutcome(
+        persistLocalSkillRename(
+            store = store,
+            workspaceViewModel = workspaceViewModel,
+            snapshot = confirmed.snapshot,
+            snapshotOrigin = confirmed.origin
+        )
+    )
+}
+
 @Composable
 internal fun LocalSkillWorkspaceSourceBar(
     workspaceViewModel: MarkdownWorkspaceViewModel,
@@ -149,21 +229,54 @@ internal fun LocalSkillWorkspaceSourceBar(
         )
     }
     var pendingRename by remember { mutableStateOf<LocalSkillSourceSaveOutcome.RenameRequired?>(null) }
-
-    fun showSaveOutcome(outcome: LocalSkillSourceSaveOutcome) {
-        when (outcome) {
-            is LocalSkillSourceSaveOutcome.Failed -> onMessage(outcome.message)
-            is LocalSkillSourceSaveOutcome.RenameRequired -> pendingRename = outcome
-            is LocalSkillSourceSaveOutcome.Saved -> onMessage(
-                if (outcome.current) {
-                    "Saved '${outcome.name}' to local skills."
-                } else {
-                    "Saved '${outcome.name}' snapshot; newer edits remain unsaved."
-                }
-            )
-        }
+    val onOutcome: (LocalSkillSourceSaveOutcome) -> Unit = { outcome ->
+        routeLocalSkillSourceSaveOutcome(
+            outcome = outcome,
+            onMessage = onMessage,
+            onRenameRequired = { pendingRename = it }
+        )
     }
 
+    LocalSkillSourceBarContent(
+        skillName = origin.name,
+        saveEnabled = uiState.isDirty && !uiState.isBusy && !uiState.isLargeDocumentReadOnly,
+        onSave = {
+            scope.launchLocalSkillSourceSave(
+                store = store,
+                workspaceViewModel = workspaceViewModel,
+                onOutcome = onOutcome
+            )
+        }
+    )
+
+    pendingRename?.let { rename ->
+        ConfirmLocalSkillRenameDialog(
+            rename = rename,
+            onDismiss = { pendingRename = null },
+            onConfirm = {
+                pendingRename = null
+                val confirmed = prepareConfirmedLocalSkillRename(workspaceViewModel, rename)
+                if (confirmed == null) {
+                    onMessage("Local skill source changed before rename confirmation. Try Save source again.")
+                } else {
+                    scope.launchConfirmedLocalSkillRename(
+                        store = store,
+                        workspaceViewModel = workspaceViewModel,
+                        confirmed = confirmed,
+                        onOutcome = onOutcome
+                    )
+                }
+            }
+        )
+    }
+}
+
+@Composable
+private fun LocalSkillSourceBarContent(
+    skillName: String,
+    saveEnabled: Boolean,
+    onSave: () -> Unit
+) {
     Surface(
         tonalElevation = 2.dp,
         modifier = Modifier.fillMaxWidth()
@@ -176,31 +289,14 @@ internal fun LocalSkillWorkspaceSourceBar(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                text = "Local skill: ${origin.name}",
+                text = "Local skill: $skillName",
                 style = MaterialTheme.typography.labelLarge,
                 modifier = Modifier.weight(1f)
             )
             Spacer(Modifier.width(12.dp))
             Button(
-                enabled = uiState.isDirty && !uiState.isBusy && !uiState.isLargeDocumentReadOnly,
-                onClick = {
-                    val snapshot = workspaceViewModel.beginExport() ?: return@Button
-                    val snapshotOrigin = snapshot.origin as? MarkdownWorkspaceOrigin.LocalSkill
-                    if (snapshotOrigin == null) {
-                        workspaceViewModel.failExport(snapshot)
-                        return@Button
-                    }
-                    scope.launch(start = CoroutineStart.UNDISPATCHED) {
-                        showSaveOutcome(
-                            persistLocalSkillSource(
-                                store = store,
-                                workspaceViewModel = workspaceViewModel,
-                                snapshot = snapshot,
-                                snapshotOrigin = snapshotOrigin
-                            )
-                        )
-                    }
-                },
+                enabled = saveEnabled,
+                onClick = onSave,
                 modifier = Modifier.testTag("save_local_skill_source")
             ) {
                 Icon(Icons.Default.Save, contentDescription = null)
@@ -209,54 +305,35 @@ internal fun LocalSkillWorkspaceSourceBar(
             }
         }
     }
+}
 
-    pendingRename?.let { rename ->
-        AlertDialog(
-            onDismissRequest = { pendingRename = null },
-            title = { Text("Rename '${rename.existingName}'?") },
-            text = {
-                Text(
-                    "The edited SKILL.md changes its portable skill name to '${rename.newName}'. " +
-                        "Rename the local skill and keep its current enabled/disabled state?"
-                )
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        pendingRename = null
-                        val snapshot = workspaceViewModel.beginExport()
-                        val snapshotOrigin = snapshot?.origin as? MarkdownWorkspaceOrigin.LocalSkill
-                        if (
-                            snapshot == null ||
-                            snapshotOrigin == null ||
-                            snapshotOrigin.name != rename.existingName ||
-                            snapshot.revision != rename.revision
-                        ) {
-                            snapshot?.let(workspaceViewModel::failExport)
-                            onMessage("Local skill source changed before rename confirmation. Try Save source again.")
-                            return@Button
-                        }
-                        scope.launch(start = CoroutineStart.UNDISPATCHED) {
-                            showSaveOutcome(
-                                persistLocalSkillRename(
-                                    store = store,
-                                    workspaceViewModel = workspaceViewModel,
-                                    snapshot = snapshot,
-                                    snapshotOrigin = snapshotOrigin
-                                )
-                            )
-                        }
-                    },
-                    modifier = Modifier.testTag("confirm_local_skill_rename")
-                ) {
-                    Text("Rename")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { pendingRename = null }) {
-                    Text("Cancel")
-                }
+@Composable
+private fun ConfirmLocalSkillRenameDialog(
+    rename: LocalSkillSourceSaveOutcome.RenameRequired,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Rename '${rename.existingName}'?") },
+        text = {
+            Text(
+                "The edited SKILL.md changes its portable skill name to '${rename.newName}'. " +
+                    "Rename the local skill and keep its current enabled/disabled state?"
+            )
+        },
+        confirmButton = {
+            Button(
+                onClick = onConfirm,
+                modifier = Modifier.testTag("confirm_local_skill_rename")
+            ) {
+                Text("Rename")
             }
-        )
-    }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
 }
