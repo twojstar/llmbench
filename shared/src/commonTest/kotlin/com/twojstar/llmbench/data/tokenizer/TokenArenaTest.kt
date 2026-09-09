@@ -106,8 +106,11 @@ class TokenArenaTest {
 
         variants.clear()
         measurements.clear()
-        (experiment.variants as? MutableList<TokenArenaVariant>)?.clear()
-        (experiment.tokenMeasurements as? MutableList<TokenArenaTokenMeasurement>)?.clear()
+
+        val exposedVariants = experiment.variants
+        val exposedMeasurements = experiment.tokenMeasurements
+        runCatching { (exposedVariants as? MutableList<TokenArenaVariant>)?.clear() }
+        runCatching { (exposedMeasurements as? MutableList<TokenArenaTokenMeasurement>)?.clear() }
 
         assertEquals(listOf(variant), experiment.variants)
         assertEquals(1, experiment.tokenMeasurements.size)
