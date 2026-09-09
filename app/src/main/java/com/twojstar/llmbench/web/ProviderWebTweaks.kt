@@ -218,13 +218,20 @@ internal object ProviderWebTweakRegistry {
         ProviderIdentityMethod.MICROSOFT to setOf("login.live.com", "login.microsoftonline.com")
     )
 
-    private val topLevelNavigationAuthHosts = WebAiService.entries
+    // This Android-specific allowlist means the complete top-level redirect boundary has been
+    // verified for the provider. Portable identity metadata alone must never enable this policy.
+    private val verifiedTopLevelNavigationServices = setOf(
+        WebAiService.QWEN,
+        WebAiService.COPILOT,
+        WebAiService.ZAI
+    )
+
+    private val topLevelNavigationAuthHosts = verifiedTopLevelNavigationServices
         .associateWith { service ->
             service.onboardingCapabilities().preferredIdentityMethods
                 .flatMap { method -> identityAuthHosts[method].orEmpty() }
                 .toSet()
         }
-        .filterValues { it.isNotEmpty() }
 
     private val providerTweaks = WebAiService.entries.associateWith { service ->
         when (service) {
@@ -265,7 +272,7 @@ internal object ProviderWebTweakRegistry {
     }
 
     fun hasVerifiedTopLevelNavigationPolicy(service: WebAiService): Boolean =
-        service in topLevelNavigationAuthHosts
+        service in verifiedTopLevelNavigationServices
 
     fun topLevelNavigationAuthHosts(service: WebAiService): Set<String> =
         topLevelNavigationAuthHosts[service].orEmpty()
