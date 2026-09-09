@@ -2,9 +2,6 @@ package com.twojstar.llmbench.data.document
 
 import com.charleskorn.kaml.Yaml
 import com.charleskorn.kaml.YamlException
-import kotlinx.serialization.SerializationException
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonElement
 
 /** Structured text syntaxes currently validated by the portable document core. */
 enum class StructuredTextFormat {
@@ -37,8 +34,6 @@ data class StructuredTextFormatResult(
  * syntax without knowingly weakening fidelity.
  */
 object StructuredTextDiagnostics {
-    private val prettyJson = Json { prettyPrint = true }
-
     fun validate(text: String, format: StructuredTextFormat): StructuredTextValidationResult =
         when (format) {
             StructuredTextFormat.JSON -> validateJson(text)
@@ -47,7 +42,7 @@ object StructuredTextDiagnostics {
 
     /**
      * Pretty-prints strict JSON only after a fidelity gate. Duplicate object keys are valid syntax
-     * but are not formatted because a tree/map representation would silently discard earlier values.
+     * but are not formatted until a caller explicitly resolves their ambiguous semantics.
      */
     fun formatJson(text: String): StructuredTextFormatResult {
         val inspection = StrictJsonParser(text).inspect()
@@ -66,16 +61,7 @@ object StructuredTextDiagnostics {
             )
         }
 
-        val element = try {
-            Json.parseToJsonElement(text)
-        } catch (error: SerializationException) {
-            return StructuredTextFormatResult(
-                text = text,
-                changed = false,
-                errorMessage = error.message ?: "Invalid JSON."
-            )
-        }
-        val formatted = prettyJson.encodeToString(JsonElement.serializer(), element)
+        val formatted = formatValidatedJsonLexically(text)
         return StructuredTextFormatResult(
             text = formatted,
             changed = formatted != text
@@ -96,7 +82,7 @@ object StructuredTextDiagnostics {
     } catch (error: YamlException) {
         StructuredTextValidationResult(
             format = StructuredTextFormat.YAML,
-            errorMessage = error.message ?: "Invalid YAML."
+            errorMessage = error.message
         )
     }
 }
@@ -287,7 +273,75 @@ private class StrictJsonParser(private val source: String) {
     }
 }
 
+/** Formats structural whitespace only, preserving every string, number and literal lexeme verbatim. */
+private fun formatValidatedJsonLexically(source: String): String {
+    val output = StringBuilder(source.length + source.length / 4)
+    val nonEmptyScopes = mutableListOf<Boolean>()
+    var indent = 0
+    var inString = false
+    var escaped = false
+
+    fun appendIndent() {
+        repeat(indent) { output.append("  ") }
+    }
+
+    fun nextNonWhitespace(start: Int): Char? {
+        var cursor = start
+        while (cursor < source.length && source[cursor] in JSON_FORMAT_WHITESPACE) cursor++
+        return source.getOrNull(cursor)
+    }
+
+    source.forEachIndexed { index, char ->
+        if (inString) {
+            output.append(char)
+            when {
+                escaped -> escaped = false
+                char == '\\' -> escaped = true
+                char == '"' -> inString = false
+            }
+            return@forEachIndexed
+        }
+
+        when (char) {
+            '"' -> {
+                inString = true
+                output.append(char)
+            }
+            ' ', '\t', '\r', '\n' -> Unit
+            '{', '[' -> {
+                output.append(char)
+                val closing = if (char == '{') '}' else ']'
+                val nonEmpty = nextNonWhitespace(index + 1) != closing
+                nonEmptyScopes.add(nonEmpty)
+                if (nonEmpty) {
+                    indent++
+                    output.append('\n')
+                    appendIndent()
+                }
+            }
+            '}', ']' -> {
+                val nonEmpty = nonEmptyScopes.removeLast()
+                if (nonEmpty) {
+                    indent--
+                    output.append('\n')
+                    appendIndent()
+                }
+                output.append(char)
+            }
+            ',' -> {
+                output.append(',').append('\n')
+                appendIndent()
+            }
+            ':' -> output.append(": ")
+            else -> output.append(char)
+        }
+    }
+    return output.toString()
+}
+
 private data class ParsedJsonString(
     val value: String? = null,
     val errorMessage: String? = null
 )
+
+private val JSON_FORMAT_WHITESPACE = setOf(' ', '\t', '\r', '\n')
