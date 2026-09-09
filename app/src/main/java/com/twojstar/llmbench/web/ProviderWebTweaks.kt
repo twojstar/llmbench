@@ -218,30 +218,32 @@ internal object ProviderWebTweakRegistry {
         ProviderIdentityMethod.MICROSOFT to setOf("login.live.com", "login.microsoftonline.com")
     )
 
-    // This Android-specific allowlist means the complete top-level redirect boundary has been
-    // verified for the provider. Portable identity metadata alone must never enable this policy.
-    private val verifiedTopLevelNavigationServices = setOf(
-        WebAiService.QWEN,
-        WebAiService.COPILOT,
-        WebAiService.ZAI
+    // Android verification is scoped to an exact provider + identity-method pair. Portable
+    // onboarding metadata can add discoverable methods without silently widening WebView redirects.
+    private val verifiedTopLevelNavigationIdentityMethods = mapOf(
+        WebAiService.QWEN to setOf(
+            ProviderIdentityMethod.GOOGLE,
+            ProviderIdentityMethod.GITHUB
+        ),
+        WebAiService.COPILOT to setOf(ProviderIdentityMethod.MICROSOFT),
+        WebAiService.ZAI to setOf(
+            ProviderIdentityMethod.GOOGLE,
+            ProviderIdentityMethod.GITHUB
+        )
     )
 
-    fun identityAuthHostsForNavigation(
+    fun isIdentityMethodVerifiedForNavigation(
         service: WebAiService,
-        navigationVerified: Boolean
-    ): Set<String> {
-        if (!navigationVerified) return emptySet()
-        return service.onboardingCapabilities().preferredIdentityMethods
-            .flatMap { method -> identityAuthHosts[method].orEmpty() }
-            .toSet()
-    }
+        method: ProviderIdentityMethod
+    ): Boolean = method in verifiedTopLevelNavigationIdentityMethods[service].orEmpty() &&
+        method in service.onboardingCapabilities().preferredIdentityMethods
 
     private val topLevelNavigationAuthHosts = WebAiService.entries
         .associateWith { service ->
-            identityAuthHostsForNavigation(
-                service = service,
-                navigationVerified = service in verifiedTopLevelNavigationServices
-            )
+            service.onboardingCapabilities().preferredIdentityMethods
+                .filter { method -> isIdentityMethodVerifiedForNavigation(service, method) }
+                .flatMap { method -> identityAuthHosts[method].orEmpty() }
+                .toSet()
         }
         .filterValues { it.isNotEmpty() }
 
@@ -284,7 +286,7 @@ internal object ProviderWebTweakRegistry {
     }
 
     fun hasVerifiedTopLevelNavigationPolicy(service: WebAiService): Boolean =
-        service in verifiedTopLevelNavigationServices
+        topLevelNavigationAuthHosts(service).isNotEmpty()
 
     fun topLevelNavigationAuthHosts(service: WebAiService): Set<String> =
         topLevelNavigationAuthHosts[service].orEmpty()
