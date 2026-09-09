@@ -153,7 +153,7 @@ class PromptTournamentTest {
     )
 
     private fun profiles(vararg variants: TokenArenaVariant) =
-        variants.map(TokenArenaVariant::tournamentProfile)
+        variants.map { variant -> variant.tournamentProfile() }
 
     private fun run(
         variant: TokenArenaVariant,
