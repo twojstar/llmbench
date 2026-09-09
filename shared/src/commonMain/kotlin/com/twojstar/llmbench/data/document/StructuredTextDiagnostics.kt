@@ -7,11 +7,16 @@ import it.krzeminski.snakeyaml.engine.kmp.events.NodeEvent
 import it.krzeminski.snakeyaml.engine.kmp.exceptions.YamlEngineException
 import it.krzeminski.snakeyaml.engine.kmp.parser.ParserImpl
 import it.krzeminski.snakeyaml.engine.kmp.scanner.StreamReader
+import nl.adaptivity.xmlutil.EventType
+import nl.adaptivity.xmlutil.XmlException
+import nl.adaptivity.xmlutil.XmlReader
+import nl.adaptivity.xmlutil.xmlStreaming
 
 /** Structured text syntaxes currently validated by the portable document core. */
 enum class StructuredTextFormat {
     JSON,
-    YAML
+    YAML,
+    XML
 }
 
 data class StructuredTextValidationResult(
@@ -42,11 +47,14 @@ object StructuredTextDiagnostics {
     private const val MAX_JSON_NESTING = 128
     private const val MAX_JSON_FORMATTED_CHARS = 8 * 1024 * 1024
     private const val MAX_YAML_CODE_POINTS = 3 * 1024 * 1024
+    private const val MAX_XML_CHARS = 3 * 1024 * 1024
+    private const val MAX_XML_NESTING = 128
 
     fun validate(text: String, format: StructuredTextFormat): StructuredTextValidationResult =
         when (format) {
             StructuredTextFormat.JSON -> validateJson(text)
             StructuredTextFormat.YAML -> validateYaml(text)
+            StructuredTextFormat.XML -> validateXml(text)
         }
 
     /**
@@ -131,6 +139,259 @@ object StructuredTextDiagnostics {
             )
         }
     }
+
+    /**
+     * Validates XML well-formedness through the portable pull parser without building a document tree.
+     * A lexical preflight rejects DTD/DOCTYPE declarations before the parser is constructed, so JVM
+     * parser implementations never get an opportunity to resolve external subsets. Entity expansion
+     * remains disabled during parsing. XML Schema or DTD validation is intentionally out of scope.
+     */
+    private fun validateXml(text: String): StructuredTextValidationResult {
+        validateXmlInput(text)?.let { return it }
+        XmlLexicalPreflight(text).inspect()?.let { return invalidXml(it) }
+
+        return try {
+            val reader = xmlStreaming.newReader(text, expandEntities = false)
+            try {
+                validateXmlReader(reader)
+            } finally {
+                reader.close()
+            }
+        } catch (error: XmlException) {
+            invalidXml(error.message ?: "Invalid XML.")
+        } catch (error: IllegalStateException) {
+            invalidXml(error.message ?: "Invalid XML.")
+        }
+    }
+
+    private fun validateXmlInput(text: String): StructuredTextValidationResult? = when {
+        text.length > MAX_XML_CHARS ->
+            invalidXml("XML input exceeds the supported 3 Mi character limit.")
+        text.isBlank() -> invalidXml("XML input is empty.")
+        !hasOnlyXml10Characters(text) ->
+            invalidXml("XML contains a character outside the supported XML 1.0 repertoire.")
+        else -> null
+    }
+
+    private fun validateXmlReader(reader: XmlReader): StructuredTextValidationResult {
+        var depth = 0
+        var rootElements = 0
+        while (reader.hasNext()) {
+            val event = reader.next()
+            when (event) {
+                EventType.START_ELEMENT -> {
+                    validateXmlStartElement(reader)?.let { return it }
+                    if (depth == 0) rootElements++
+                    depth++
+                    if (depth > MAX_XML_NESTING) {
+                        return invalidXml(
+                            "XML nesting exceeds the supported limit of $MAX_XML_NESTING."
+                        )
+                    }
+                }
+                EventType.END_ELEMENT -> depth--
+                EventType.ENTITY_REF -> validateXmlEntity(reader)?.let { return it }
+                EventType.DOCDECL -> return invalidXml(
+                    "XML DOCTYPE/DTD declarations are not supported by portable validation."
+                )
+                else -> validateXmlTextEvent(reader, event)?.let { return it }
+            }
+        }
+
+        return when {
+            depth != 0 -> invalidXml("XML element nesting is unbalanced.")
+            rootElements != 1 -> invalidXml("XML must contain exactly one root element.")
+            else -> StructuredTextValidationResult(StructuredTextFormat.XML)
+        }
+    }
+
+    private fun validateXmlStartElement(reader: XmlReader): StructuredTextValidationResult? {
+        if (hasDuplicateXmlAttributes(reader)) {
+            return invalidXml("XML element contains duplicate attributes.")
+        }
+        for (index in 0 until reader.attributeCount) {
+            if (!hasOnlyXml10Characters(reader.getAttributeValue(index))) {
+                return invalidXml(
+                    "XML attribute contains a character outside the supported XML 1.0 repertoire."
+                )
+            }
+        }
+        return null
+    }
+
+    private fun validateXmlEntity(reader: XmlReader): StructuredTextValidationResult? {
+        if (!reader.isKnownEntity) return invalidXml("XML references an undeclared entity.")
+        return if (hasOnlyXml10Characters(reader.text)) {
+            null
+        } else {
+            invalidXml("XML entity resolves to a character outside the supported XML 1.0 repertoire.")
+        }
+    }
+
+    private fun validateXmlTextEvent(
+        reader: XmlReader,
+        event: EventType
+    ): StructuredTextValidationResult? =
+        if (event.isTextElement && !hasOnlyXml10Characters(reader.text)) {
+            invalidXml("XML contains a character outside the supported XML 1.0 repertoire.")
+        } else {
+            null
+        }
+
+    private fun hasDuplicateXmlAttributes(reader: XmlReader): Boolean {
+        val expandedNames = mutableSetOf<Pair<String, String>>()
+        for (index in 0 until reader.attributeCount) {
+            val expandedName = reader.getAttributeNamespace(index) to reader.getAttributeLocalName(index)
+            if (!expandedNames.add(expandedName)) return true
+        }
+        return false
+    }
+
+    /**
+     * Performs only security-sensitive checks that must happen before an XML parser is created.
+     * Malformed markup that does not match these narrow checks is deliberately left to xmlutil.
+     */
+    private class XmlLexicalPreflight(private val source: String) {
+        private var index = 0
+
+        fun inspect(): String? {
+            while (index < source.length) {
+                val markupStart = source.indexOf('<', index)
+                if (markupStart < 0) return null
+                index = markupStart
+                when {
+                    source.startsWith("<!--", index) -> skipDelimited("-->")
+                    source.startsWith("<![CDATA[", index) -> skipDelimited("]]>")
+                    source.startsWith("<?", index) -> skipDelimited("?>")
+                    source.startsWith("<!DOCTYPE", index) -> return DOCTYPE_ERROR
+                    source.startsWith("</", index) || source.startsWith("<!", index) -> skipMarkup()
+                    else -> inspectStartTag()?.let { return it }
+                }
+            }
+            return null
+        }
+
+        private fun inspectStartTag(): String? {
+            val tagEnd = findTagEnd(index + 1)
+            if (tagEnd < 0) {
+                index = source.length
+                return null
+            }
+
+            var cursor = index + 1
+            while (cursor < tagEnd && !source[cursor].isXmlWhitespace() && source[cursor] != '/') {
+                cursor++
+            }
+            val rawAttributeNames = mutableSetOf<String>()
+
+            while (cursor < tagEnd) {
+                cursor = skipXmlWhitespace(cursor, tagEnd)
+                if (cursor >= tagEnd || source[cursor] == '/') break
+
+                val nameStart = cursor
+                while (
+                    cursor < tagEnd &&
+                    !source[cursor].isXmlWhitespace() &&
+                    source[cursor] != '=' &&
+                    source[cursor] != '/'
+                ) {
+                    cursor++
+                }
+                if (nameStart == cursor) break
+                val rawName = source.substring(nameStart, cursor)
+                if (!rawAttributeNames.add(rawName)) return DUPLICATE_ATTRIBUTE_ERROR
+
+                cursor = skipXmlWhitespace(cursor, tagEnd)
+                if (cursor >= tagEnd || source[cursor] != '=') break
+                cursor++
+                cursor = skipXmlWhitespace(cursor, tagEnd)
+                if (cursor >= tagEnd || source[cursor] !in XML_ATTRIBUTE_QUOTES) break
+                val quote = source[cursor++]
+                val closingQuote = source.indexOf(quote, cursor)
+                if (closingQuote < 0 || closingQuote > tagEnd) break
+                cursor = closingQuote + 1
+            }
+
+            index = tagEnd + 1
+            return null
+        }
+
+        private fun findTagEnd(start: Int): Int {
+            var cursor = start
+            var quote: Char? = null
+            while (cursor < source.length) {
+                val char = source[cursor]
+                when {
+                    quote != null && char == quote -> quote = null
+                    quote == null && char in XML_ATTRIBUTE_QUOTES -> quote = char
+                    quote == null && char == '>' -> return cursor
+                }
+                cursor++
+            }
+            return -1
+        }
+
+        private fun skipDelimited(delimiter: String) {
+            val end = source.indexOf(delimiter, index + 2)
+            index = if (end < 0) source.length else end + delimiter.length
+        }
+
+        private fun skipMarkup() {
+            val end = source.indexOf('>', index + 2)
+            index = if (end < 0) source.length else end + 1
+        }
+
+        private fun skipXmlWhitespace(start: Int, end: Int): Int {
+            var cursor = start
+            while (cursor < end && source[cursor].isXmlWhitespace()) cursor++
+            return cursor
+        }
+
+        private fun Char.isXmlWhitespace(): Boolean = this == ' ' || this == '\t' || this == '\r' || this == '\n'
+
+        companion object {
+            private const val DOCTYPE_ERROR =
+                "XML DOCTYPE/DTD declarations are not supported by portable validation."
+            private const val DUPLICATE_ATTRIBUTE_ERROR =
+                "XML element contains duplicate attributes or namespace declarations."
+            private val XML_ATTRIBUTE_QUOTES = setOf('\'', '"')
+        }
+    }
+
+    private fun hasOnlyXml10Characters(value: String): Boolean {
+        var index = 0
+        while (index < value.length) {
+            val first = value[index].code
+            val codePoint = when {
+                first in 0xD800..0xDBFF -> {
+                    if (index + 1 >= value.length) return false
+                    val second = value[index + 1].code
+                    if (second !in 0xDC00..0xDFFF) return false
+                    index++
+                    0x10000 + ((first - 0xD800) shl 10) + (second - 0xDC00)
+                }
+                first in 0xDC00..0xDFFF -> return false
+                else -> first
+            }
+            if (!isXml10CodePoint(codePoint)) return false
+            index++
+        }
+        return true
+    }
+
+    private fun isXml10CodePoint(codePoint: Int): Boolean =
+        codePoint == 0x9 ||
+            codePoint == 0xA ||
+            codePoint == 0xD ||
+            codePoint in 0x20..0xD7FF ||
+            codePoint in 0xE000..0xFFFD ||
+            codePoint in 0x10000..0x10FFFF
+
+    private fun invalidXml(message: String): StructuredTextValidationResult =
+        StructuredTextValidationResult(
+            format = StructuredTextFormat.XML,
+            errorMessage = message
+        )
 
     private data class StrictJsonInspection(
         val errorMessage: String? = null,

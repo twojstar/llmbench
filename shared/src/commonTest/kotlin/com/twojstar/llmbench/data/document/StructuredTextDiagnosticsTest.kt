@@ -132,4 +132,120 @@ class StructuredTextDiagnosticsTest {
             ).isValid
         )
     }
+
+    @Test
+    fun xmlValidationAcceptsPortableWellFormedSyntax() {
+        listOf(
+            "<root />",
+            "<?xml version=\"1.0\"?><root><child id=\"1\">text &amp; more</child></root>",
+            "<!-- before --><root xmlns=\"urn:llmbench\"><![CDATA[a < b]]></root><!-- after -->",
+            "<?tool preview?><root xmlns:x=\"urn:x\"><x:item /></root><?done ok?>",
+            "<root>&amp;&lt;&gt;&apos;&quot;</root>",
+            "<root><!-- <!DOCTYPE ignored> --><![CDATA[<!DOCTYPE ignored>]]></root>"
+        ).forEach { source ->
+            assertTrue(
+                StructuredTextDiagnostics.validate(source, StructuredTextFormat.XML).isValid,
+                source
+            )
+        }
+    }
+
+    @Test
+    fun malformedOrMultiRootXmlFailsValidation() {
+        listOf(
+            "",
+            "   \n\t",
+            "<root>",
+            "<root><child></root>",
+            "<first /><second />",
+            "text-before<root />",
+            "<root attr=\"unterminated",
+            "<!-- unterminated",
+            "<root><![CDATA[unterminated</root>"
+        ).forEach { source ->
+            assertFalse(
+                StructuredTextDiagnostics.validate(source, StructuredTextFormat.XML).isValid,
+                source
+            )
+        }
+    }
+
+    @Test
+    fun xmlUnknownEntitiesAreRejectedWhilePredefinedEntitiesRemainValid() {
+        assertFalse(
+            StructuredTextDiagnostics.validate(
+                "<root>&undeclared;</root>",
+                StructuredTextFormat.XML
+            ).isValid
+        )
+        assertTrue(
+            StructuredTextDiagnostics.validate(
+                "<root>&amp;&lt;&gt;&apos;&quot;</root>",
+                StructuredTextFormat.XML
+            ).isValid
+        )
+    }
+
+    @Test
+    fun xmlDuplicateAttributesAreRejectedByExpandedName() {
+        listOf(
+            "<root id=\"1\" id=\"2\" />",
+            "<root xmlns:x=\"urn:id\" xmlns:y=\"urn:id\" x:id=\"1\" y:id=\"2\" />",
+            "<root xmlns:x=\"urn:a\" xmlns:x=\"urn:b\" />",
+            "<root xmlns:x=\"urn:a\" xmlns:x=\"urn:a\" />",
+            "<root xmlns=\"urn:a\" xmlns=\"urn:a\" />"
+        ).forEach { source ->
+            assertFalse(
+                StructuredTextDiagnostics.validate(source, StructuredTextFormat.XML).isValid,
+                source
+            )
+        }
+    }
+
+    @Test
+    fun xmlInvalidCharactersAndReferencesAreRejected() {
+        listOf(
+            "<root>\u0001</root>",
+            "<root>\uD800</root>",
+            "<root>&#0;</root>",
+            "<root>&#x1F;</root>",
+            "<root attr=\"&#0;\" />"
+        ).forEach { source ->
+            assertFalse(
+                StructuredTextDiagnostics.validate(source, StructuredTextFormat.XML).isValid,
+                source
+            )
+        }
+    }
+
+    @Test
+    fun xmlDoctypeIsRejectedBeforeParserCanResolveExternalSubset() {
+        listOf(
+            "<!DOCTYPE root [<!ENTITY secret \"value\">]><root>&secret;</root>",
+            "<!DOCTYPE root SYSTEM \"http://127.0.0.1:9/should-not-be-fetched\"><root />"
+        ).forEach { source ->
+            val result = StructuredTextDiagnostics.validate(source, StructuredTextFormat.XML)
+
+            assertFalse(result.isValid, source)
+            assertTrue(result.errorMessage.orEmpty().contains("DOCTYPE", ignoreCase = true), source)
+        }
+    }
+
+    @Test
+    fun excessiveXmlNestingReturnsValidationError() {
+        val source = "<n>".repeat(129) + "x" + "</n>".repeat(129)
+        val result = StructuredTextDiagnostics.validate(source, StructuredTextFormat.XML)
+
+        assertFalse(result.isValid)
+        assertTrue(result.errorMessage.orEmpty().contains("nesting", ignoreCase = true))
+    }
+
+    @Test
+    fun oversizedXmlIsRejectedBeforeParsing() {
+        val source = "<root>" + "x".repeat(3 * 1024 * 1024) + "</root>"
+        val result = StructuredTextDiagnostics.validate(source, StructuredTextFormat.XML)
+
+        assertFalse(result.isValid)
+        assertTrue(result.errorMessage.orEmpty().contains("limit", ignoreCase = true))
+    }
 }
