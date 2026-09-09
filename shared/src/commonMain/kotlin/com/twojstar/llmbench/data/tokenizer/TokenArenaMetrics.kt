@@ -84,7 +84,7 @@ fun TokenArenaResponseObservation.efficiencyMetrics(): TokenArenaResponseEfficie
     val qualityPerThousandInputTokens = if (
         quality != null && providerInputTokens != null && providerInputTokens > 0
     ) {
-        (quality * 1000.0 / providerInputTokens.toDouble()).finiteOrNull()
+        (quality * (1000.0 / providerInputTokens.toDouble())).finiteOrNull()
     } else {
         null
     }
