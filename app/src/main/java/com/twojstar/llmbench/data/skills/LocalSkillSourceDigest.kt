@@ -16,4 +16,8 @@ internal fun sha256Hex(bytes: ByteArray): String {
     return hex.concatToString()
 }
 
+internal fun isSha256Hex(value: String): Boolean =
+    value.length == SHA256_HEX_CHARS && value.all { it in HEX_DIGITS }
+
+private const val SHA256_HEX_CHARS = 64
 private const val HEX_DIGITS = "0123456789abcdef"
