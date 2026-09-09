@@ -5,7 +5,7 @@ package com.twojstar.llmbench.data.document
  *
  * Detection deliberately does not sniff document contents. File names and MIME types are treated as
  * independent hints; conflicting specific hints return null instead of selecting the wrong parser.
- * Generic or unknown MIME types do not override a recognized file extension.
+ * Generic, malformed or unknown MIME types do not override a recognized file extension.
  */
 fun detectStructuredTextFormat(
     displayName: String?,
@@ -41,24 +41,51 @@ private fun structuredTextFormatFromDisplayName(displayName: String?): Structure
 }
 
 private fun structuredTextFormatFromMimeType(mimeType: String?): StructuredTextFormat? {
+    val mime = parseMimeType(mimeType) ?: return null
+    val normalized = "${mime.type}/${mime.subtype}"
+    return when {
+        normalized == "application/json" ||
+            normalized == "text/json" ||
+            mime.subtype.hasStructuredSuffix("json") -> StructuredTextFormat.JSON
+        normalized in YAML_MIME_TYPES -> StructuredTextFormat.YAML
+        normalized == "application/xml" ||
+            normalized == "text/xml" ||
+            mime.subtype.hasStructuredSuffix("xml") -> StructuredTextFormat.XML
+        else -> null
+    }
+}
+
+private fun parseMimeType(mimeType: String?): ParsedMimeType? {
     val normalized = mimeType
         ?.substringBefore(';')
         ?.trim()
         ?.lowercase()
-        ?.takeIf { '/' in it }
+        ?.takeIf { it.count { char -> char == '/' } == 1 }
         ?: return null
-
-    return when {
-        normalized == "application/json" ||
-            normalized == "text/json" ||
-            normalized.endsWith("+json") -> StructuredTextFormat.JSON
-        normalized in YAML_MIME_TYPES -> StructuredTextFormat.YAML
-        normalized == "application/xml" ||
-            normalized == "text/xml" ||
-            normalized.endsWith("+xml") -> StructuredTextFormat.XML
-        else -> null
-    }
+    val type = normalized.substringBefore('/')
+    val subtype = normalized.substringAfter('/')
+    if (!type.isMimeToken() || !subtype.isMimeToken()) return null
+    return ParsedMimeType(type, subtype)
 }
+
+private fun String.hasStructuredSuffix(suffix: String): Boolean {
+    val marker = "+$suffix"
+    return endsWith(marker) && length > marker.length
+}
+
+private fun String.isMimeToken(): Boolean =
+    isNotEmpty() && all { char ->
+        char in 'a'..'z' ||
+            char in '0'..'9' ||
+            char in MIME_TOKEN_PUNCTUATION
+    }
+
+private data class ParsedMimeType(
+    val type: String,
+    val subtype: String
+)
+
+private const val MIME_TOKEN_PUNCTUATION = "!#$%&'*+-.^_`|~"
 
 private val YAML_MIME_TYPES = setOf(
     "application/yaml",
