@@ -9,24 +9,24 @@ import kotlin.test.assertNotSame
 class PromptTournamentTest {
     @Test
     fun plannedRunsExpandVariantsAcrossTargetsWithoutDuplicatingPromptText() {
-        val concise = variant("concise", "Answer in one sentence.")
-        val markdown = variant("markdown", "## Task\nAnswer in one sentence.")
+        val concise = variant(CONCISE_ID, ANSWER_SENTENCE)
+        val markdown = variant(MARKDOWN_ID, "## Task\n$ANSWER_SENTENCE")
         val plan = PromptTournamentPlan.create(
             experiment = experiment(concise, markdown),
             targets = listOf(
-                PromptTournamentTarget("openai", "gpt-test"),
-                PromptTournamentTarget("anthropic", "claude-test")
+                PromptTournamentTarget(OPENAI_PROVIDER, GPT_MODEL),
+                PromptTournamentTarget(ANTHROPIC_PROVIDER, CLAUDE_MODEL)
             ),
             profiles = listOf(
                 concise.tournamentProfile(
                     format = PromptTournamentFormat.PLAIN_TEXT,
                     verbosity = PromptTournamentVerbosity.CONCISE,
-                    languageTag = "en"
+                    languageTag = EN_LANGUAGE
                 ),
                 markdown.tournamentProfile(
                     format = PromptTournamentFormat.MARKDOWN,
                     verbosity = PromptTournamentVerbosity.CONCISE,
-                    languageTag = "en"
+                    languageTag = EN_LANGUAGE
                 )
             )
         )
@@ -34,10 +34,10 @@ class PromptTournamentTest {
         assertEquals(4L, plan.plannedRunCount)
         assertEquals(
             listOf(
-                run(concise, "openai", "gpt-test"),
-                run(concise, "anthropic", "claude-test"),
-                run(markdown, "openai", "gpt-test"),
-                run(markdown, "anthropic", "claude-test")
+                run(concise, OPENAI_PROVIDER, GPT_MODEL),
+                run(concise, ANTHROPIC_PROVIDER, CLAUDE_MODEL),
+                run(markdown, OPENAI_PROVIDER, GPT_MODEL),
+                run(markdown, ANTHROPIC_PROVIDER, CLAUDE_MODEL)
             ),
             plan.plannedRuns().toList()
         )
@@ -45,16 +45,16 @@ class PromptTournamentTest {
 
     @Test
     fun tournamentRequiresAtLeastTwoVariantsAndOneTarget() {
-        val only = variant("only", "same intent")
+        val only = variant(ONLY_ID, SAME_INTENT)
         assertFailsWith<IllegalArgumentException> {
             PromptTournamentPlan.create(
                 experiment = experiment(only),
-                targets = listOf(PromptTournamentTarget("provider", "model")),
+                targets = listOf(defaultTarget()),
                 profiles = listOf(only.tournamentProfile())
             )
         }
 
-        val second = variant("second", "same intent, second form")
+        val second = variant(SECOND_ID, "$SAME_INTENT, second form")
         assertFailsWith<IllegalArgumentException> {
             PromptTournamentPlan.create(
                 experiment = experiment(only, second),
@@ -66,9 +66,9 @@ class PromptTournamentTest {
 
     @Test
     fun tournamentRejectsDuplicateTargetsAndIncompleteProfiles() {
-        val first = variant("first", "first")
-        val second = variant("second", "second")
-        val target = PromptTournamentTarget("provider", "model")
+        val first = variant(FIRST_ID, FIRST_ID)
+        val second = variant(SECOND_ID, SECOND_ID)
+        val target = defaultTarget()
         val arena = experiment(first, second)
 
         assertFailsWith<IllegalArgumentException> {
@@ -89,14 +89,14 @@ class PromptTournamentTest {
 
     @Test
     fun tournamentRejectsStalePromptProfiles() {
-        val first = variant("first", "first")
-        val second = variant("second", "second")
-        val stale = first.copy(prompt = "edited")
+        val first = variant(FIRST_ID, FIRST_ID)
+        val second = variant(SECOND_ID, SECOND_ID)
+        val stale = first.copy(prompt = EDITED_PROMPT)
 
         assertFailsWith<IllegalArgumentException> {
             PromptTournamentPlan.create(
                 experiment = experiment(stale, second),
-                targets = listOf(PromptTournamentTarget("provider", "model")),
+                targets = listOf(defaultTarget()),
                 profiles = profiles(first, second)
             )
         }
@@ -104,9 +104,9 @@ class PromptTournamentTest {
 
     @Test
     fun collectionInputsAreSnapshottedAndGettersReturnFreshCopies() {
-        val first = variant("first", "first")
-        val second = variant("second", "second")
-        val targets = mutableListOf(PromptTournamentTarget("provider", "model"))
+        val first = variant(FIRST_ID, FIRST_ID)
+        val second = variant(SECOND_ID, SECOND_ID)
+        val targets = mutableListOf(defaultTarget())
         val metadata = profiles(first, second).toMutableList()
         val plan = PromptTournamentPlan.create(
             experiment = experiment(first, second),
@@ -125,11 +125,11 @@ class PromptTournamentTest {
 
     @Test
     fun serializationRoundTripPreservesValueSemanticsAndMatrix() {
-        val first = variant("plain", "Explain the result.")
-        val second = variant("json", "{\"task\":\"Explain the result.\"}")
+        val first = variant("plain", EXPLAIN_RESULT)
+        val second = variant("json", "{\"task\":\"$EXPLAIN_RESULT\"}")
         val plan = PromptTournamentPlan.create(
             experiment = experiment(first, second),
-            targets = listOf(PromptTournamentTarget("provider", "model")),
+            targets = listOf(defaultTarget()),
             profiles = listOf(
                 first.tournamentProfile(format = PromptTournamentFormat.PLAIN_TEXT),
                 second.tournamentProfile(format = PromptTournamentFormat.JSON)
@@ -147,13 +147,15 @@ class PromptTournamentTest {
     private fun variant(id: String, prompt: String) = TokenArenaVariant(id, id, prompt)
 
     private fun experiment(vararg variants: TokenArenaVariant) = TokenArenaExperiment.create(
-        id = "tournament",
-        intentLabel = "same intent",
+        id = TOURNAMENT_ID,
+        intentLabel = SAME_INTENT,
         variants = variants.toList()
     )
 
     private fun profiles(vararg variants: TokenArenaVariant) =
         variants.map { variant -> variant.tournamentProfile() }
+
+    private fun defaultTarget() = PromptTournamentTarget(DEFAULT_PROVIDER, DEFAULT_MODEL)
 
     private fun run(
         variant: TokenArenaVariant,
@@ -165,4 +167,24 @@ class PromptTournamentTest {
         providerId = providerId,
         modelName = modelName
     )
+
+    companion object {
+        private const val TOURNAMENT_ID = "tournament"
+        private const val SAME_INTENT = "same intent"
+        private const val FIRST_ID = "first"
+        private const val SECOND_ID = "second"
+        private const val ONLY_ID = "only"
+        private const val CONCISE_ID = "concise"
+        private const val MARKDOWN_ID = "markdown"
+        private const val DEFAULT_PROVIDER = "provider"
+        private const val DEFAULT_MODEL = "model"
+        private const val OPENAI_PROVIDER = "openai"
+        private const val GPT_MODEL = "gpt-test"
+        private const val ANTHROPIC_PROVIDER = "anthropic"
+        private const val CLAUDE_MODEL = "claude-test"
+        private const val EN_LANGUAGE = "en"
+        private const val ANSWER_SENTENCE = "Answer in one sentence."
+        private const val EDITED_PROMPT = "edited"
+        private const val EXPLAIN_RESULT = "Explain the result."
+    }
 }
