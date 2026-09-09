@@ -28,6 +28,7 @@ kotlin {
         commonMain.dependencies {
             implementation(libs.kotlinx.serialization.json)
             implementation(libs.kotaml)
+            implementation(libs.snakeyaml.engine.kmp)
             implementation(libs.normalize)
         }
         androidMain.dependencies {
