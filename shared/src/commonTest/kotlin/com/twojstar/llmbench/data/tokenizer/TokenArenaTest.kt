@@ -8,6 +8,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertNotEquals
+import kotlin.test.assertNotSame
 import kotlin.test.assertTrue
 
 class TokenArenaTest {
@@ -19,7 +20,7 @@ class TokenArenaTest {
     @Test
     fun localMeasurementStaysExplicitlyEncodingScopedAndBoundToVariantPrompt() {
         val variant = TokenArenaVariant(
-            id = "short",
+            id = SHORT_VARIANT_ID,
             label = "Short",
             prompt = PROMPT_HELLO
         )
@@ -28,7 +29,7 @@ class TokenArenaTest {
             backendLabel = BACKEND_LOCAL
         )
 
-        assertEquals("short", measurement.variantId)
+        assertEquals(SHORT_VARIANT_ID, measurement.variantId)
         assertEquals(variant.promptFingerprint, measurement.promptFingerprint)
         assertEquals(5L, measurement.tokens)
         assertEquals(TokenMeasurementMode.LOCAL_EXACT_ENCODING, measurement.mode)
@@ -42,7 +43,7 @@ class TokenArenaTest {
     fun providerExactMeasurementRequiresProviderAndModel() {
         assertFailsWith<IllegalArgumentException> {
             TokenArenaTokenMeasurement(
-                variantId = "short",
+                variantId = SHORT_VARIANT_ID,
                 promptFingerprint = stablePromptFingerprint(PROMPT_HELLO),
                 tokens = 10,
                 mode = TokenMeasurementMode.PROVIDER_EXACT,
@@ -58,13 +59,13 @@ class TokenArenaTest {
                 id = "duplicate",
                 intentLabel = INTENT_LABEL,
                 variants = listOf(
-                    TokenArenaVariant(VARIANT_ID, "A", "first"),
+                    TokenArenaVariant(VARIANT_ID, LABEL_A, PROMPT_FIRST),
                     TokenArenaVariant(VARIANT_ID, "Again", "second")
                 )
             )
         }
 
-        val original = TokenArenaVariant(VARIANT_ID, "A", "first")
+        val original = TokenArenaVariant(VARIANT_ID, LABEL_A, PROMPT_FIRST)
         val measurement = FakeCounter.measureForArena(original, BACKEND_LOCAL)
         assertFailsWith<IllegalArgumentException> {
             TokenArenaExperiment.create(
@@ -93,8 +94,8 @@ class TokenArenaTest {
     }
 
     @Test
-    fun experimentSnapshotsCallerAndExposedCollections() {
-        val variant = TokenArenaVariant(VARIANT_ID, "A", "first")
+    fun experimentSnapshotsCallerAndReturnsDefensiveCollections() {
+        val variant = TokenArenaVariant(VARIANT_ID, LABEL_A, PROMPT_FIRST)
         val variants = mutableListOf(variant)
         val measurements = mutableListOf(FakeCounter.measureForArena(variant, BACKEND_LOCAL))
         val experiment = TokenArenaExperiment.create(
@@ -109,16 +110,15 @@ class TokenArenaTest {
 
         val exposedVariants = experiment.variants
         val exposedMeasurements = experiment.tokenMeasurements
-        runCatching { (exposedVariants as? MutableList<TokenArenaVariant>)?.clear() }
-        runCatching { (exposedMeasurements as? MutableList<TokenArenaTokenMeasurement>)?.clear() }
-
+        assertNotSame(exposedVariants, experiment.variants)
+        assertNotSame(exposedMeasurements, experiment.tokenMeasurements)
         assertEquals(listOf(variant), experiment.variants)
         assertEquals(1, experiment.tokenMeasurements.size)
     }
 
     @Test
     fun experimentSerializationRoundTripPreservesValueSemantics() {
-        val variant = TokenArenaVariant(VARIANT_ID, "A", PROMPT_HELLO)
+        val variant = TokenArenaVariant(VARIANT_ID, LABEL_A, PROMPT_HELLO)
         val experiment = TokenArenaExperiment.create(
             id = "round-trip",
             intentLabel = INTENT_LABEL,
@@ -145,7 +145,7 @@ class TokenArenaTest {
 
     @Test
     fun onlyCompleteSuccessfulLiveResponsesEnterLiveEfficiencyRanking() {
-        val variant = TokenArenaVariant(VARIANT_ID, "A", "prompt")
+        val variant = TokenArenaVariant(VARIANT_ID, LABEL_A, "prompt")
         fun observation(
             provenance: ArenaResponseProvenance,
             isError: Boolean = false,
@@ -179,7 +179,10 @@ class TokenArenaTest {
 
     private companion object {
         const val VARIANT_ID = "a"
+        const val SHORT_VARIANT_ID = "short"
+        const val LABEL_A = "A"
         const val INTENT_LABEL = "same intent"
+        const val PROMPT_FIRST = "first"
         const val PROMPT_HELLO = "hello"
         const val BACKEND_LOCAL = "fake-local"
         const val PROVIDER_ID = "provider"
