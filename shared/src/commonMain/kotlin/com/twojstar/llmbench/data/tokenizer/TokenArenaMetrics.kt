@@ -44,7 +44,7 @@ fun TokenArenaExperiment.tokenDeltas(referenceVariantId: String): List<TokenAren
 
                 val reference = referenceMatches.single()
                 val candidate = variantMatches.single()
-                val delta = nonNegativeLongDelta(candidate.tokens, reference.tokens)
+                val delta = safeLongDelta(candidate.tokens, reference.tokens)
                 TokenArenaTokenDelta(
                     referenceVariantId = referenceVariantId,
                     variantId = variant.id,
@@ -122,7 +122,7 @@ fun TokenArenaExperiment.liveEfficiencyRanking(
 ): List<TokenArenaRankedObservation> {
     val scored = responseObservations
         .asSequence()
-        .filter(TokenArenaResponseObservation::canEnterLiveEfficiencyRanking)
+        .filter { observation -> observation.canEnterLiveEfficiencyRanking }
         .mapNotNull { observation ->
             val efficiency = observation.efficiencyMetrics()
             val score = when (metric) {
@@ -159,7 +159,7 @@ private fun TokenArenaTokenMeasurement.seriesKey(): TokenMeasurementSeriesKey =
         modelName = modelName
     )
 
-private fun nonNegativeLongDelta(value: Long, reference: Long): Long =
+private fun safeLongDelta(value: Long, reference: Long): Long =
     if (value >= reference) value - reference else -(reference - value)
 
-private fun Double.finiteOrNull(): Double? = takeIf(Double::isFinite)
+private fun Double.finiteOrNull(): Double? = takeIf { value -> value.isFinite() }
