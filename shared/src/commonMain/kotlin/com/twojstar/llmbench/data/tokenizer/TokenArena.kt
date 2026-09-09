@@ -109,7 +109,8 @@ data class TokenArenaResponseObservation(
  *
  * Public construction snapshots every collection so callers cannot mutate an experiment through a
  * retained MutableList alias. Prompt fingerprints bind recorded results to the exact variant text.
- * This model does not imply persistence; durable storage/export must remain explicit.
+ * Manual value equality keeps decoded experiments usable as stable state and collection keys without
+ * reintroducing a data-class `copy()` path that could bypass the defensive snapshots.
  */
 @Serializable
 class TokenArenaExperiment private constructor(
@@ -142,6 +143,29 @@ class TokenArenaExperiment private constructor(
             "Every response observation must reference the current prompt version of a known variant"
         }
     }
+
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is TokenArenaExperiment) return false
+        return id == other.id &&
+            intentLabel == other.intentLabel &&
+            variants == other.variants &&
+            tokenMeasurements == other.tokenMeasurements &&
+            responseObservations == other.responseObservations
+    }
+
+    override fun hashCode(): Int {
+        var result = id.hashCode()
+        result = 31 * result + intentLabel.hashCode()
+        result = 31 * result + variants.hashCode()
+        result = 31 * result + tokenMeasurements.hashCode()
+        result = 31 * result + responseObservations.hashCode()
+        return result
+    }
+
+    override fun toString(): String =
+        "TokenArenaExperiment(id=$id, intentLabel=$intentLabel, variants=$variants, " +
+            "tokenMeasurements=$tokenMeasurements, responseObservations=$responseObservations)"
 
     companion object {
         fun create(
