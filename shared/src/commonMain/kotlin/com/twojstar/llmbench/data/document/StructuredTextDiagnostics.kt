@@ -7,11 +7,15 @@ import it.krzeminski.snakeyaml.engine.kmp.events.NodeEvent
 import it.krzeminski.snakeyaml.engine.kmp.exceptions.YamlEngineException
 import it.krzeminski.snakeyaml.engine.kmp.parser.ParserImpl
 import it.krzeminski.snakeyaml.engine.kmp.scanner.StreamReader
+import nl.adaptivity.xmlutil.EventType
+import nl.adaptivity.xmlutil.XmlException
+import nl.adaptivity.xmlutil.xmlStreaming
 
 /** Structured text syntaxes currently validated by the portable document core. */
 enum class StructuredTextFormat {
     JSON,
-    YAML
+    YAML,
+    XML
 }
 
 data class StructuredTextValidationResult(
@@ -42,11 +46,14 @@ object StructuredTextDiagnostics {
     private const val MAX_JSON_NESTING = 128
     private const val MAX_JSON_FORMATTED_CHARS = 8 * 1024 * 1024
     private const val MAX_YAML_CODE_POINTS = 3 * 1024 * 1024
+    private const val MAX_XML_CHARS = 3 * 1024 * 1024
+    private const val MAX_XML_NESTING = 128
 
     fun validate(text: String, format: StructuredTextFormat): StructuredTextValidationResult =
         when (format) {
             StructuredTextFormat.JSON -> validateJson(text)
             StructuredTextFormat.YAML -> validateYaml(text)
+            StructuredTextFormat.XML -> validateXml(text)
         }
 
     /**
@@ -131,6 +138,61 @@ object StructuredTextDiagnostics {
             )
         }
     }
+
+    /**
+     * Validates XML well-formedness through the portable pull parser without building a document tree.
+     * Entity expansion stays disabled and DTD/DOCTYPE declarations are rejected so validation never
+     * becomes a network/file-resolution surface. XML Schema or DTD validation is intentionally out of
+     * scope; this gate checks only the portable syntax boundary.
+     */
+    private fun validateXml(text: String): StructuredTextValidationResult {
+        if (text.length > MAX_XML_CHARS) {
+            return invalidXml("XML input exceeds the supported 3 Mi character limit.")
+        }
+        if (text.isBlank()) return invalidXml("XML input is empty.")
+
+        return try {
+            val reader = xmlStreaming.newReader(text, expandEntities = false)
+            var depth = 0
+            var rootElements = 0
+            try {
+                while (reader.hasNext()) {
+                    when (reader.next()) {
+                        EventType.START_ELEMENT -> {
+                            if (depth == 0) rootElements++
+                            depth++
+                            if (depth > MAX_XML_NESTING) {
+                                return invalidXml(
+                                    "XML nesting exceeds the supported limit of $MAX_XML_NESTING."
+                                )
+                            }
+                        }
+                        EventType.END_ELEMENT -> depth--
+                        EventType.DOCDECL -> return invalidXml(
+                            "XML DOCTYPE/DTD declarations are not supported by portable validation."
+                        )
+                        else -> Unit
+                    }
+                }
+            } finally {
+                reader.close()
+            }
+
+            when {
+                depth != 0 -> invalidXml("XML element nesting is unbalanced.")
+                rootElements != 1 -> invalidXml("XML must contain exactly one root element.")
+                else -> StructuredTextValidationResult(StructuredTextFormat.XML)
+            }
+        } catch (error: XmlException) {
+            invalidXml(error.message ?: "Invalid XML.")
+        }
+    }
+
+    private fun invalidXml(message: String): StructuredTextValidationResult =
+        StructuredTextValidationResult(
+            format = StructuredTextFormat.XML,
+            errorMessage = message
+        )
 
     private data class StrictJsonInspection(
         val errorMessage: String? = null,
