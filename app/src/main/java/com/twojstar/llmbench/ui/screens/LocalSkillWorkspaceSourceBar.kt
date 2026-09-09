@@ -74,26 +74,31 @@ internal fun LocalSkillWorkspaceSourceBar(
                         return@Button
                     }
                     scope.launch {
-                        try {
+                        val failure = runCatching {
                             store.replace(snapshotOrigin.name, snapshot.document.text)
-                            val current = workspaceViewModel.completeSourceSave(snapshot)
-                            onMessage(
-                                if (current) {
-                                    "Saved '${snapshotOrigin.name}' to local skills."
-                                } else {
-                                    "Saved '${snapshotOrigin.name}' snapshot; newer edits remain unsaved."
-                                }
-                            )
-                        } catch (error: CancellationException) {
+                        }.exceptionOrNull()
+                        if (failure != null) {
                             workspaceViewModel.failExport(snapshot)
-                            throw error
-                        } catch (error: IllegalArgumentException) {
-                            workspaceViewModel.failExport(snapshot)
-                            onMessage(error.message ?: "SKILL.md is not valid and was not saved.")
-                        } catch (error: IOException) {
-                            workspaceViewModel.failExport(snapshot)
-                            onMessage(error.message ?: "Could not save the local skill source.")
+                            if (failure is CancellationException) throw failure
+                            val message = when (failure) {
+                                is IllegalArgumentException ->
+                                    failure.message ?: "SKILL.md is not valid and was not saved."
+                                is IOException ->
+                                    failure.message ?: "Could not save the local skill source."
+                                else -> throw failure
+                            }
+                            onMessage(message)
+                            return@launch
                         }
+
+                        val current = workspaceViewModel.completeSourceSave(snapshot)
+                        onMessage(
+                            if (current) {
+                                "Saved '${snapshotOrigin.name}' to local skills."
+                            } else {
+                                "Saved '${snapshotOrigin.name}' snapshot; newer edits remain unsaved."
+                            }
+                        )
                     }
                 },
                 modifier = Modifier.testTag("save_local_skill_source")
