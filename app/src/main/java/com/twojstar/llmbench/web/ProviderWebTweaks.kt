@@ -1,7 +1,9 @@
 package com.twojstar.llmbench.web
 
 import android.webkit.WebView
+import com.twojstar.llmbench.data.model.ProviderIdentityMethod
 import com.twojstar.llmbench.data.model.WebAiService
+import com.twojstar.llmbench.data.model.onboardingCapabilities
 import java.net.URI
 
 internal data class ProviderWebTweak(
@@ -210,11 +212,40 @@ internal object ProviderWebTweakRegistry {
         WebAiService.META_AI to setOf("alpha.meta.ai")
     )
 
-    private val topLevelNavigationAuthHosts = mapOf(
-        WebAiService.QWEN to setOf("accounts.google.com", "github.com"),
-        WebAiService.COPILOT to setOf("login.live.com", "login.microsoftonline.com"),
-        WebAiService.ZAI to setOf("accounts.google.com", "github.com")
+    private val identityAuthHosts = mapOf(
+        ProviderIdentityMethod.GOOGLE to setOf("accounts.google.com"),
+        ProviderIdentityMethod.GITHUB to setOf("github.com"),
+        ProviderIdentityMethod.MICROSOFT to setOf("login.live.com", "login.microsoftonline.com")
     )
+
+    // Android verification is scoped to an exact provider + identity-method pair. Portable
+    // onboarding metadata can add discoverable methods without silently widening WebView redirects.
+    private val verifiedTopLevelNavigationIdentityMethods = mapOf(
+        WebAiService.QWEN to setOf(
+            ProviderIdentityMethod.GOOGLE,
+            ProviderIdentityMethod.GITHUB
+        ),
+        WebAiService.COPILOT to setOf(ProviderIdentityMethod.MICROSOFT),
+        WebAiService.ZAI to setOf(
+            ProviderIdentityMethod.GOOGLE,
+            ProviderIdentityMethod.GITHUB
+        )
+    )
+
+    fun isIdentityMethodVerifiedForNavigation(
+        service: WebAiService,
+        method: ProviderIdentityMethod
+    ): Boolean = method in verifiedTopLevelNavigationIdentityMethods[service].orEmpty() &&
+        method in service.onboardingCapabilities().preferredIdentityMethods
+
+    private val topLevelNavigationAuthHosts = WebAiService.entries
+        .associateWith { service ->
+            service.onboardingCapabilities().preferredIdentityMethods
+                .filter { method -> isIdentityMethodVerifiedForNavigation(service, method) }
+                .flatMap { method -> identityAuthHosts[method].orEmpty() }
+                .toSet()
+        }
+        .filterValues { it.isNotEmpty() }
 
     private val providerTweaks = WebAiService.entries.associateWith { service ->
         when (service) {
@@ -255,7 +286,7 @@ internal object ProviderWebTweakRegistry {
     }
 
     fun hasVerifiedTopLevelNavigationPolicy(service: WebAiService): Boolean =
-        service in topLevelNavigationAuthHosts
+        service in verifiedTopLevelNavigationIdentityMethods
 
     fun topLevelNavigationAuthHosts(service: WebAiService): Set<String> =
         topLevelNavigationAuthHosts[service].orEmpty()
