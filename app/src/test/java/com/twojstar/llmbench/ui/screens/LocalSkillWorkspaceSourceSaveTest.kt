@@ -21,7 +21,7 @@ class LocalSkillWorkspaceSourceSaveTest {
         val root = Files.createTempDirectory("llmbench-skill-save").toFile()
         try {
             val store = LocalSkillLibraryStore(root)
-            val original = skillSource(SKILL_NAME, "First version.")
+            val original = skillSource(SKILL_NAME, FIRST_VERSION)
             val edited = skillSource(SKILL_NAME, "Edited version.")
             store.add(original)
             val opened = requireNotNull(store.read(SKILL_NAME))
@@ -59,7 +59,7 @@ class LocalSkillWorkspaceSourceSaveTest {
         val root = Files.createTempDirectory("llmbench-skill-rename-prompt").toFile()
         try {
             val store = LocalSkillLibraryStore(root)
-            val original = skillSource(SKILL_NAME, "First version.")
+            val original = skillSource(SKILL_NAME, FIRST_VERSION)
             val renamed = skillSource(RENAMED_SKILL_NAME, "Renamed version.")
             store.add(original)
             val opened = requireNotNull(store.read(SKILL_NAME))
@@ -71,7 +71,11 @@ class LocalSkillWorkspaceSourceSaveTest {
             val outcome = persistLocalSkillSource(store, viewModel, snapshot, snapshotOrigin)
 
             assertEquals(
-                LocalSkillSourceSaveOutcome.RenameRequired(SKILL_NAME, RENAMED_SKILL_NAME),
+                LocalSkillSourceSaveOutcome.RenameRequired(
+                    existingName = SKILL_NAME,
+                    newName = RENAMED_SKILL_NAME,
+                    revision = snapshot.revision
+                ),
                 outcome
             )
             assertEquals(original, store.read(SKILL_NAME)?.source)
@@ -88,7 +92,7 @@ class LocalSkillWorkspaceSourceSaveTest {
         val root = Files.createTempDirectory("llmbench-skill-rename-confirm").toFile()
         try {
             val store = LocalSkillLibraryStore(root)
-            val original = skillSource(SKILL_NAME, "First version.")
+            val original = skillSource(SKILL_NAME, FIRST_VERSION)
             val renamed = skillSource(RENAMED_SKILL_NAME, "Renamed version.")
             store.add(original)
             val opened = requireNotNull(store.read(SKILL_NAME))
@@ -152,5 +156,6 @@ class LocalSkillWorkspaceSourceSaveTest {
         const val SKILL_NAME = "cancellation-safe"
         const val RENAMED_SKILL_NAME = "renamed-cancellation-safe"
         const val SKILL_FILE_NAME = "SKILL.md"
+        const val FIRST_VERSION = "First version."
     }
 }
