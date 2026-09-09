@@ -34,14 +34,24 @@ The ideas are inspired by observed workflows in other AI/document apps and by to
 
 ## Skills
 
-- Use a portable `SKILL.md` convention with YAML frontmatter and optional `assets/` / `scripts/` siblings.
-- Create and manually edit skills in LlmBench instead of hiding their instructions behind a form.
-- Import a local skill directory or a skill URL; allow export/download as normal files.
-- Provide built-in and custom skill lists with search, enable/disable, delete, rename and sample prompts.
-- Add AI-assisted create/edit and document-to-skill flows as optional conveniences, while keeping the Markdown source directly editable.
-- Preview and validate imported skills before enabling them.
-- Require explicit capabilities/permissions for active behavior; importing Markdown alone must never execute scripts.
-- Keep secrets outside `SKILL.md` and show a trust warning for third-party skills.
+### Shipped: Skills v1
+
+- Parse and validate portable `SKILL.md` files with YAML frontmatter before they enter the local library.
+- Keep imported skills in a local searchable library with preview, add/replace, view source, file export, remove and rename flows.
+- Reuse the Markdown workspace for direct source editing and digest-safe save-back instead of hiding skill instructions behind a form.
+- Keep imports disabled by default; enabling a skill requires an explicit trust confirmation.
+- Inject only explicitly enabled skill instructions into native/API chat system context. Imported `allowed-tools`, scripts and other active content remain inert.
+- Enforce per-skill and combined runtime budgets, preserve activation through edits/renames and reject stale or colliding writes.
+- Keep local-skill storage recovery-safe across interrupted writes and renames, including pending/committed rename recovery and tombstone cleanup.
+- Keep secrets outside `SKILL.md`; importing or previewing Markdown alone never executes scripts or grants capabilities.
+
+### Optional follow-ups: Skills++
+
+- Add whole-directory/bundle import and export for portable skills with optional `assets/` / `scripts/` siblings while preserving the v1 non-execution default.
+- Add skill URL import with the same preview, validation and trust boundary as local imports.
+- Add sample prompts/examples to the skill browsing and discovery flow.
+- Add AI-assisted create/edit and document-to-skill conveniences while keeping the Markdown source directly editable and authoritative.
+- Introduce richer capability/permission UI only if active skill behavior is added later; file/network/secret access must remain explicit and least-privileged.
 
 ## Projects and libraries
 
