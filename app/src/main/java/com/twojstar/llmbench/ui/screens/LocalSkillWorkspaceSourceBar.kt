@@ -5,7 +5,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.weight
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Save
@@ -74,9 +73,14 @@ internal fun LocalSkillWorkspaceSourceBar(
                         return@Button
                     }
                     scope.launch {
-                        val failure = runCatching {
-                            store.replace(snapshotOrigin.name, snapshot.document.text)
-                        }.exceptionOrNull()
+                        val saveResult = runCatching {
+                            store.replace(
+                                name = snapshotOrigin.name,
+                                expectedSourceDigest = snapshotOrigin.sourceDigest,
+                                source = snapshot.document.text
+                            )
+                        }
+                        val failure = saveResult.exceptionOrNull()
                         if (failure != null) {
                             workspaceViewModel.failExport(snapshot)
                             if (failure is CancellationException) throw failure
@@ -91,7 +95,12 @@ internal fun LocalSkillWorkspaceSourceBar(
                             return@launch
                         }
 
-                        val current = workspaceViewModel.completeSourceSave(snapshot)
+                        val saved = requireNotNull(saveResult.getOrNull())
+                        val persistedOrigin = MarkdownWorkspaceOrigin.LocalSkill(
+                            name = snapshotOrigin.name,
+                            sourceDigest = saved.sourceDigest
+                        )
+                        val current = workspaceViewModel.completeSourceSave(snapshot, persistedOrigin)
                         onMessage(
                             if (current) {
                                 "Saved '${snapshotOrigin.name}' to local skills."
