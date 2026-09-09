@@ -79,13 +79,19 @@ data class BuiltInBenchToolCapabilities(
             }
         }
         if (networkBehavior == BenchToolNetworkBehavior.LOCAL_ONLY) {
-            require(BenchToolPermission.NETWORK !in requiredPermissions) {
-                "Local-only Bench tools cannot require NETWORK"
+            require(
+                BenchToolPermission.NETWORK !in requiredPermissions &&
+                    BenchToolPermission.NETWORK !in optionalPermissions
+            ) {
+                "Local-only Bench tools cannot request NETWORK"
             }
         }
         if (BenchToolSurface.ACCOUNT_WEB_CHAT in surfaces) {
-            require(BenchToolInvocationMode.EXPLICIT_USER_ACTION in invocationModes) {
-                "Account Web chat Bench bridges must remain explicit user actions"
+            require(
+                BenchToolInvocationMode.EXPLICIT_USER_ACTION in invocationModes &&
+                    BenchToolInvocationMode.MODEL_TOOL_CALL !in invocationModes
+            ) {
+                "Account Web chat Bench bridges must remain explicit user actions only"
             }
         }
     }
