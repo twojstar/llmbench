@@ -312,6 +312,97 @@ class LocalSkillLibraryStoreTest {
     }
 
     @Test
+    fun renameBackToInheritedNameNeverTombstonesItsNewTarget() = runBlocking {
+        var blockedDirectoryName: String? = null
+        val stubbornStore = LocalSkillLibraryStore(root) { directory ->
+            if (directory.name == blockedDirectoryName) false else directory.deleteRecursively()
+        }
+        val original = skillSource(RELEASE_SKILL, FIRST_VERSION)
+        val renamed = skillSource(RENAMED_SKILL, SECOND_VERSION)
+        val renamedBack = skillSource(RELEASE_SKILL, "Back again.")
+        stubbornStore.add(original)
+        blockedDirectoryName = storageDirectoryFor(RELEASE_SKILL).name
+        val firstOpened = requireNotNull(stubbornStore.read(RELEASE_SKILL))
+        stubbornStore.rename(RELEASE_SKILL, firstOpened.sourceDigest, renamed)
+        val secondOpened = requireNotNull(stubbornStore.read(RENAMED_SKILL))
+
+        val blocked = runCatching {
+            stubbornStore.rename(RENAMED_SKILL, secondOpened.sourceDigest, renamedBack)
+        }.exceptionOrNull()
+
+        assertTrue(blocked is IOException)
+        assertEquals(renamed, stubbornStore.read(RENAMED_SKILL)?.source)
+        assertNull(stubbornStore.read(RELEASE_SKILL))
+
+        blockedDirectoryName = null
+        val retryOpened = requireNotNull(stubbornStore.read(RENAMED_SKILL))
+        val result = stubbornStore.rename(RENAMED_SKILL, retryOpened.sourceDigest, renamedBack)
+
+        assertEquals(RELEASE_SKILL, result.skill.name)
+        assertEquals(renamedBack, stubbornStore.read(RELEASE_SKILL)?.source)
+        assertNull(stubbornStore.read(RENAMED_SKILL))
+        assertEquals(listOf(RELEASE_SKILL), stubbornStore.load().map(LocalSkillSummary::name))
+    }
+
+    @Test
+    fun oldNameReuseWaitsUntilStaleTombstoneCanBeRetired() = runBlocking {
+        var blockMarkerDelete = true
+        val stubbornStore = LocalSkillLibraryStore(
+            rootDirectory = root,
+            deleteFile = { file ->
+                if (file.name == RENAME_FROM_FILE_NAME && blockMarkerDelete) false else file.delete()
+            }
+        )
+        val original = skillSource(RELEASE_SKILL, FIRST_VERSION)
+        val renamed = skillSource(RENAMED_SKILL, SECOND_VERSION)
+        val reused = skillSource(RELEASE_SKILL, "Reused name.")
+        stubbornStore.add(original)
+        val opened = requireNotNull(stubbornStore.read(RELEASE_SKILL))
+        stubbornStore.rename(RELEASE_SKILL, opened.sourceDigest, renamed)
+
+        assertFalse(storageDirectoryFor(RELEASE_SKILL).exists())
+        assertTrue(storageDirectoryFor(RENAMED_SKILL).resolve(RENAME_FROM_FILE_NAME).isFile)
+
+        val blocked = runCatching { stubbornStore.add(reused) }.exceptionOrNull()
+
+        assertTrue(blocked is IOException)
+        assertNull(stubbornStore.read(RELEASE_SKILL))
+        assertEquals(renamed, stubbornStore.read(RENAMED_SKILL)?.source)
+
+        blockMarkerDelete = false
+        stubbornStore.add(reused)
+
+        assertEquals(reused, stubbornStore.read(RELEASE_SKILL)?.source)
+        assertEquals(renamed, stubbornStore.read(RENAMED_SKILL)?.source)
+        assertEquals(
+            listOf(RELEASE_SKILL, RENAMED_SKILL),
+            stubbornStore.load().map(LocalSkillSummary::name)
+        )
+    }
+
+    @Test
+    fun unreadableCommittedTargetNeverTombstonesLastValidSource() = runBlocking {
+        val targetDirectory = storageDirectoryFor(RENAMED_SKILL)
+        val stubbornStore = LocalSkillLibraryStore(root) { directory ->
+            if (directory.name == targetDirectory.name) false else directory.deleteRecursively()
+        }
+        val original = skillSource(RELEASE_SKILL, FIRST_VERSION)
+        stubbornStore.add(original)
+        val sourceDirectory = storageDirectoryFor(RELEASE_SKILL)
+        targetDirectory.mkdirs()
+        targetDirectory.resolve(RENAME_FROM_FILE_NAME).writeText(
+            renameMarker(committed = true, sourceDirectory.name)
+        )
+
+        val loaded = stubbornStore.load()
+
+        assertEquals(listOf(RELEASE_SKILL), loaded.map(LocalSkillSummary::name))
+        assertEquals(original, stubbornStore.read(RELEASE_SKILL)?.source)
+        assertTrue(targetDirectory.exists())
+        assertNull(stubbornStore.read(RENAMED_SKILL))
+    }
+
+    @Test
     fun invalidTargetDirectoryIsReclaimedOnRetry() = runBlocking {
         val original = skillSource(RETRY_SKILL, "First attempt.")
         val retry = skillSource(RETRY_SKILL, "Retry succeeds.")
