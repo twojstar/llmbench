@@ -1,9 +1,13 @@
 package com.twojstar.llmbench.data.tokenizer
 
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
+import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
 
 class TokenArenaTest {
@@ -17,18 +21,18 @@ class TokenArenaTest {
         val variant = TokenArenaVariant(
             id = "short",
             label = "Short",
-            prompt = "hello"
+            prompt = PROMPT_HELLO
         )
         val measurement = FakeCounter.measureForArena(
             variant = variant,
-            backendLabel = "fake-local"
+            backendLabel = BACKEND_LOCAL
         )
 
         assertEquals("short", measurement.variantId)
         assertEquals(variant.promptFingerprint, measurement.promptFingerprint)
         assertEquals(5L, measurement.tokens)
         assertEquals(TokenMeasurementMode.LOCAL_EXACT_ENCODING, measurement.mode)
-        assertEquals("fake-local", measurement.backendLabel)
+        assertEquals(BACKEND_LOCAL, measurement.backendLabel)
         assertEquals("fake-encoding", measurement.encodingLabel)
         assertEquals(null, measurement.providerId)
         assertEquals(null, measurement.modelName)
@@ -39,7 +43,7 @@ class TokenArenaTest {
         assertFailsWith<IllegalArgumentException> {
             TokenArenaTokenMeasurement(
                 variantId = "short",
-                promptFingerprint = stablePromptFingerprint("hello"),
+                promptFingerprint = stablePromptFingerprint(PROMPT_HELLO),
                 tokens = 10,
                 mode = TokenMeasurementMode.PROVIDER_EXACT,
                 backendLabel = "provider-api"
@@ -61,7 +65,7 @@ class TokenArenaTest {
         }
 
         val original = TokenArenaVariant(VARIANT_ID, "A", "first")
-        val measurement = FakeCounter.measureForArena(original, "fake-local")
+        val measurement = FakeCounter.measureForArena(original, BACKEND_LOCAL)
         assertFailsWith<IllegalArgumentException> {
             TokenArenaExperiment.create(
                 id = "unknown-ref",
@@ -89,10 +93,10 @@ class TokenArenaTest {
     }
 
     @Test
-    fun experimentSnapshotsCallerCollections() {
+    fun experimentSnapshotsCallerAndExposedCollections() {
         val variant = TokenArenaVariant(VARIANT_ID, "A", "first")
         val variants = mutableListOf(variant)
-        val measurements = mutableListOf(FakeCounter.measureForArena(variant, "fake-local"))
+        val measurements = mutableListOf(FakeCounter.measureForArena(variant, BACKEND_LOCAL))
         val experiment = TokenArenaExperiment.create(
             id = "snapshot",
             intentLabel = INTENT_LABEL,
@@ -102,9 +106,38 @@ class TokenArenaTest {
 
         variants.clear()
         measurements.clear()
+        (experiment.variants as? MutableList<TokenArenaVariant>)?.clear()
+        (experiment.tokenMeasurements as? MutableList<TokenArenaTokenMeasurement>)?.clear()
 
         assertEquals(listOf(variant), experiment.variants)
         assertEquals(1, experiment.tokenMeasurements.size)
+    }
+
+    @Test
+    fun experimentSerializationRoundTripPreservesValueSemantics() {
+        val variant = TokenArenaVariant(VARIANT_ID, "A", PROMPT_HELLO)
+        val experiment = TokenArenaExperiment.create(
+            id = "round-trip",
+            intentLabel = INTENT_LABEL,
+            variants = listOf(variant),
+            tokenMeasurements = listOf(FakeCounter.measureForArena(variant, BACKEND_LOCAL))
+        )
+
+        val json = Json.encodeToString(experiment)
+        val decoded = Json.decodeFromString<TokenArenaExperiment>(json)
+
+        assertEquals(experiment, decoded)
+        assertEquals(experiment.hashCode(), decoded.hashCode())
+        assertTrue(setOf(experiment).contains(decoded))
+    }
+
+    @Test
+    fun promptFingerprintPreservesDistinctUnpairedUtf16Surrogates() {
+        val first = charArrayOf(0xD800.toChar()).concatToString()
+        val second = charArrayOf(0xD801.toChar()).concatToString()
+
+        assertNotEquals(first, second)
+        assertNotEquals(stablePromptFingerprint(first), stablePromptFingerprint(second))
     }
 
     @Test
@@ -117,8 +150,8 @@ class TokenArenaTest {
         ) = TokenArenaResponseObservation(
             variantId = variant.id,
             promptFingerprint = variant.promptFingerprint,
-            providerId = "provider",
-            modelName = "model",
+            providerId = PROVIDER_ID,
+            modelName = MODEL_NAME,
             provenance = provenance,
             isError = isError,
             isPartial = isPartial
@@ -144,5 +177,9 @@ class TokenArenaTest {
     private companion object {
         const val VARIANT_ID = "a"
         const val INTENT_LABEL = "same intent"
+        const val PROMPT_HELLO = "hello"
+        const val BACKEND_LOCAL = "fake-local"
+        const val PROVIDER_ID = "provider"
+        const val MODEL_NAME = "model"
     }
 }
