@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<data-extraction-rules>
+    <cloud-backup>
+        <!--
+            Allowlist only non-sensitive Web chat UI preferences. Sensitive/local working state is
+            intentionally absent, so it is excluded by construction.
+        -->
+        <include domain="sharedpref" path="web_chat_preferences.xml" />
+    </cloud-backup>
+    <device-transfer>
+        <include domain="sharedpref" path="web_chat_preferences.xml" />
+    </device-transfer>
+</data-extraction-rules>
