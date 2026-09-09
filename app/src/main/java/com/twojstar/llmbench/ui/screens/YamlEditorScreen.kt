@@ -98,7 +98,16 @@ fun YamlEditorScreen(
                     onSelectedTab = { selectedYamlTabIndex = it }
                 )
             } else {
-                MarkdownWorkspaceScreen(workspaceViewModel = markdownWorkspaceViewModel)
+                Column(modifier = Modifier.fillMaxSize()) {
+                    LocalSkillWorkspaceSourceBar(
+                        workspaceViewModel = markdownWorkspaceViewModel,
+                        onMessage = viewModel::showSnackbar
+                    )
+                    MarkdownWorkspaceScreen(
+                        workspaceViewModel = markdownWorkspaceViewModel,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
             }
         }
     }

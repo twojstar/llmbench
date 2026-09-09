@@ -25,11 +25,16 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.viewmodel.compose.viewModel
 import com.twojstar.llmbench.data.document.MarkdownDocumentFileAccess
 import com.twojstar.llmbench.data.repository.SkillsAndDocsRepository
 import com.twojstar.llmbench.data.skills.LocalSkillAlreadyExistsException
 import com.twojstar.llmbench.data.skills.LocalSkillLibraryStore
 import com.twojstar.llmbench.ui.theme.*
+import com.twojstar.llmbench.ui.viewmodel.ExternalMarkdownOpenResult
+import com.twojstar.llmbench.ui.viewmodel.MarkdownWorkspaceOrigin
+import com.twojstar.llmbench.ui.viewmodel.MarkdownWorkspaceViewModel
+import com.twojstar.llmbench.ui.viewmodel.NavigationTab
 import com.twojstar.llmbench.ui.viewmodel.StudioViewModel
 import java.io.File
 import java.io.IOException
@@ -54,6 +59,7 @@ fun SkillsBrowserScreen(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val markdownWorkspaceViewModel: MarkdownWorkspaceViewModel = viewModel()
     val localSkillStore = remember(context) {
         LocalSkillLibraryStore(
             File(context.noBackupFilesDir, LocalSkillLibraryStore.LIBRARY_DIRECTORY_NAME)
@@ -64,10 +70,39 @@ fun SkillsBrowserScreen(
     var selectedItemContent by remember { mutableStateOf<Pair<String, String>?>(null) } // Title to Content dialog
     var skillImportPreview by remember { mutableStateOf<SkillImportPreview?>(null) }
     var pendingSkillReplacement by remember { mutableStateOf<SkillImportPreview?>(null) }
+    var pendingSkillEditName by remember { mutableStateOf<String?>(null) }
     var skillImportLoading by remember { mutableStateOf(false) }
     var skillImportSaving by remember { mutableStateOf(false) }
     var localSkillCount by remember { mutableIntStateOf(0) }
     var localSkillsRefreshToken by remember { mutableIntStateOf(0) }
+
+    fun openLocalSkillEditor(
+        name: String,
+        source: String,
+        allowDiscardDirty: Boolean
+    ) {
+        when (
+            markdownWorkspaceViewModel.openExternalText(
+                text = source,
+                displayName = "SKILL.md",
+                allowDiscardDirty = allowDiscardDirty,
+                origin = MarkdownWorkspaceOrigin.LocalSkill(name),
+                markDirty = false
+            )
+        ) {
+            ExternalMarkdownOpenResult.OPENED -> {
+                pendingSkillEditName = null
+                viewModel.selectTab(NavigationTab.YAML)
+            }
+            ExternalMarkdownOpenResult.NEEDS_DISCARD -> pendingSkillEditName = name
+            ExternalMarkdownOpenResult.BUSY -> viewModel.showSnackbar(
+                "Markdown workspace is still restoring or busy. Try again when it is ready."
+            )
+            ExternalMarkdownOpenResult.TOO_LARGE -> viewModel.showSnackbar(
+                "This local skill is larger than the 8 MiB Markdown workspace limit."
+            )
+        }
+    }
 
     val skillImportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
@@ -209,6 +244,9 @@ fun SkillsBrowserScreen(
                             refreshToken = localSkillsRefreshToken,
                             onCountChanged = { localSkillCount = it },
                             onViewSource = { name, source -> selectedItemContent = name to source },
+                            onEditSource = { name, source ->
+                                openLocalSkillEditor(name, source, allowDiscardDirty = false)
+                            },
                             onMessage = viewModel::showSnackbar
                         )
                     }
@@ -458,6 +496,45 @@ fun SkillsBrowserScreen(
             dismissButton = {
                 TextButton(onClick = { selectedItemContent = null }) {
                     Text("Close")
+                }
+            }
+        )
+    }
+
+    pendingSkillEditName?.let { skillName ->
+        AlertDialog(
+            onDismissRequest = { pendingSkillEditName = null },
+            title = { Text("Replace unsaved Markdown draft?") },
+            text = {
+                Text(
+                    "The Markdown workspace has unsaved edits. Discard that draft and edit '$skillName' as its local SKILL.md source?"
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        scope.launch {
+                            val document = localSkillStore.read(skillName)
+                            if (document == null) {
+                                pendingSkillEditName = null
+                                localSkillsRefreshToken += 1
+                                viewModel.showSnackbar("Local skill is no longer available.")
+                            } else {
+                                openLocalSkillEditor(
+                                    name = skillName,
+                                    source = document.source,
+                                    allowDiscardDirty = true
+                                )
+                            }
+                        }
+                    }
+                ) {
+                    Text("Discard and edit")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingSkillEditName = null }) {
+                    Text("Cancel")
                 }
             }
         )

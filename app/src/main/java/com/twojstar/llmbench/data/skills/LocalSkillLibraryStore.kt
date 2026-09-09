@@ -6,7 +6,6 @@ import java.io.IOException
 import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
-import java.security.MessageDigest
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -20,14 +19,42 @@ internal data class LocalSkillSummary(
 
 internal data class LocalSkillDocument(
     val manifest: AgentSkillManifest,
-    val source: String
+    val source: String,
+    val sourceDigest: String
+)
+
+internal data class LocalSkillReplacementResult(
+    val skill: LocalSkillSummary,
+    val sourceDigest: String
 )
 
 internal class LocalSkillAlreadyExistsException(
     val skillName: String
 ) : IOException("Local skill '$skillName' already exists.")
 
+internal class LocalSkillNotFoundException(
+    val skillName: String
+) : IOException("Local skill '$skillName' is no longer available.")
+
+internal class LocalSkillRenameRequiredException(
+    val existingName: String,
+    val newName: String
+) : IOException(
+    "Changing a skill name while editing is not supported. Keep '$existingName' as the name, " +
+        "or import '$newName' as a separate skill."
+)
+
+internal class LocalSkillSourceConflictException(
+    val skillName: String
+) : IOException("Local skill '$skillName' changed since this editor was opened. Reload it before saving.")
+
 internal class LocalSkillActivationException(message: String) : IOException(message)
+
+private data class ParsedLocalSkillSource(
+    val manifest: AgentSkillManifest,
+    val bytes: ByteArray,
+    val sourceDigest: String
+)
 
 internal class LocalSkillLibraryStore(
     private val rootDirectory: File
@@ -61,37 +88,63 @@ internal class LocalSkillLibraryStore(
         source: String,
         replaceExisting: Boolean = false
     ): LocalSkillSummary {
-        val parsed = withContext(Dispatchers.Default) {
-            AgentSkillManifestParser.parse(source)
-        }
-        val manifest = parsed.manifest?.takeIf { parsed.issues.isEmpty() }
-            ?: throw IllegalArgumentException("Only valid portable SKILL.md content can be added.")
-        val bytes = source.encodeToByteArray()
-        if (bytes.size > MAX_SKILL_BYTES) throw IOException("Skill source exceeds the library size limit.")
+        val parsed = parseLocalSkillSource(source)
 
         return mutex.withLock {
-            val skillDirectory = storageDirectory(manifest.name)
+            val skillDirectory = storageDirectory(parsed.manifest.name)
             val existing = if (skillDirectory.isDirectory) readStoredDocument(skillDirectory) else null
             if (existing != null && !replaceExisting) {
-                throw LocalSkillAlreadyExistsException(manifest.name)
+                throw LocalSkillAlreadyExistsException(parsed.manifest.name)
             }
             if (skillDirectory.exists() && existing == null) {
                 withContext(Dispatchers.IO) {
                     if (!skillDirectory.deleteRecursively()) {
-                        throw IOException("Could not reclaim invalid local skill storage for '${manifest.name}'.")
+                        throw IOException("Could not reclaim invalid local skill storage for '${parsed.manifest.name}'.")
                     }
                 }
             }
-            ensureCapacityFor(manifest.name)
+            ensureCapacityFor(parsed.manifest.name)
             val enabled = existing != null && isEnabled(skillDirectory)
             if (enabled) {
-                validateRuntimeBudgetFor(manifest)
+                validateRuntimeBudgetFor(parsed.manifest)
             }
             withContext(Dispatchers.IO) {
                 skillDirectory.mkdirs()
-                writeAtomically(File(skillDirectory, SKILL_FILE_NAME), bytes)
+                writeAtomically(File(skillDirectory, SKILL_FILE_NAME), parsed.bytes)
             }
-            manifest.toSummary(enabled)
+            parsed.manifest.toSummary(enabled)
+        }
+    }
+
+    suspend fun replace(
+        name: String,
+        expectedSourceDigest: String,
+        source: String
+    ): LocalSkillReplacementResult {
+        val parsed = parseLocalSkillSource(source)
+        if (parsed.manifest.name != name) {
+            throw LocalSkillRenameRequiredException(name, parsed.manifest.name)
+        }
+
+        return mutex.withLock {
+            val skillDirectory = storageDirectory(name)
+            val existing = readStoredDocument(skillDirectory)
+                ?.takeIf { it.manifest.name == name }
+                ?: throw LocalSkillNotFoundException(name)
+            if (existing.sourceDigest != expectedSourceDigest) {
+                throw LocalSkillSourceConflictException(name)
+            }
+            val enabled = isEnabled(skillDirectory)
+            if (enabled) {
+                validateRuntimeBudgetFor(parsed.manifest)
+            }
+            withContext(Dispatchers.IO) {
+                writeAtomically(File(skillDirectory, SKILL_FILE_NAME), parsed.bytes)
+            }
+            LocalSkillReplacementResult(
+                skill = parsed.manifest.toSummary(enabled),
+                sourceDigest = parsed.sourceDigest
+            )
         }
     }
 
@@ -121,6 +174,21 @@ internal class LocalSkillLibraryStore(
                 throw IOException("Could not remove local skill '$name'.")
             }
         }
+    }
+
+    private suspend fun parseLocalSkillSource(source: String): ParsedLocalSkillSource {
+        val parsed = withContext(Dispatchers.Default) {
+            AgentSkillManifestParser.parse(source)
+        }
+        val manifest = parsed.manifest?.takeIf { parsed.issues.isEmpty() }
+            ?: throw IllegalArgumentException("Only valid portable SKILL.md content can be saved.")
+        val bytes = source.encodeToByteArray()
+        if (bytes.size > MAX_SKILL_BYTES) throw IOException("Skill source exceeds the library size limit.")
+        return ParsedLocalSkillSource(
+            manifest = manifest,
+            bytes = bytes,
+            sourceDigest = localSkillSourceDigest(source)
+        )
     }
 
     private suspend fun validateRuntimeBudgetFor(candidate: AgentSkillManifest) {
@@ -192,7 +260,11 @@ internal class LocalSkillLibraryStore(
         }
         val manifest = parsed.manifest?.takeIf { parsed.issues.isEmpty() } ?: return null
         if (storageKey(manifest.name) != directory.name) return null
-        return LocalSkillDocument(manifest = manifest, source = source)
+        return LocalSkillDocument(
+            manifest = manifest,
+            source = source,
+            sourceDigest = localSkillSourceDigest(source)
+        )
     }
 
     private fun readStoredSource(directory: File): String? {
@@ -213,21 +285,11 @@ internal class LocalSkillLibraryStore(
     private fun storageDirectory(name: String): File =
         File(rootDirectory, storageKey(name))
 
-    private fun storageKey(name: String): String {
-        val digest = MessageDigest.getInstance("SHA-256").digest(name.encodeToByteArray())
-        val hex = CharArray(digest.size * 2)
-        digest.forEachIndexed { index, byte ->
-            val value = byte.toInt() and 0xFF
-            hex[index * 2] = HEX_DIGITS[value ushr 4]
-            hex[index * 2 + 1] = HEX_DIGITS[value and 0x0F]
-        }
-        return STORAGE_PREFIX + hex.concatToString()
-    }
+    private fun storageKey(name: String): String =
+        STORAGE_PREFIX + sha256Hex(name.encodeToByteArray())
 
     private fun isStorageKey(value: String): Boolean =
-        value.length == STORAGE_PREFIX.length + SHA256_HEX_CHARS &&
-            value.startsWith(STORAGE_PREFIX) &&
-            value.drop(STORAGE_PREFIX.length).all { it in HEX_DIGITS }
+        value.startsWith(STORAGE_PREFIX) && isSha256Hex(value.drop(STORAGE_PREFIX.length))
 
     private fun writeAtomically(destination: File, bytes: ByteArray) {
         destination.parentFile?.mkdirs()
@@ -266,7 +328,5 @@ internal class LocalSkillLibraryStore(
         private const val ENABLED_FILE_NAME = ".enabled"
         private const val MAX_SKILL_BYTES = 8 * 1024 * 1024
         private const val STORAGE_PREFIX = "skill-"
-        private const val SHA256_HEX_CHARS = 64
-        private const val HEX_DIGITS = "0123456789abcdef"
     }
 }
