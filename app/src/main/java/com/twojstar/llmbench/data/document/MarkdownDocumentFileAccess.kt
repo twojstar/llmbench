@@ -18,11 +18,13 @@ internal object MarkdownDocumentFileAccess {
         TextDocumentFileAccess.export(context, uri, document)
 
     fun displayName(context: Context, uri: Uri, fallback: String = FALLBACK_NAME): String =
-        TextDocumentFileAccess.displayName(context, uri, fallback)
+        TextDocumentFileAccess.displayName(context, uri, markdownFallback(fallback))
 
     internal fun resolveDisplayName(providerName: String?, fallback: String = FALLBACK_NAME): String =
-        TextDocumentFileAccess.resolveDisplayName(providerName, fallback)
+        TextDocumentFileAccess.resolveDisplayName(providerName, markdownFallback(fallback))
 
     internal fun normalizeDisplayName(name: String, fallback: String = FALLBACK_NAME): String =
-        TextDocumentFileAccess.normalizeDisplayName(name, fallback)
+        TextDocumentFileAccess.normalizeDisplayName(name, markdownFallback(fallback))
+
+    private fun markdownFallback(fallback: String): String = fallback.trim().ifBlank { FALLBACK_NAME }
 }
