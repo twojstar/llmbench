@@ -1,9 +1,9 @@
 package com.twojstar.llmbench.data.document
 
-import com.charleskorn.kaml.AnchorsAndAliases
-import com.charleskorn.kaml.Yaml
-import com.charleskorn.kaml.YamlConfiguration
-import com.charleskorn.kaml.YamlException
+import it.krzeminski.snakeyaml.engine.kmp.api.LoadSettings
+import it.krzeminski.snakeyaml.engine.kmp.exceptions.YamlEngineException
+import it.krzeminski.snakeyaml.engine.kmp.parser.ParserImpl
+import it.krzeminski.snakeyaml.engine.kmp.scanner.StreamReader
 
 /** Structured text syntaxes currently validated by the portable document core. */
 enum class StructuredTextFormat {
@@ -37,13 +37,7 @@ data class StructuredTextFormatResult(
  */
 object StructuredTextDiagnostics {
     private const val MAX_JSON_NESTING = 128
-    private val MAX_YAML_ALIAS_COUNT = 100u
-
-    private val documentYaml = Yaml(
-        configuration = YamlConfiguration(
-            anchorsAndAliases = AnchorsAndAliases.Permitted(maxAliasCount = MAX_YAML_ALIAS_COUNT)
-        )
-    )
+    private const val MAX_YAML_CODE_POINTS = 3 * 1024 * 1024
 
     fun validate(text: String, format: StructuredTextFormat): StructuredTextValidationResult =
         when (format) {
@@ -87,13 +81,23 @@ object StructuredTextDiagnostics {
         )
     }
 
+    /**
+     * Parses YAML events only. This validates YAML syntax without forcing documents into Kotaml's
+     * narrower YamlNode model or constructing application objects. StreamReader enforces the bounded
+     * code-point limit before an imported document can consume unbounded parser memory.
+     */
     private fun validateYaml(text: String): StructuredTextValidationResult = try {
-        documentYaml.parseToYamlNode(text)
+        val settings = LoadSettings(
+            label = "LlmBench document",
+            codePointLimit = MAX_YAML_CODE_POINTS
+        )
+        val parser = ParserImpl(settings, StreamReader(settings, text))
+        while (parser.hasNext()) parser.next()
         StructuredTextValidationResult(StructuredTextFormat.YAML)
-    } catch (error: YamlException) {
+    } catch (error: YamlEngineException) {
         StructuredTextValidationResult(
             format = StructuredTextFormat.YAML,
-            errorMessage = error.message
+            errorMessage = error.message ?: "Invalid YAML."
         )
     }
 
