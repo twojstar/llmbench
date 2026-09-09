@@ -60,6 +60,7 @@ private data class RenameMarker(
 
 internal class LocalSkillLibraryStore(
     private val rootDirectory: File,
+    private val deleteFile: (File) -> Boolean = { file -> file.delete() },
     private val deleteDirectory: (File) -> Boolean = { directory -> directory.deleteRecursively() }
 ) {
     private val mutex = PROCESS_MUTEX
@@ -372,7 +373,7 @@ internal class LocalSkillLibraryStore(
         }
         withContext(Dispatchers.IO) {
             when {
-                remaining.isEmpty() -> markerFile.delete()
+                remaining.isEmpty() -> deleteFile(markerFile)
                 remaining != marker.sourceDirectoryNames -> runCatching {
                     writeAtomically(
                         markerFile,
@@ -408,7 +409,7 @@ internal class LocalSkillLibraryStore(
             val markerFile = File(candidate, RENAME_FROM_FILE_NAME)
             withContext(Dispatchers.IO) {
                 if (remaining.isEmpty()) {
-                    if (markerFile.exists() && !markerFile.delete()) {
+                    if (markerFile.exists() && !deleteFile(markerFile)) {
                         throw IOException("Could not retire local skill rename history.")
                     }
                 } else {
