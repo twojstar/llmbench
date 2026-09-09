@@ -8,6 +8,7 @@ import com.twojstar.llmbench.data.document.DocumentDiagnostics
 import com.twojstar.llmbench.data.document.LineEnding
 import com.twojstar.llmbench.data.document.MarkdownDocumentFileAccess
 import com.twojstar.llmbench.data.document.MarkdownWorkspaceRecoverySnapshot
+import com.twojstar.llmbench.data.document.MarkdownWorkspaceRecoverySource
 import com.twojstar.llmbench.data.document.MarkdownWorkspaceRecoveryStore
 import com.twojstar.llmbench.data.document.TextDocument
 import com.twojstar.llmbench.data.document.TextDocumentCodec
@@ -31,7 +32,10 @@ private const val RECOVERY_DEBOUNCE_MS = 650L
 internal const val MAX_EDITABLE_MARKDOWN_CHARS = 1_000_000
 
 sealed interface MarkdownWorkspaceOrigin {
-    data class LocalSkill(val name: String) : MarkdownWorkspaceOrigin
+    data class LocalSkill(
+        val name: String,
+        val sourceDigest: String
+    ) : MarkdownWorkspaceOrigin
 }
 
 data class MarkdownWorkspaceUiState(
@@ -300,23 +304,28 @@ class MarkdownWorkspaceViewModel : ViewModel() {
         return stillCurrent
     }
 
-    fun completeSourceSave(snapshot: MarkdownExportSnapshot): Boolean {
+    fun completeSourceSave(
+        snapshot: MarkdownExportSnapshot,
+        persistedOrigin: MarkdownWorkspaceOrigin
+    ): Boolean {
         val stillCurrent = synchronized(this) {
             val state = _uiState.value
             if (!state.isExporting || activeExportOperationId != snapshot.operationId) return@synchronized false
             activeExportOperationId = null
-            val current =
-                snapshot.origin != null &&
-                    state.origin == snapshot.origin &&
-                    state.revision == snapshot.revision
-            _uiState.value = if (current) {
-                state.copy(isDirty = false, isExporting = false)
+            val sameSource = snapshot.origin != null && state.origin == snapshot.origin
+            val current = sameSource && state.revision == snapshot.revision
+            _uiState.value = if (sameSource) {
+                state.copy(
+                    origin = persistedOrigin,
+                    isDirty = !current,
+                    isExporting = false
+                )
             } else {
                 state.copy(isExporting = false)
             }
             current
         }
-        if (stillCurrent) scheduleRecovery(delayMs = 0L)
+        scheduleRecovery(delayMs = 0L)
         return stillCurrent
     }
 
@@ -332,11 +341,19 @@ class MarkdownWorkspaceViewModel : ViewModel() {
 
     fun recoverySnapshot(): MarkdownWorkspaceRecoverySnapshot {
         val state = _uiState.value
+        val source = when (val origin = state.origin) {
+            is MarkdownWorkspaceOrigin.LocalSkill -> MarkdownWorkspaceRecoverySource(
+                localSkillName = origin.name,
+                sourceDigest = origin.sourceDigest
+            )
+            null -> null
+        }
         return MarkdownWorkspaceRecoverySnapshot(
             text = state.text,
             hadUtf8Bom = state.hadUtf8Bom,
             displayName = state.displayName,
-            isDirty = state.isDirty
+            isDirty = state.isDirty,
+            source = source
         )
     }
 
@@ -389,7 +406,13 @@ class MarkdownWorkspaceViewModel : ViewModel() {
             ),
             isDirty = snapshot.isDirty,
             revision = 1L,
-            isRecoveryLoading = false
+            isRecoveryLoading = false,
+            origin = snapshot.source?.let { source ->
+                MarkdownWorkspaceOrigin.LocalSkill(
+                    name = source.localSkillName,
+                    sourceDigest = source.sourceDigest
+                )
+            }
         )
 
     private fun documentFrom(state: MarkdownWorkspaceUiState): TextDocument = TextDocument(
