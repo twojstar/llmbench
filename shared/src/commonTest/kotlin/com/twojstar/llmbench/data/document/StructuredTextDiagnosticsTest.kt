@@ -132,4 +132,63 @@ class StructuredTextDiagnosticsTest {
             ).isValid
         )
     }
+
+    @Test
+    fun xmlValidationAcceptsPortableWellFormedSyntax() {
+        listOf(
+            "<root />",
+            "<?xml version=\"1.0\"?><root><child id=\"1\">text &amp; more</child></root>",
+            "<!-- before --><root xmlns=\"urn:llmbench\"><![CDATA[a < b]]></root><!-- after -->",
+            "<?tool preview?><root xmlns:x=\"urn:x\"><x:item /></root><?done ok?>"
+        ).forEach { source ->
+            assertTrue(
+                StructuredTextDiagnostics.validate(source, StructuredTextFormat.XML).isValid,
+                source
+            )
+        }
+    }
+
+    @Test
+    fun malformedOrMultiRootXmlFailsValidation() {
+        listOf(
+            "",
+            "   \n\t",
+            "<root>",
+            "<root><child></root>",
+            "<first /><second />",
+            "text-before<root />"
+        ).forEach { source ->
+            assertFalse(
+                StructuredTextDiagnostics.validate(source, StructuredTextFormat.XML).isValid,
+                source
+            )
+        }
+    }
+
+    @Test
+    fun xmlDoctypeIsRejectedWithoutEntityExpansion() {
+        val source = "<!DOCTYPE root [<!ENTITY secret \"value\">]><root>&secret;</root>"
+        val result = StructuredTextDiagnostics.validate(source, StructuredTextFormat.XML)
+
+        assertFalse(result.isValid)
+        assertTrue(result.errorMessage.orEmpty().contains("DOCTYPE", ignoreCase = true))
+    }
+
+    @Test
+    fun excessiveXmlNestingReturnsValidationError() {
+        val source = "<n>".repeat(129) + "x" + "</n>".repeat(129)
+        val result = StructuredTextDiagnostics.validate(source, StructuredTextFormat.XML)
+
+        assertFalse(result.isValid)
+        assertTrue(result.errorMessage.orEmpty().contains("nesting", ignoreCase = true))
+    }
+
+    @Test
+    fun oversizedXmlIsRejectedBeforeParsing() {
+        val source = "<root>" + "x".repeat(3 * 1024 * 1024) + "</root>"
+        val result = StructuredTextDiagnostics.validate(source, StructuredTextFormat.XML)
+
+        assertFalse(result.isValid)
+        assertTrue(result.errorMessage.orEmpty().contains("limit", ignoreCase = true))
+    }
 }
