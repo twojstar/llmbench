@@ -8,6 +8,7 @@ composeBom = "2025.02.00"
 navigationCompose = "2.10.0"
 serialization = "1.11.0"
 kotaml = "0.110.0"
+snakeyamlEngineKmp = "4.0.1"
 normalize = "1.3.3"
 material3 = "1.3.1"
 materialIconsExtended = "1.7.8"
@@ -35,6 +36,7 @@ androidx-material-icons-extended = { group = "androidx.compose.material", name =
 androidx-navigation-compose = { group = "androidx.navigation", name = "navigation-compose", version.ref = "navigationCompose" }
 kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "serialization" }
 kotaml = { group = "io.heapy.kotaml", name = "kotaml", version.ref = "kotaml" }
+snakeyaml-engine-kmp = { group = "it.krzeminski", name = "snakeyaml-engine-kmp", version.ref = "snakeyamlEngineKmp" }
 normalize = { group = "com.doist.x", name = "normalize", version.ref = "normalize" }
 kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "coroutines" }
 okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version.ref = "okhttp" }
