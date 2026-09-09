@@ -1,7 +1,9 @@
 package com.twojstar.llmbench.web
 
 import android.webkit.WebView
+import com.twojstar.llmbench.data.model.ProviderIdentityMethod
 import com.twojstar.llmbench.data.model.WebAiService
+import com.twojstar.llmbench.data.model.onboardingCapabilities
 import java.net.URI
 
 internal data class ProviderWebTweak(
@@ -210,11 +212,19 @@ internal object ProviderWebTweakRegistry {
         WebAiService.META_AI to setOf("alpha.meta.ai")
     )
 
-    private val topLevelNavigationAuthHosts = mapOf(
-        WebAiService.QWEN to setOf("accounts.google.com", "github.com"),
-        WebAiService.COPILOT to setOf("login.live.com", "login.microsoftonline.com"),
-        WebAiService.ZAI to setOf("accounts.google.com", "github.com")
+    private val identityAuthHosts = mapOf(
+        ProviderIdentityMethod.GOOGLE to setOf("accounts.google.com"),
+        ProviderIdentityMethod.GITHUB to setOf("github.com"),
+        ProviderIdentityMethod.MICROSOFT to setOf("login.live.com", "login.microsoftonline.com")
     )
+
+    private val topLevelNavigationAuthHosts = WebAiService.entries
+        .associateWith { service ->
+            service.onboardingCapabilities().preferredIdentityMethods
+                .flatMap { method -> identityAuthHosts[method].orEmpty() }
+                .toSet()
+        }
+        .filterValues { it.isNotEmpty() }
 
     private val providerTweaks = WebAiService.entries.associateWith { service ->
         when (service) {
