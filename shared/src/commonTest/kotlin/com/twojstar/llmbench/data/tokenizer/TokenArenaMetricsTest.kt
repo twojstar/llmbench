@@ -12,12 +12,12 @@ class TokenArenaMetricsTest {
         val reference = variant(REFERENCE_ID, "reference")
         val candidate = variant(CANDIDATE_ID, "candidate")
         val experiment = TokenArenaExperiment.create(
-            id = "arena",
+            id = ARENA_ID,
             intentLabel = "Compare prompt representations",
             variants = listOf(reference, candidate),
             tokenMeasurements = listOf(
-                localMeasurement(reference, 100, "o200k"),
-                localMeasurement(candidate, 80, "o200k"),
+                localMeasurement(reference, 100, O200K_ENCODING),
+                localMeasurement(candidate, 80, O200K_ENCODING),
                 localMeasurement(candidate, 55, "other-encoding"),
                 providerMeasurement(reference, 120),
                 providerMeasurement(candidate, 90)
@@ -41,12 +41,12 @@ class TokenArenaMetricsTest {
         val reference = variant(REFERENCE_ID, "")
         val candidate = variant(CANDIDATE_ID, "x")
         val experiment = TokenArenaExperiment.create(
-            id = "arena",
+            id = ARENA_ID,
             intentLabel = "Zero baseline",
             variants = listOf(reference, candidate),
             tokenMeasurements = listOf(
-                localMeasurement(reference, 0, "o200k"),
-                localMeasurement(candidate, 1, "o200k")
+                localMeasurement(reference, 0, O200K_ENCODING),
+                localMeasurement(candidate, 1, O200K_ENCODING)
             )
         )
 
@@ -70,13 +70,13 @@ class TokenArenaMetricsTest {
 
     @Test
     fun missingProviderUsageDoesNotBorrowLocalTokenMeasurement() {
-        val prompt = variant(REFERENCE_ID, "prompt")
+        val prompt = variant(REFERENCE_ID, PROMPT_TEXT)
         val observation = observation(qualityScore = 1.0)
         val experiment = TokenArenaExperiment.create(
-            id = "arena",
+            id = ARENA_ID,
             intentLabel = "No provider usage",
             variants = listOf(prompt),
-            tokenMeasurements = listOf(localMeasurement(prompt, 20, "o200k")),
+            tokenMeasurements = listOf(localMeasurement(prompt, 20, O200K_ENCODING)),
             responseObservations = listOf(observation)
         )
 
@@ -90,7 +90,7 @@ class TokenArenaMetricsTest {
 
     @Test
     fun liveRankingExcludesCachedSimulatedPartialAndFailedResponses() {
-        val prompt = variant(REFERENCE_ID, "prompt")
+        val prompt = variant(REFERENCE_ID, PROMPT_TEXT)
         val liveBetter = observation(
             variant = prompt,
             qualityScore = 0.9,
@@ -133,7 +133,7 @@ class TokenArenaMetricsTest {
             )
         )
         val experiment = TokenArenaExperiment.create(
-            id = "arena",
+            id = ARENA_ID,
             intentLabel = "Live ranking",
             variants = listOf(prompt),
             responseObservations = listOf(liveBetter, liveLower) + excluded
@@ -190,7 +190,7 @@ class TokenArenaMetricsTest {
     )
 
     private fun observation(
-        variant: TokenArenaVariant = variant(REFERENCE_ID, "prompt"),
+        variant: TokenArenaVariant = variant(REFERENCE_ID, PROMPT_TEXT),
         providerId: String = PROVIDER_ID,
         provenance: ArenaResponseProvenance = ArenaResponseProvenance.LIVE_PROVIDER,
         usage: ProviderUsage? = null,
@@ -210,10 +210,13 @@ class TokenArenaMetricsTest {
     )
 
     companion object {
+        private const val ARENA_ID = "arena"
         private const val REFERENCE_ID = "reference"
         private const val CANDIDATE_ID = "candidate"
         private const val PROVIDER_ID = "provider"
         private const val MODEL_NAME = "model"
         private const val PROVIDER_BACKEND = "provider-count-api"
+        private const val O200K_ENCODING = "o200k"
+        private const val PROMPT_TEXT = "prompt"
     }
 }
