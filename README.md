@@ -129,8 +129,8 @@ Backends are optional, not the default. If a feature truly needs one, prefer a t
 - [x] add Qwen, Microsoft Copilot, Z.ai, Grok, Character.AI, Venice and Meta AI account-backed WebView entries
 - [ ] verify embedded sign-in, embedded upload flows and provider-specific generation activity probes for Qwen, Copilot, Z.ai, Grok, Character.AI, Venice and Meta AI
 - [ ] add identity-assisted provider onboarding with a preferred Google/GitHub/Microsoft sign-in path, verified provider capabilities and browser-backed auth where needed, without a mandatory LlmBench account or cookie/token copying
-- [ ] add a local Markdown prompt vault with edit/import/export and chat-to-`.md` workflows
-- [ ] add manually editable/importable `SKILL.md` assets with safe capability gating
+- [x] add a local Markdown prompt vault with edit/import/export and chat-to-`.md` workflows
+- [x] add manually editable/importable `SKILL.md` assets with safe capability gating
 - [ ] bring Docbench's format validation/repair, EOL normalization, local tokenizer and hidden-text/prompt-smuggling inspector into prompt/file tooling
 - [ ] add first-party Docbench/Codebench tools/plugins for compatible chats, plus a persistent Streambench radio player as first-party companion UI
 - [ ] modernize chat/navigation UX with current stable Material 3 Adaptive, measured Compose performance work and large-screen list-detail layouts
