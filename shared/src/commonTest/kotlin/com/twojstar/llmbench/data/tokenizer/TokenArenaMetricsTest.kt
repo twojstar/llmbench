@@ -28,10 +28,10 @@ class TokenArenaMetricsTest {
 
         assertEquals(2, deltas.size)
         val local = deltas.single { it.series.mode == TokenMeasurementMode.LOCAL_EXACT_ENCODING }
-        assertEquals(-20, local.deltaTokens)
+        assertEquals(-20L, local.deltaTokens)
         assertEquals(-20.0, local.deltaPercent)
         val provider = deltas.single { it.series.mode == TokenMeasurementMode.PROVIDER_EXACT }
-        assertEquals(-30, provider.deltaTokens)
+        assertEquals(-30L, provider.deltaTokens)
         assertEquals(-25.0, provider.deltaPercent)
         assertTrue(deltas.none { it.series.encodingLabel == "other-encoding" })
     }
@@ -51,7 +51,7 @@ class TokenArenaMetricsTest {
         )
 
         val delta = experiment.tokenDeltas(REFERENCE_ID).single()
-        assertEquals(1, delta.deltaTokens)
+        assertEquals(1L, delta.deltaTokens)
         assertNull(delta.deltaPercent)
     }
 
