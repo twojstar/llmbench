@@ -6,7 +6,6 @@ import java.io.IOException
 import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
-import java.security.MessageDigest
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -188,7 +187,7 @@ internal class LocalSkillLibraryStore(
         return ParsedLocalSkillSource(
             manifest = manifest,
             bytes = bytes,
-            sourceDigest = sha256Hex(bytes)
+            sourceDigest = localSkillSourceDigest(source)
         )
     }
 
@@ -264,7 +263,7 @@ internal class LocalSkillLibraryStore(
         return LocalSkillDocument(
             manifest = manifest,
             source = source,
-            sourceDigest = sha256Hex(source.encodeToByteArray())
+            sourceDigest = localSkillSourceDigest(source)
         )
     }
 
@@ -289,21 +288,8 @@ internal class LocalSkillLibraryStore(
     private fun storageKey(name: String): String =
         STORAGE_PREFIX + sha256Hex(name.encodeToByteArray())
 
-    private fun sha256Hex(bytes: ByteArray): String {
-        val digest = MessageDigest.getInstance("SHA-256").digest(bytes)
-        val hex = CharArray(digest.size * 2)
-        digest.forEachIndexed { index, byte ->
-            val value = byte.toInt() and 0xFF
-            hex[index * 2] = HEX_DIGITS[value ushr 4]
-            hex[index * 2 + 1] = HEX_DIGITS[value and 0x0F]
-        }
-        return hex.concatToString()
-    }
-
     private fun isStorageKey(value: String): Boolean =
-        value.length == STORAGE_PREFIX.length + SHA256_HEX_CHARS &&
-            value.startsWith(STORAGE_PREFIX) &&
-            value.drop(STORAGE_PREFIX.length).all { it in HEX_DIGITS }
+        value.startsWith(STORAGE_PREFIX) && isSha256Hex(value.drop(STORAGE_PREFIX.length))
 
     private fun writeAtomically(destination: File, bytes: ByteArray) {
         destination.parentFile?.mkdirs()
@@ -342,7 +328,5 @@ internal class LocalSkillLibraryStore(
         private const val ENABLED_FILE_NAME = ".enabled"
         private const val MAX_SKILL_BYTES = 8 * 1024 * 1024
         private const val STORAGE_PREFIX = "skill-"
-        private const val SHA256_HEX_CHARS = 64
-        private const val HEX_DIGITS = "0123456789abcdef"
     }
 }
