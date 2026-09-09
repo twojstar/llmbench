@@ -41,7 +41,11 @@ import kotlinx.coroutines.withContext
 
 internal sealed interface LocalSkillSourceSaveOutcome {
     data class Saved(val name: String, val current: Boolean) : LocalSkillSourceSaveOutcome
-    data class RenameRequired(val existingName: String, val newName: String) : LocalSkillSourceSaveOutcome
+    data class RenameRequired(
+        val existingName: String,
+        val newName: String,
+        val revision: Long
+    ) : LocalSkillSourceSaveOutcome
     data class Failed(val message: String) : LocalSkillSourceSaveOutcome
 }
 
@@ -64,7 +68,8 @@ internal suspend fun persistLocalSkillSource(
         if (failure is LocalSkillRenameRequiredException) {
             return@withContext LocalSkillSourceSaveOutcome.RenameRequired(
                 existingName = failure.existingName,
-                newName = failure.newName
+                newName = failure.newName,
+                revision = snapshot.revision
             )
         }
         return@withContext LocalSkillSourceSaveOutcome.Failed(localSkillSaveFailureMessage(failure))
@@ -221,7 +226,12 @@ internal fun LocalSkillWorkspaceSourceBar(
                         pendingRename = null
                         val snapshot = workspaceViewModel.beginExport()
                         val snapshotOrigin = snapshot?.origin as? MarkdownWorkspaceOrigin.LocalSkill
-                        if (snapshot == null || snapshotOrigin == null || snapshotOrigin.name != rename.existingName) {
+                        if (
+                            snapshot == null ||
+                            snapshotOrigin == null ||
+                            snapshotOrigin.name != rename.existingName ||
+                            snapshot.revision != rename.revision
+                        ) {
                             snapshot?.let(workspaceViewModel::failExport)
                             onMessage("Local skill source changed before rename confirmation. Try Save source again.")
                             return@Button
