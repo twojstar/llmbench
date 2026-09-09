@@ -62,6 +62,24 @@ class BuiltInBenchCapabilitiesTest {
     }
 
     @Test
+    fun optionalNetworkCapabilityRequiresNetworkAsOptionalOnly() {
+        capability(
+            optionalPermissions = setOf(BenchToolPermission.NETWORK),
+            networkBehavior = BenchToolNetworkBehavior.NETWORK_OPTIONAL
+        )
+
+        assertFailsWith<IllegalArgumentException> {
+            capability(networkBehavior = BenchToolNetworkBehavior.NETWORK_OPTIONAL)
+        }
+        assertFailsWith<IllegalArgumentException> {
+            capability(
+                requiredPermissions = setOf(BenchToolPermission.NETWORK),
+                networkBehavior = BenchToolNetworkBehavior.NETWORK_OPTIONAL
+            )
+        }
+    }
+
+    @Test
     fun streambenchRemainsACompanionSurfaceWithExplicitNetworkScope() {
         val capabilities = BuiltInBenchTool.STREAMBENCH_PLAYER.capabilities()
 
@@ -86,6 +104,7 @@ class BuiltInBenchCapabilitiesTest {
     }
 
     private fun capability(
+        requiredPermissions: Set<BenchToolPermission> = emptySet(),
         optionalPermissions: Set<BenchToolPermission> = emptySet(),
         networkBehavior: BenchToolNetworkBehavior = BenchToolNetworkBehavior.LOCAL_ONLY,
         surfaces: Set<BenchToolSurface> = setOf(BenchToolSurface.NATIVE_CHAT),
@@ -95,7 +114,7 @@ class BuiltInBenchCapabilitiesTest {
         displayName = "Test tool",
         inputs = setOf(BenchToolDataKind.TEXT),
         outputs = setOf(BenchToolDataKind.TEXT),
-        requiredPermissions = emptySet(),
+        requiredPermissions = requiredPermissions,
         optionalPermissions = optionalPermissions,
         networkBehavior = networkBehavior,
         surfaces = surfaces,
