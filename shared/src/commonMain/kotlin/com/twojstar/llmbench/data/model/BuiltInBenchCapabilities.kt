@@ -73,13 +73,22 @@ data class BuiltInBenchToolCapabilities(
         require(requiredPermissions.intersect(optionalPermissions).isEmpty()) {
             "A Bench tool permission cannot be both required and optional"
         }
-        if (networkBehavior == BenchToolNetworkBehavior.NETWORK_REQUIRED) {
-            require(BenchToolPermission.NETWORK in requiredPermissions) {
-                "Network-required Bench tools must declare NETWORK as required"
+        when (networkBehavior) {
+            BenchToolNetworkBehavior.NETWORK_REQUIRED -> require(
+                BenchToolPermission.NETWORK in requiredPermissions &&
+                    BenchToolPermission.NETWORK !in optionalPermissions
+            ) {
+                "Network-required Bench tools must require NETWORK"
             }
-        }
-        if (networkBehavior == BenchToolNetworkBehavior.LOCAL_ONLY) {
-            require(
+
+            BenchToolNetworkBehavior.NETWORK_OPTIONAL -> require(
+                BenchToolPermission.NETWORK !in requiredPermissions &&
+                    BenchToolPermission.NETWORK in optionalPermissions
+            ) {
+                "Network-optional Bench tools must declare NETWORK as optional only"
+            }
+
+            BenchToolNetworkBehavior.LOCAL_ONLY -> require(
                 BenchToolPermission.NETWORK !in requiredPermissions &&
                     BenchToolPermission.NETWORK !in optionalPermissions
             ) {
