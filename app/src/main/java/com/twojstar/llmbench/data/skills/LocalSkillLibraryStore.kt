@@ -53,6 +53,11 @@ private data class ParsedLocalSkillSource(
     val sourceDigest: String
 )
 
+private data class RenameMarker(
+    val sourceDirectoryName: String,
+    val committed: Boolean
+)
+
 internal class LocalSkillLibraryStore(
     private val rootDirectory: File
 ) {
@@ -190,12 +195,23 @@ internal class LocalSkillLibraryStore(
             withContext(Dispatchers.IO) {
                 targetDirectory.mkdirs()
                 val renameMarker = File(targetDirectory, RENAME_FROM_FILE_NAME)
-                writeAtomically(renameMarker, existingDirectory.name.encodeToByteArray())
-                writeAtomically(File(targetDirectory, SKILL_FILE_NAME), parsed.bytes)
-                if (enabled) {
-                    writeAtomically(File(targetDirectory, ENABLED_FILE_NAME), ByteArray(0))
+                val pendingMarker = renameMarkerValue(existingDirectory.name, committed = false)
+                val committedMarker = renameMarkerValue(existingDirectory.name, committed = true)
+                writeAtomically(renameMarker, pendingMarker.encodeToByteArray())
+                try {
+                    writeAtomically(File(targetDirectory, SKILL_FILE_NAME), parsed.bytes)
+                    if (enabled) {
+                        writeAtomically(File(targetDirectory, ENABLED_FILE_NAME), ByteArray(0))
+                    }
+                    // Overwriting this marker is the rename commit point. Before it, recovery
+                    // discards the staged target. After it, the old identity is logically hidden.
+                    writeAtomically(renameMarker, committedMarker.encodeToByteArray())
+                } catch (error: IOException) {
+                    targetDirectory.deleteRecursively()
+                    throw error
                 }
-                if (existingDirectory.deleteRecursively()) {
+
+                if (!existingDirectory.exists() || existingDirectory.deleteRecursively()) {
                     renameMarker.delete()
                 }
             }
@@ -314,31 +330,34 @@ internal class LocalSkillLibraryStore(
     private suspend fun recoverPendingRenames() {
         val directories = withContext(Dispatchers.IO) { storageDirectories() }
         directories.forEach { targetDirectory ->
-            val marker = File(targetDirectory, RENAME_FROM_FILE_NAME)
-            if (!marker.isFile) return@forEach
-            val sourceDirectoryName = withContext(Dispatchers.IO) {
-                runCatching { marker.readText() }.getOrNull()
+            val markerFile = File(targetDirectory, RENAME_FROM_FILE_NAME)
+            if (!markerFile.isFile) return@forEach
+            val marker = withContext(Dispatchers.IO) {
+                runCatching { parseRenameMarker(markerFile.readText()) }.getOrNull()
             }
-            if (sourceDirectoryName == null || !isStorageKey(sourceDirectoryName)) {
+            if (marker == null || !isStorageKey(marker.sourceDirectoryName)) {
                 withContext(Dispatchers.IO) { targetDirectory.deleteRecursively() }
                 return@forEach
             }
 
-            val targetDocument = readStoredDocument(targetDirectory)
+            val sourceDirectory = File(rootDirectory, marker.sourceDirectoryName)
+            if (!marker.committed) {
+                withContext(Dispatchers.IO) { targetDirectory.deleteRecursively() }
+                return@forEach
+            }
+
+            val targetDocument = readStoredDocument(targetDirectory, includeRenamedSources = true)
             if (targetDocument == null) {
                 withContext(Dispatchers.IO) { targetDirectory.deleteRecursively() }
                 return@forEach
             }
 
-            val sourceDirectory = File(rootDirectory, sourceDirectoryName)
             withContext(Dispatchers.IO) {
-                if (File(sourceDirectory, ENABLED_FILE_NAME).isFile && !File(targetDirectory, ENABLED_FILE_NAME).isFile) {
-                    writeAtomically(File(targetDirectory, ENABLED_FILE_NAME), ByteArray(0))
+                // Once the marker is committed, the target is canonical. Failure to physically
+                // remove the old directory must not make the whole library unavailable.
+                if (!sourceDirectory.exists() || sourceDirectory.deleteRecursively()) {
+                    markerFile.delete()
                 }
-                if (sourceDirectory.exists() && !sourceDirectory.deleteRecursively()) {
-                    throw IOException("Could not finish a pending local skill rename.")
-                }
-                marker.delete()
             }
         }
     }
@@ -347,7 +366,11 @@ internal class LocalSkillLibraryStore(
         File(directory, ENABLED_FILE_NAME).isFile
     }
 
-    private suspend fun readStoredDocument(directory: File): LocalSkillDocument? {
+    private suspend fun readStoredDocument(
+        directory: File,
+        includeRenamedSources: Boolean = false
+    ): LocalSkillDocument? {
+        if (!includeRenamedSources && isCommittedRenameSourceDirectory(directory)) return null
         val source = withContext(Dispatchers.IO) {
             readStoredSource(directory)
         } ?: return null
@@ -361,6 +384,30 @@ internal class LocalSkillLibraryStore(
             source = source,
             sourceDigest = localSkillSourceDigest(source)
         )
+    }
+
+    private fun isCommittedRenameSourceDirectory(directory: File): Boolean =
+        storageDirectories().any { candidate ->
+            val markerFile = File(candidate, RENAME_FROM_FILE_NAME)
+            if (!markerFile.isFile) return@any false
+            val marker = runCatching { parseRenameMarker(markerFile.readText()) }.getOrNull()
+                ?: return@any false
+            marker.committed && marker.sourceDirectoryName == directory.name
+        }
+
+    private fun renameMarkerValue(sourceDirectoryName: String, committed: Boolean): String =
+        (if (committed) RENAME_COMMITTED_PREFIX else RENAME_PENDING_PREFIX) + sourceDirectoryName
+
+    private fun parseRenameMarker(value: String): RenameMarker? = when {
+        value.startsWith(RENAME_COMMITTED_PREFIX) -> RenameMarker(
+            sourceDirectoryName = value.removePrefix(RENAME_COMMITTED_PREFIX),
+            committed = true
+        )
+        value.startsWith(RENAME_PENDING_PREFIX) -> RenameMarker(
+            sourceDirectoryName = value.removePrefix(RENAME_PENDING_PREFIX),
+            committed = false
+        )
+        else -> null
     }
 
     private fun readStoredSource(directory: File): String? {
@@ -423,6 +470,8 @@ internal class LocalSkillLibraryStore(
         private const val SKILL_FILE_NAME = "SKILL.md"
         private const val ENABLED_FILE_NAME = ".enabled"
         private const val RENAME_FROM_FILE_NAME = ".rename-from"
+        private const val RENAME_PENDING_PREFIX = "pending:"
+        private const val RENAME_COMMITTED_PREFIX = "committed:"
         private const val MAX_SKILL_BYTES = 8 * 1024 * 1024
         private const val STORAGE_PREFIX = "skill-"
     }
