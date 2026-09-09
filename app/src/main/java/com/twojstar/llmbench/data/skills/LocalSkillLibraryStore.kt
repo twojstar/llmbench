@@ -39,10 +39,7 @@ internal class LocalSkillNotFoundException(
 internal class LocalSkillRenameRequiredException(
     val existingName: String,
     val newName: String
-) : IOException(
-    "Changing a skill name while editing is not supported. Keep '$existingName' as the name, " +
-        "or import '$newName' as a separate skill."
-)
+) : IOException("Rename '$existingName' to '$newName' before saving this source.")
 
 internal class LocalSkillSourceConflictException(
     val skillName: String
@@ -62,10 +59,12 @@ internal class LocalSkillLibraryStore(
     private val mutex = PROCESS_MUTEX
 
     suspend fun load(): List<LocalSkillSummary> = mutex.withLock {
+        recoverPendingRenames()
         inspectStoredSkills(pruneInvalid = true).sortedBy(LocalSkillSummary::name)
     }
 
     suspend fun loadEnabledManifests(): List<AgentSkillManifest> = mutex.withLock {
+        recoverPendingRenames()
         val candidates = readEnabledManifests()
         val accepted = mutableListOf<AgentSkillManifest>()
         candidates.sortedBy(AgentSkillManifest::name).forEach { manifest ->
@@ -79,6 +78,7 @@ internal class LocalSkillLibraryStore(
     }
 
     suspend fun read(name: String): LocalSkillDocument? = mutex.withLock {
+        recoverPendingRenames()
         val directory = storageDirectory(name)
         readStoredDocument(directory)
             ?.takeIf { it.manifest.name == name }
@@ -91,6 +91,7 @@ internal class LocalSkillLibraryStore(
         val parsed = parseLocalSkillSource(source)
 
         return mutex.withLock {
+            recoverPendingRenames()
             val skillDirectory = storageDirectory(parsed.manifest.name)
             val existing = if (skillDirectory.isDirectory) readStoredDocument(skillDirectory) else null
             if (existing != null && !replaceExisting) {
@@ -127,6 +128,7 @@ internal class LocalSkillLibraryStore(
         }
 
         return mutex.withLock {
+            recoverPendingRenames()
             val skillDirectory = storageDirectory(name)
             val existing = readStoredDocument(skillDirectory)
                 ?.takeIf { it.manifest.name == name }
@@ -148,7 +150,69 @@ internal class LocalSkillLibraryStore(
         }
     }
 
+    suspend fun rename(
+        existingName: String,
+        expectedSourceDigest: String,
+        source: String
+    ): LocalSkillReplacementResult {
+        val parsed = parseLocalSkillSource(source)
+        val newName = parsed.manifest.name
+        if (newName == existingName) {
+            return replace(existingName, expectedSourceDigest, source)
+        }
+
+        return mutex.withLock {
+            recoverPendingRenames()
+            val existingDirectory = storageDirectory(existingName)
+            val existing = readStoredDocument(existingDirectory)
+                ?.takeIf { it.manifest.name == existingName }
+                ?: throw LocalSkillNotFoundException(existingName)
+            if (existing.sourceDigest != expectedSourceDigest) {
+                throw LocalSkillSourceConflictException(existingName)
+            }
+
+            val targetDirectory = storageDirectory(newName)
+            if (targetDirectory.exists()) {
+                val target = readStoredDocument(targetDirectory)
+                if (target != null) throw LocalSkillAlreadyExistsException(newName)
+                withContext(Dispatchers.IO) {
+                    if (!targetDirectory.deleteRecursively()) {
+                        throw IOException("Could not reclaim invalid local skill storage for '$newName'.")
+                    }
+                }
+            }
+
+            val enabled = isEnabled(existingDirectory)
+            if (enabled) {
+                validateRuntimeBudgetFor(parsed.manifest, excludeName = existingName)
+            }
+
+            withContext(Dispatchers.IO) {
+                targetDirectory.mkdirs()
+                val renameMarker = File(targetDirectory, RENAME_FROM_FILE_NAME)
+                writeAtomically(renameMarker, existingDirectory.name.encodeToByteArray())
+                writeAtomically(File(targetDirectory, SKILL_FILE_NAME), parsed.bytes)
+                if (enabled) {
+                    writeAtomically(File(targetDirectory, ENABLED_FILE_NAME), ByteArray(0))
+                }
+                if (!existingDirectory.deleteRecursively()) {
+                    targetDirectory.deleteRecursively()
+                    throw IOException("Could not finalize local skill rename from '$existingName' to '$newName'.")
+                }
+                if (renameMarker.exists() && !renameMarker.delete()) {
+                    throw IOException("Renamed '$existingName' to '$newName', but cleanup is still pending.")
+                }
+            }
+
+            LocalSkillReplacementResult(
+                skill = parsed.manifest.toSummary(enabled),
+                sourceDigest = parsed.sourceDigest
+            )
+        }
+    }
+
     suspend fun setEnabled(name: String, enabled: Boolean): LocalSkillSummary? = mutex.withLock {
+        recoverPendingRenames()
         val directory = storageDirectory(name)
         val document = readStoredDocument(directory)
             ?.takeIf { it.manifest.name == name }
@@ -168,6 +232,7 @@ internal class LocalSkillLibraryStore(
     }
 
     suspend fun remove(name: String) = mutex.withLock {
+        recoverPendingRenames()
         withContext(Dispatchers.IO) {
             val directory = storageDirectory(name)
             if (directory.exists() && !directory.deleteRecursively()) {
@@ -191,8 +256,11 @@ internal class LocalSkillLibraryStore(
         )
     }
 
-    private suspend fun validateRuntimeBudgetFor(candidate: AgentSkillManifest) {
-        val enabledOthers = readEnabledManifests(excludeName = candidate.name)
+    private suspend fun validateRuntimeBudgetFor(
+        candidate: AgentSkillManifest,
+        excludeName: String = candidate.name
+    ) {
+        val enabledOthers = readEnabledManifests(excludeName = excludeName)
         localSkillRuntimeBudgetError(enabledOthers + candidate)?.let { message ->
             throw LocalSkillActivationException(message)
         }
@@ -245,6 +313,40 @@ internal class LocalSkillLibraryStore(
             }
         }
         return valid
+    }
+
+    private suspend fun recoverPendingRenames() {
+        val directories = withContext(Dispatchers.IO) { storageDirectories() }
+        directories.forEach { targetDirectory ->
+            val marker = File(targetDirectory, RENAME_FROM_FILE_NAME)
+            if (!marker.isFile) return@forEach
+            val sourceDirectoryName = withContext(Dispatchers.IO) {
+                runCatching { marker.readText() }.getOrNull()
+            }
+            if (sourceDirectoryName == null || !isStorageKey(sourceDirectoryName)) {
+                withContext(Dispatchers.IO) { targetDirectory.deleteRecursively() }
+                return@forEach
+            }
+
+            val targetDocument = readStoredDocument(targetDirectory)
+            if (targetDocument == null) {
+                withContext(Dispatchers.IO) { targetDirectory.deleteRecursively() }
+                return@forEach
+            }
+
+            val sourceDirectory = File(rootDirectory, sourceDirectoryName)
+            withContext(Dispatchers.IO) {
+                if (File(sourceDirectory, ENABLED_FILE_NAME).isFile && !File(targetDirectory, ENABLED_FILE_NAME).isFile) {
+                    writeAtomically(File(targetDirectory, ENABLED_FILE_NAME), ByteArray(0))
+                }
+                if (sourceDirectory.exists() && !sourceDirectory.deleteRecursively()) {
+                    throw IOException("Could not finish a pending local skill rename.")
+                }
+                if (marker.exists() && !marker.delete()) {
+                    throw IOException("Could not clear a completed local skill rename marker.")
+                }
+            }
+        }
     }
 
     private suspend fun isEnabled(directory: File): Boolean = withContext(Dispatchers.IO) {
@@ -326,6 +428,7 @@ internal class LocalSkillLibraryStore(
         const val LIBRARY_DIRECTORY_NAME = "local-skills-v1"
         private const val SKILL_FILE_NAME = "SKILL.md"
         private const val ENABLED_FILE_NAME = ".enabled"
+        private const val RENAME_FROM_FILE_NAME = ".rename-from"
         private const val MAX_SKILL_BYTES = 8 * 1024 * 1024
         private const val STORAGE_PREFIX = "skill-"
     }
