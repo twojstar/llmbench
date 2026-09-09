@@ -113,10 +113,10 @@ private class StrictJsonParser(private val source: String) {
 
     fun inspect(): StrictJsonInspection {
         skipWhitespace()
-        if (index == source.length) return failure("JSON input is empty")
-        parseValue()?.let { return failure(it) }
+        if (index == source.length) return failureAt("JSON input is empty")
+        parseValue()?.let { error -> return StrictJsonInspection(errorMessage = error) }
         skipWhitespace()
-        if (index != source.length) return failure("Unexpected trailing JSON content")
+        if (index != source.length) return failureAt("Unexpected trailing JSON content")
         return StrictJsonInspection(hasDuplicateObjectKeys = hasDuplicateObjectKeys)
     }
 
@@ -203,28 +203,28 @@ private class StrictJsonParser(private val source: String) {
         when (source[index]) {
             '0' -> {
                 index++
-                if (index < source.length && source[index].isDigit()) {
+                if (index < source.length && source[index] in '0'..'9') {
                     return errorAt("Leading zeroes are not valid JSON numbers")
                 }
             }
-            in '1'..'9' -> while (index < source.length && source[index].isDigit()) index++
+            in '1'..'9' -> while (index < source.length && source[index] in '0'..'9') index++
             else -> return errorAt("Invalid JSON number")
         }
 
         if (consume('.')) {
-            if (index >= source.length || !source[index].isDigit()) {
+            if (index >= source.length || source[index] !in '0'..'9') {
                 return errorAt("JSON fraction requires at least one digit")
             }
-            while (index < source.length && source[index].isDigit()) index++
+            while (index < source.length && source[index] in '0'..'9') index++
         }
 
         if (index < source.length && (source[index] == 'e' || source[index] == 'E')) {
             index++
             if (index < source.length && (source[index] == '+' || source[index] == '-')) index++
-            if (index >= source.length || !source[index].isDigit()) {
+            if (index >= source.length || source[index] !in '0'..'9') {
                 return errorAt("JSON exponent requires at least one digit")
             }
-            while (index < source.length && source[index].isDigit()) index++
+            while (index < source.length && source[index] in '0'..'9') index++
         }
         return null
     }
@@ -276,7 +276,7 @@ private class StrictJsonParser(private val source: String) {
 
     private fun errorAt(message: String): String = "$message at offset $index."
 
-    private fun failure(message: String): StrictJsonInspection =
+    private fun failureAt(message: String): StrictJsonInspection =
         StrictJsonInspection(errorMessage = errorAt(message))
 
     private fun stringFailure(message: String): ParsedJsonString =
