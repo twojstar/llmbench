@@ -36,6 +36,9 @@ data class StructuredTextFormatResult(
  * syntax without knowingly weakening fidelity.
  */
 object StructuredTextDiagnostics {
+    private const val MAX_JSON_NESTING = 128
+    private val MAX_YAML_ALIAS_COUNT = 100u
+
     private val documentYaml = Yaml(
         configuration = YamlConfiguration(
             anchorsAndAliases = AnchorsAndAliases.Permitted(maxAliasCount = MAX_YAML_ALIAS_COUNT)
@@ -93,9 +96,6 @@ object StructuredTextDiagnostics {
             errorMessage = error.message
         )
     }
-
-    private const val MAX_JSON_NESTING = 128
-    private val MAX_YAML_ALIAS_COUNT = 100u
 
     private data class StrictJsonInspection(
         val errorMessage: String? = null,
