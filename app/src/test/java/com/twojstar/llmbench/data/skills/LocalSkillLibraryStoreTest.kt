@@ -312,7 +312,7 @@ class LocalSkillLibraryStoreTest {
     }
 
     @Test
-    fun renameBackToInheritedNameNeverTombstonesItsNewTarget() = runBlocking {
+    fun renameBackRecoveryKeepsNewTargetCanonical() = runBlocking {
         var blockedDirectoryName: String? = null
         val stubbornStore = LocalSkillLibraryStore(root) { directory ->
             if (directory.name == blockedDirectoryName) false else directory.deleteRecursively()
@@ -334,14 +334,25 @@ class LocalSkillLibraryStoreTest {
         assertEquals(renamed, stubbornStore.read(RENAMED_SKILL)?.source)
         assertNull(stubbornStore.read(RELEASE_SKILL))
 
-        blockedDirectoryName = null
+        // Allow reclaiming the inherited A directory, but block cleanup of B after A commits.
+        blockedDirectoryName = storageDirectoryFor(RENAMED_SKILL).name
         val retryOpened = requireNotNull(stubbornStore.read(RENAMED_SKILL))
         val result = stubbornStore.rename(RENAMED_SKILL, retryOpened.sourceDigest, renamedBack)
+        val newTarget = storageDirectoryFor(RELEASE_SKILL)
+        val oldTarget = storageDirectoryFor(RENAMED_SKILL)
 
         assertEquals(RELEASE_SKILL, result.skill.name)
+        assertTrue(newTarget.resolve(RENAME_FROM_FILE_NAME).isFile)
+        assertFalse(oldTarget.resolve(RENAME_FROM_FILE_NAME).exists())
+        assertTrue(oldTarget.exists())
         assertEquals(renamedBack, stubbornStore.read(RELEASE_SKILL)?.source)
         assertNull(stubbornStore.read(RENAMED_SKILL))
         assertEquals(listOf(RELEASE_SKILL), stubbornStore.load().map(LocalSkillSummary::name))
+
+        blockedDirectoryName = null
+        assertEquals(listOf(RELEASE_SKILL), stubbornStore.load().map(LocalSkillSummary::name))
+        assertFalse(oldTarget.exists())
+        assertEquals(renamedBack, stubbornStore.read(RELEASE_SKILL)?.source)
     }
 
     @Test
