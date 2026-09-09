@@ -108,9 +108,7 @@ class PromptTournamentPlan private constructor(
         }
     }
 
-    /**
-     * Lazily expand the deterministic variant x target matrix to avoid allocating a potentially large list.
-     */
+    /** Lazily expand the deterministic variant x target matrix. */
     fun plannedRuns(): Sequence<PromptTournamentRun> =
         experiment.variants.asSequence().flatMap { variant ->
             targetSnapshot.asSequence().map { target ->
@@ -154,7 +152,7 @@ class PromptTournamentPlan private constructor(
     }
 }
 
-/** Build a profile that is cryptographically unrelated but identity-bound to the current prompt version. */
+/** Build descriptive Tournament metadata bound to the variant's current prompt version. */
 fun TokenArenaVariant.tournamentProfile(
     format: PromptTournamentFormat = PromptTournamentFormat.OTHER,
     verbosity: PromptTournamentVerbosity? = null,
