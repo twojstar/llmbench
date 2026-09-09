@@ -39,12 +39,31 @@ class StructuredTextFormatDetectionTest {
     fun genericMimeDoesNotOverrideRecognizedExtension() {
         assertEquals(
             StructuredTextFormat.YAML,
-            detectStructuredTextFormat("settings.yaml", TEXT_PLAIN)
+            detectStructuredTextFormat(SETTINGS_YAML, TEXT_PLAIN)
         )
         assertEquals(
             StructuredTextFormat.JSON,
             detectStructuredTextFormat(SETTINGS_JSON, APPLICATION_OCTET_STREAM)
         )
+    }
+
+    @Test
+    fun malformedMimeHintsRemainUnknownInsteadOfConflictingWithFileName() {
+        listOf(
+            "garbage/+json",
+            "/+xml",
+            "application/+json",
+            "application/json/extra",
+            "application /json"
+        ).forEach { mimeType ->
+            assertEquals(
+                StructuredTextFormat.YAML,
+                detectStructuredTextFormat(SETTINGS_YAML, mimeType),
+                mimeType
+            )
+        }
+        assertNull(detectStructuredTextFormat(null, "application/+json"))
+        assertNull(detectStructuredTextFormat(null, "application/xml/extra"))
     }
 
     @Test
@@ -87,6 +106,7 @@ class StructuredTextFormatDetectionTest {
 
     private companion object {
         const val SETTINGS_JSON = "settings.json"
+        const val SETTINGS_YAML = "settings.yaml"
         const val APPLICATION_OCTET_STREAM = "application/octet-stream"
         const val APPLICATION_YAML = "application/yaml"
         const val TEXT_PLAIN = "text/plain"
