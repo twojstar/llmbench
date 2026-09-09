@@ -195,12 +195,8 @@ internal class LocalSkillLibraryStore(
                 if (enabled) {
                     writeAtomically(File(targetDirectory, ENABLED_FILE_NAME), ByteArray(0))
                 }
-                if (!existingDirectory.deleteRecursively()) {
-                    targetDirectory.deleteRecursively()
-                    throw IOException("Could not finalize local skill rename from '$existingName' to '$newName'.")
-                }
-                if (renameMarker.exists() && !renameMarker.delete()) {
-                    throw IOException("Renamed '$existingName' to '$newName', but cleanup is still pending.")
+                if (existingDirectory.deleteRecursively()) {
+                    renameMarker.delete()
                 }
             }
 
@@ -342,9 +338,7 @@ internal class LocalSkillLibraryStore(
                 if (sourceDirectory.exists() && !sourceDirectory.deleteRecursively()) {
                     throw IOException("Could not finish a pending local skill rename.")
                 }
-                if (marker.exists() && !marker.delete()) {
-                    throw IOException("Could not clear a completed local skill rename marker.")
-                }
+                marker.delete()
             }
         }
     }
