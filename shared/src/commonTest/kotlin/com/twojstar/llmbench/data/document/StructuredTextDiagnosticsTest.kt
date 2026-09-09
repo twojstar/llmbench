@@ -20,7 +20,9 @@ class StructuredTextDiagnosticsTest {
             "{\"enabled\":tru}",
             "{\"count\":01}",
             "{\"count\":1.}",
-            "{\"count\":1e}"
+            "{\"count\":1e}",
+            "{\"text\":\"\\u+123\"}",
+            "{\"text\":\"\\u-123\"}"
         ).forEach { source ->
             assertFalse(
                 StructuredTextDiagnostics.validate(source, StructuredTextFormat.JSON).isValid,
@@ -63,10 +65,28 @@ class StructuredTextDiagnosticsTest {
     }
 
     @Test
-    fun validatesYamlWithoutAttemptingHeuristicRepair() {
+    fun excessiveJsonNestingReturnsValidationErrorInsteadOfRecursingUnbounded() {
+        val source = "[".repeat(256) + "0" + "]".repeat(256)
+        val validation = StructuredTextDiagnostics.validate(source, StructuredTextFormat.JSON)
+        val formatting = StructuredTextDiagnostics.formatJson(source)
+
+        assertFalse(validation.isValid)
+        assertTrue(validation.errorMessage.orEmpty().contains("nesting", ignoreCase = true))
+        assertFalse(formatting.isSuccess)
+        assertEquals(source, formatting.text)
+    }
+
+    @Test
+    fun validatesYamlAnchorsAndAliasesWithoutHeuristicRepair() {
         assertTrue(
             StructuredTextDiagnostics.validate(
                 "name: LlmBench\nitems:\n  - one\n  - two\n",
+                StructuredTextFormat.YAML
+            ).isValid
+        )
+        assertTrue(
+            StructuredTextDiagnostics.validate(
+                "base: &defaults\n  model: fast\ncopy: *defaults\n",
                 StructuredTextFormat.YAML
             ).isValid
         )
