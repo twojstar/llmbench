@@ -20,7 +20,13 @@ internal data class LocalSkillSummary(
 
 internal data class LocalSkillDocument(
     val manifest: AgentSkillManifest,
-    val source: String
+    val source: String,
+    val sourceDigest: String
+)
+
+internal data class LocalSkillReplacementResult(
+    val skill: LocalSkillSummary,
+    val sourceDigest: String
 )
 
 internal class LocalSkillAlreadyExistsException(
@@ -34,13 +40,21 @@ internal class LocalSkillNotFoundException(
 internal class LocalSkillRenameRequiredException(
     val existingName: String,
     val newName: String
-) : IOException("Change the skill name with Rename before saving '$newName' over '$existingName'.")
+) : IOException(
+    "Changing a skill name while editing is not supported. Keep '$existingName' as the name, " +
+        "or import '$newName' as a separate skill."
+)
+
+internal class LocalSkillSourceConflictException(
+    val skillName: String
+) : IOException("Local skill '$skillName' changed since this editor was opened. Reload it before saving.")
 
 internal class LocalSkillActivationException(message: String) : IOException(message)
 
 private data class ParsedLocalSkillSource(
     val manifest: AgentSkillManifest,
-    val bytes: ByteArray
+    val bytes: ByteArray,
+    val sourceDigest: String
 )
 
 internal class LocalSkillLibraryStore(
@@ -103,7 +117,11 @@ internal class LocalSkillLibraryStore(
         }
     }
 
-    suspend fun replace(name: String, source: String): LocalSkillSummary {
+    suspend fun replace(
+        name: String,
+        expectedSourceDigest: String,
+        source: String
+    ): LocalSkillReplacementResult {
         val parsed = parseLocalSkillSource(source)
         if (parsed.manifest.name != name) {
             throw LocalSkillRenameRequiredException(name, parsed.manifest.name)
@@ -114,6 +132,9 @@ internal class LocalSkillLibraryStore(
             val existing = readStoredDocument(skillDirectory)
                 ?.takeIf { it.manifest.name == name }
                 ?: throw LocalSkillNotFoundException(name)
+            if (existing.sourceDigest != expectedSourceDigest) {
+                throw LocalSkillSourceConflictException(name)
+            }
             val enabled = isEnabled(skillDirectory)
             if (enabled) {
                 validateRuntimeBudgetFor(parsed.manifest)
@@ -121,7 +142,10 @@ internal class LocalSkillLibraryStore(
             withContext(Dispatchers.IO) {
                 writeAtomically(File(skillDirectory, SKILL_FILE_NAME), parsed.bytes)
             }
-            parsed.manifest.toSummary(enabled)
+            LocalSkillReplacementResult(
+                skill = parsed.manifest.toSummary(enabled),
+                sourceDigest = parsed.sourceDigest
+            )
         }
     }
 
@@ -161,7 +185,11 @@ internal class LocalSkillLibraryStore(
             ?: throw IllegalArgumentException("Only valid portable SKILL.md content can be saved.")
         val bytes = source.encodeToByteArray()
         if (bytes.size > MAX_SKILL_BYTES) throw IOException("Skill source exceeds the library size limit.")
-        return ParsedLocalSkillSource(manifest = manifest, bytes = bytes)
+        return ParsedLocalSkillSource(
+            manifest = manifest,
+            bytes = bytes,
+            sourceDigest = sha256Hex(bytes)
+        )
     }
 
     private suspend fun validateRuntimeBudgetFor(candidate: AgentSkillManifest) {
@@ -233,7 +261,11 @@ internal class LocalSkillLibraryStore(
         }
         val manifest = parsed.manifest?.takeIf { parsed.issues.isEmpty() } ?: return null
         if (storageKey(manifest.name) != directory.name) return null
-        return LocalSkillDocument(manifest = manifest, source = source)
+        return LocalSkillDocument(
+            manifest = manifest,
+            source = source,
+            sourceDigest = sha256Hex(source.encodeToByteArray())
+        )
     }
 
     private fun readStoredSource(directory: File): String? {
@@ -254,15 +286,18 @@ internal class LocalSkillLibraryStore(
     private fun storageDirectory(name: String): File =
         File(rootDirectory, storageKey(name))
 
-    private fun storageKey(name: String): String {
-        val digest = MessageDigest.getInstance("SHA-256").digest(name.encodeToByteArray())
+    private fun storageKey(name: String): String =
+        STORAGE_PREFIX + sha256Hex(name.encodeToByteArray())
+
+    private fun sha256Hex(bytes: ByteArray): String {
+        val digest = MessageDigest.getInstance("SHA-256").digest(bytes)
         val hex = CharArray(digest.size * 2)
         digest.forEachIndexed { index, byte ->
             val value = byte.toInt() and 0xFF
             hex[index * 2] = HEX_DIGITS[value ushr 4]
             hex[index * 2 + 1] = HEX_DIGITS[value and 0x0F]
         }
-        return STORAGE_PREFIX + hex.concatToString()
+        return hex.concatToString()
     }
 
     private fun isStorageKey(value: String): Boolean =
