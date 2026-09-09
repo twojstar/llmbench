@@ -50,5 +50,7 @@ fun WebAiService.onboardingCapabilities(): ProviderOnboardingCapabilities = when
             ProviderIdentityMethod.GITHUB
         )
     )
-    else -> ProviderOnboardingCapabilities()
+    else -> ProviderOnboardingCapabilities(
+        embeddedSessionHandoff = EmbeddedSessionHandoff.UNSUPPORTED
+    )
 }
