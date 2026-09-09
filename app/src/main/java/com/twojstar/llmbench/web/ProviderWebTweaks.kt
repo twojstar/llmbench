@@ -286,7 +286,7 @@ internal object ProviderWebTweakRegistry {
     }
 
     fun hasVerifiedTopLevelNavigationPolicy(service: WebAiService): Boolean =
-        topLevelNavigationAuthHosts(service).isNotEmpty()
+        service in verifiedTopLevelNavigationIdentityMethods
 
     fun topLevelNavigationAuthHosts(service: WebAiService): Set<String> =
         topLevelNavigationAuthHosts[service].orEmpty()
