@@ -56,16 +56,71 @@ private fun structuredTextFormatFromMimeType(mimeType: String?): StructuredTextF
 }
 
 private fun parseMimeType(mimeType: String?): ParsedMimeType? {
-    val normalized = mimeType
-        ?.substringBefore(';')
-        ?.trim()
-        ?.lowercase()
-        ?.takeIf { it.count { char -> char == '/' } == 1 }
-        ?: return null
-    val type = normalized.substringBefore('/')
-    val subtype = normalized.substringAfter('/')
+    val raw = mimeType?.trim()?.lowercase()?.takeIf { it.isNotEmpty() } ?: return null
+    val parameterStart = raw.indexOf(';')
+    val mediaType = if (parameterStart < 0) raw else raw.substring(0, parameterStart).trim()
+    if (parameterStart >= 0 && !hasValidMimeParameters(raw, parameterStart)) return null
+    if (mediaType.count { char -> char == '/' } != 1) return null
+
+    val type = mediaType.substringBefore('/')
+    val subtype = mediaType.substringAfter('/')
     if (!type.isMimeToken() || !subtype.isMimeToken()) return null
     return ParsedMimeType(type, subtype)
+}
+
+private fun hasValidMimeParameters(source: String, start: Int): Boolean {
+    var index = start
+    while (index < source.length) {
+        if (source[index] != ';') return false
+        index++
+        index = source.skipMimeWhitespace(index)
+
+        val nameStart = index
+        while (index < source.length && source[index].isMimeTokenChar()) index++
+        if (index == nameStart) return false
+
+        index = source.skipMimeWhitespace(index)
+        if (index >= source.length || source[index] != '=') return false
+        index++
+        index = source.skipMimeWhitespace(index)
+        if (index >= source.length) return false
+
+        index = if (source[index] == '"') {
+            source.skipQuotedMimeValue(index) ?: return false
+        } else {
+            val valueStart = index
+            while (index < source.length && source[index].isMimeTokenChar()) index++
+            if (index == valueStart) return false
+            index
+        }
+
+        index = source.skipMimeWhitespace(index)
+        if (index < source.length && source[index] != ';') return false
+    }
+    return true
+}
+
+private fun String.skipQuotedMimeValue(start: Int): Int? {
+    var index = start + 1
+    while (index < length) {
+        val char = this[index]
+        when {
+            char == '"' -> return index + 1
+            char == '\\' -> {
+                if (index + 1 >= length) return null
+                index += 2
+            }
+            char.code < 0x20 && char != '\t' -> return null
+            else -> index++
+        }
+    }
+    return null
+}
+
+private fun String.skipMimeWhitespace(start: Int): Int {
+    var index = start
+    while (index < length && this[index] in MIME_WHITESPACE) index++
+    return index
 }
 
 private fun String.hasStructuredSuffix(suffix: String): Boolean {
@@ -73,12 +128,12 @@ private fun String.hasStructuredSuffix(suffix: String): Boolean {
     return endsWith(marker) && length > marker.length
 }
 
-private fun String.isMimeToken(): Boolean =
-    isNotEmpty() && all { char ->
-        char in 'a'..'z' ||
-            char in '0'..'9' ||
-            char in MIME_TOKEN_PUNCTUATION
-    }
+private fun String.isMimeToken(): Boolean = isNotEmpty() && all(Char::isMimeTokenChar)
+
+private fun Char.isMimeTokenChar(): Boolean =
+    this in 'a'..'z' ||
+        this in '0'..'9' ||
+        this in MIME_TOKEN_PUNCTUATION
 
 private data class ParsedMimeType(
     val type: String,
@@ -86,6 +141,7 @@ private data class ParsedMimeType(
 )
 
 private const val MIME_TOKEN_PUNCTUATION = "!#$%&'*+-.^_`|~"
+private val MIME_WHITESPACE = setOf(' ', '\t')
 
 private val YAML_MIME_TYPES = setOf(
     "application/yaml",
