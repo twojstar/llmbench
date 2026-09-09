@@ -1,5 +1,6 @@
 package com.twojstar.llmbench.data.skills
 
+import java.io.IOException
 import java.nio.file.Files
 import kotlinx.coroutines.runBlocking
 import org.junit.After
@@ -230,16 +231,19 @@ class LocalSkillLibraryStoreTest {
     }
 
     @Test
-    fun loadFinishesInterruptedRenameAndRestoresActivationMarker() = runBlocking {
+    fun loadFinishesCommittedRenameCleanup() = runBlocking {
         val original = skillSource(RELEASE_SKILL, FIRST_VERSION)
         val renamedSource = skillSource(RENAMED_SKILL, SECOND_VERSION)
         store.add(original)
         store.setEnabled(RELEASE_SKILL, true)
         val sourceDirectory = root.listFiles().orEmpty().single()
-        val targetDirectory = root.resolve("skill-${sha256Hex(RENAMED_SKILL.encodeToByteArray())}")
+        val targetDirectory = storageDirectoryFor(RENAMED_SKILL)
         targetDirectory.mkdirs()
-        targetDirectory.resolve(RENAME_FROM_FILE_NAME).writeText(sourceDirectory.name)
+        targetDirectory.resolve(RENAME_FROM_FILE_NAME).writeText(
+            renameMarker(committed = true, sourceDirectory.name)
+        )
         targetDirectory.resolve(SKILL_FILE_NAME).writeText(renamedSource)
+        targetDirectory.resolve(ENABLED_FILE_NAME).writeBytes(ByteArray(0))
 
         val loaded = store.load()
 
@@ -247,8 +251,64 @@ class LocalSkillLibraryStoreTest {
         assertTrue(loaded.single().enabled)
         assertFalse(sourceDirectory.exists())
         assertFalse(targetDirectory.resolve(RENAME_FROM_FILE_NAME).exists())
-        assertTrue(targetDirectory.resolve(ENABLED_FILE_NAME).isFile)
         assertEquals(listOf(RENAMED_SKILL), store.loadEnabledManifests().map(AgentSkillManifest::name))
+    }
+
+    @Test
+    fun pendingRenameTargetStaysInvisibleWhenCleanupFails() = runBlocking {
+        val original = skillSource(RELEASE_SKILL, FIRST_VERSION)
+        val stagedSource = skillSource(RENAMED_SKILL, SECOND_VERSION)
+        val targetDirectory = storageDirectoryFor(RENAMED_SKILL)
+        val stubbornStore = LocalSkillLibraryStore(root) { directory ->
+            if (directory.name == targetDirectory.name) false else directory.deleteRecursively()
+        }
+        stubbornStore.add(original)
+        val sourceDirectory = root.listFiles().orEmpty().single()
+        targetDirectory.mkdirs()
+        targetDirectory.resolve(RENAME_FROM_FILE_NAME).writeText(
+            renameMarker(committed = false, sourceDirectory.name)
+        )
+        targetDirectory.resolve(SKILL_FILE_NAME).writeText(stagedSource)
+
+        val loaded = stubbornStore.load()
+
+        assertEquals(listOf(RELEASE_SKILL), loaded.map(LocalSkillSummary::name))
+        assertTrue(targetDirectory.exists())
+        assertNull(stubbornStore.read(RENAMED_SKILL))
+        assertEquals(original, stubbornStore.read(RELEASE_SKILL)?.source)
+    }
+
+    @Test
+    fun renameChainDoesNotResurrectOldSkillWhenCleanupFails() = runBlocking {
+        var blockedDirectoryName: String? = null
+        val stubbornStore = LocalSkillLibraryStore(root) { directory ->
+            if (directory.name == blockedDirectoryName) false else directory.deleteRecursively()
+        }
+        val original = skillSource(RELEASE_SKILL, FIRST_VERSION)
+        val secondSource = skillSource(RENAMED_SKILL, SECOND_VERSION)
+        val thirdSource = skillSource(RENAMED_AGAIN_SKILL, "Third version.")
+        stubbornStore.add(original)
+        blockedDirectoryName = root.listFiles().orEmpty().single().name
+        val firstOpened = requireNotNull(stubbornStore.read(RELEASE_SKILL))
+
+        stubbornStore.rename(RELEASE_SKILL, firstOpened.sourceDigest, secondSource)
+
+        assertNull(stubbornStore.read(RELEASE_SKILL))
+        assertEquals(secondSource, stubbornStore.read(RENAMED_SKILL)?.source)
+        val secondOpened = requireNotNull(stubbornStore.read(RENAMED_SKILL))
+        stubbornStore.rename(RENAMED_SKILL, secondOpened.sourceDigest, thirdSource)
+
+        assertNull(stubbornStore.read(RELEASE_SKILL))
+        assertNull(stubbornStore.read(RENAMED_SKILL))
+        assertEquals(thirdSource, stubbornStore.read(RENAMED_AGAIN_SKILL)?.source)
+        val removalError = runCatching { stubbornStore.remove(RENAMED_AGAIN_SKILL) }.exceptionOrNull()
+        assertTrue(removalError is IOException)
+        assertEquals(listOf(RENAMED_AGAIN_SKILL), stubbornStore.load().map(LocalSkillSummary::name))
+        assertNull(stubbornStore.read(RELEASE_SKILL))
+
+        blockedDirectoryName = null
+        stubbornStore.remove(RENAMED_AGAIN_SKILL)
+        assertTrue(stubbornStore.load().isEmpty())
     }
 
     @Test
@@ -402,6 +462,18 @@ class LocalSkillLibraryStoreTest {
         assertTrue(loaded.all { it.description.startsWith("Bulk entry") })
     }
 
+    private fun storageDirectoryFor(name: String) =
+        root.resolve("skill-${sha256Hex(name.encodeToByteArray())}")
+
+    private fun renameMarker(committed: Boolean, vararg sourceDirectoryNames: String): String =
+        buildString {
+            append(if (committed) "committed" else "pending")
+            sourceDirectoryNames.forEach { sourceName ->
+                append('\n')
+                append(sourceName)
+            }
+        }
+
     private fun skillSource(
         name: String,
         description: String,
@@ -419,6 +491,7 @@ class LocalSkillLibraryStoreTest {
         const val RELEASE_SKILL = "release-checklist"
         const val RETRY_SKILL = "retry-skill"
         const val RENAMED_SKILL = "renamed-skill"
+        const val RENAMED_AGAIN_SKILL = "renamed-again-skill"
         const val ALPHA_SKILL = "alpha-skill"
         const val BETA_SKILL = "beta-skill"
         const val GAMMA_SKILL = "gamma-skill"
