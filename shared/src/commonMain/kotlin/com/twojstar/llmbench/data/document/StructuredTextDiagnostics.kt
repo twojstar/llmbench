@@ -1,6 +1,9 @@
 package com.twojstar.llmbench.data.document
 
 import it.krzeminski.snakeyaml.engine.kmp.api.LoadSettings
+import it.krzeminski.snakeyaml.engine.kmp.events.AliasEvent
+import it.krzeminski.snakeyaml.engine.kmp.events.Event
+import it.krzeminski.snakeyaml.engine.kmp.events.NodeEvent
 import it.krzeminski.snakeyaml.engine.kmp.exceptions.YamlEngineException
 import it.krzeminski.snakeyaml.engine.kmp.parser.ParserImpl
 import it.krzeminski.snakeyaml.engine.kmp.scanner.StreamReader
@@ -37,6 +40,7 @@ data class StructuredTextFormatResult(
  */
 object StructuredTextDiagnostics {
     private const val MAX_JSON_NESTING = 128
+    private const val MAX_JSON_FORMATTED_CHARS = 8 * 1024 * 1024
     private const val MAX_YAML_CODE_POINTS = 3 * 1024 * 1024
 
     fun validate(text: String, format: StructuredTextFormat): StructuredTextValidationResult =
@@ -66,7 +70,15 @@ object StructuredTextDiagnostics {
             )
         }
 
-        val formatted = JsonLexicalFormatter(text).format()
+        val formatted = try {
+            JsonLexicalFormatter(text).format()
+        } catch (_: JsonFormattingLimitExceededException) {
+            return StructuredTextFormatResult(
+                text = text,
+                changed = false,
+                errorMessage = "Formatting blocked: formatted JSON would exceed the 8 MiB safety limit."
+            )
+        }
         return StructuredTextFormatResult(
             text = formatted,
             changed = formatted != text
@@ -82,9 +94,10 @@ object StructuredTextDiagnostics {
     }
 
     /**
-     * Parses YAML events only. This validates YAML syntax without forcing documents into Kotaml's
-     * narrower YamlNode model or constructing application objects. StreamReader enforces the bounded
-     * code-point limit before an imported document can consume unbounded parser memory.
+     * Parses YAML events only. This validates syntax without forcing documents into Kotaml's
+     * narrower YamlNode model or constructing application objects. Anchors are tracked per document
+     * so aliases still have to refer to a previously defined anchor. StreamReader enforces the
+     * bounded code-point limit before imported input can consume unbounded parser memory.
      */
     private fun validateYaml(text: String): StructuredTextValidationResult = try {
         val settings = LoadSettings(
@@ -92,7 +105,23 @@ object StructuredTextDiagnostics {
             codePointLimit = MAX_YAML_CODE_POINTS
         )
         val parser = ParserImpl(settings, StreamReader(settings, text))
-        while (parser.hasNext()) parser.next()
+        val anchors = mutableSetOf<Any>()
+        while (parser.hasNext()) {
+            val event = parser.next()
+            when {
+                event.eventId == Event.ID.DocumentStart -> anchors.clear()
+                event is AliasEvent -> {
+                    val anchor = event.anchor
+                    if (anchor == null || anchor !in anchors) {
+                        return StructuredTextValidationResult(
+                            format = StructuredTextFormat.YAML,
+                            errorMessage = "YAML alias references an undefined anchor."
+                        )
+                    }
+                }
+                event is NodeEvent -> event.anchor?.let(anchors::add)
+            }
+        }
         StructuredTextValidationResult(StructuredTextFormat.YAML)
     } catch (error: YamlEngineException) {
         StructuredTextValidationResult(
@@ -317,7 +346,7 @@ object StructuredTextDiagnostics {
 
     /** Formats structural whitespace only, preserving string, number and literal lexemes verbatim. */
     private class JsonLexicalFormatter(private val source: String) {
-        private val output = StringBuilder(source.length + source.length / 4)
+        private val output = StringBuilder(minOf(source.length, MAX_JSON_FORMATTED_CHARS))
         private val nonEmptyScopes = mutableListOf<Boolean>()
         private var indent = 0
         private var inString = false
@@ -339,18 +368,18 @@ object StructuredTextDiagnostics {
                 '{', '[' -> appendOpening(index, char)
                 '}', ']' -> appendClosing(char)
                 ',' -> appendComma()
-                ':' -> output.append(": ")
-                else -> output.append(char)
+                ':' -> appendChecked(": ")
+                else -> appendChecked(char)
             }
         }
 
         private fun startString() {
             inString = true
-            output.append('"')
+            appendChecked('"')
         }
 
         private fun appendStringCharacter(char: Char) {
-            output.append(char)
+            appendChecked(char)
             when {
                 escaped -> escaped = false
                 char == '\\' -> escaped = true
@@ -359,13 +388,13 @@ object StructuredTextDiagnostics {
         }
 
         private fun appendOpening(index: Int, char: Char) {
-            output.append(char)
+            appendChecked(char)
             val closing = if (char == '{') '}' else ']'
             val nonEmpty = nextNonWhitespace(index + 1) != closing
             nonEmptyScopes.add(nonEmpty)
             if (!nonEmpty) return
             indent++
-            output.append('\n')
+            appendChecked('\n')
             appendIndent()
         }
 
@@ -373,19 +402,38 @@ object StructuredTextDiagnostics {
             val nonEmpty = nonEmptyScopes.removeLast()
             if (nonEmpty) {
                 indent--
-                output.append('\n')
+                appendChecked('\n')
                 appendIndent()
             }
-            output.append(char)
+            appendChecked(char)
         }
 
         private fun appendComma() {
-            output.append(',').append('\n')
+            appendChecked(',')
+            appendChecked('\n')
             appendIndent()
         }
 
         private fun appendIndent() {
-            repeat(indent) { output.append("  ") }
+            val spaces = indent * 2
+            ensureOutputCapacity(spaces)
+            repeat(spaces) { output.append(' ') }
+        }
+
+        private fun appendChecked(char: Char) {
+            ensureOutputCapacity(1)
+            output.append(char)
+        }
+
+        private fun appendChecked(text: String) {
+            ensureOutputCapacity(text.length)
+            output.append(text)
+        }
+
+        private fun ensureOutputCapacity(additionalChars: Int) {
+            if (additionalChars > MAX_JSON_FORMATTED_CHARS - output.length) {
+                throw JsonFormattingLimitExceededException()
+            }
         }
 
         private fun nextNonWhitespace(start: Int): Char? {
@@ -399,6 +447,8 @@ object StructuredTextDiagnostics {
         val value: String? = null,
         val errorMessage: String? = null
     )
+
+    private class JsonFormattingLimitExceededException : RuntimeException()
 
     private val JSON_WHITESPACE = setOf(' ', '\t', '\r', '\n')
 
