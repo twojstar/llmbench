@@ -9,6 +9,7 @@ import it.krzeminski.snakeyaml.engine.kmp.parser.ParserImpl
 import it.krzeminski.snakeyaml.engine.kmp.scanner.StreamReader
 import nl.adaptivity.xmlutil.EventType
 import nl.adaptivity.xmlutil.XmlException
+import nl.adaptivity.xmlutil.XmlReader
 import nl.adaptivity.xmlutil.xmlStreaming
 
 /** Structured text syntaxes currently validated by the portable document core. */
@@ -142,14 +143,18 @@ object StructuredTextDiagnostics {
     /**
      * Validates XML well-formedness through the portable pull parser without building a document tree.
      * Entity expansion stays disabled and DTD/DOCTYPE declarations are rejected so validation never
-     * becomes a network/file-resolution surface. XML Schema or DTD validation is intentionally out of
-     * scope; this gate checks only the portable syntax boundary.
+     * becomes a network/file-resolution surface. The portable gate additionally enforces the XML 1.0
+     * character repertoire, including decoded character references. XML Schema or DTD validation is
+     * intentionally out of scope.
      */
     private fun validateXml(text: String): StructuredTextValidationResult {
         if (text.length > MAX_XML_CHARS) {
             return invalidXml("XML input exceeds the supported 3 Mi character limit.")
         }
         if (text.isBlank()) return invalidXml("XML input is empty.")
+        if (!hasOnlyXml10Characters(text)) {
+            return invalidXml("XML contains a character outside the supported XML 1.0 repertoire.")
+        }
 
         return try {
             val reader = xmlStreaming.newReader(text, expandEntities = false)
@@ -157,8 +162,19 @@ object StructuredTextDiagnostics {
             var rootElements = 0
             try {
                 while (reader.hasNext()) {
-                    when (reader.next()) {
+                    val event = reader.next()
+                    when (event) {
                         EventType.START_ELEMENT -> {
+                            if (hasDuplicateXmlAttributes(reader)) {
+                                return invalidXml("XML element contains duplicate attributes.")
+                            }
+                            for (index in 0 until reader.attributeCount) {
+                                if (!hasOnlyXml10Characters(reader.getAttributeValue(index))) {
+                                    return invalidXml(
+                                        "XML attribute contains a character outside the supported XML 1.0 repertoire."
+                                    )
+                                }
+                            }
                             if (depth == 0) rootElements++
                             depth++
                             if (depth > MAX_XML_NESTING) {
@@ -168,10 +184,24 @@ object StructuredTextDiagnostics {
                             }
                         }
                         EventType.END_ELEMENT -> depth--
+                        EventType.ENTITY_REF -> {
+                            if (!reader.isKnownEntity) {
+                                return invalidXml("XML references an undeclared entity.")
+                            }
+                            if (!hasOnlyXml10Characters(reader.text)) {
+                                return invalidXml(
+                                    "XML entity resolves to a character outside the supported XML 1.0 repertoire."
+                                )
+                            }
+                        }
                         EventType.DOCDECL -> return invalidXml(
                             "XML DOCTYPE/DTD declarations are not supported by portable validation."
                         )
-                        else -> Unit
+                        else -> if (event.isTextElement && !hasOnlyXml10Characters(reader.text)) {
+                            return invalidXml(
+                                "XML contains a character outside the supported XML 1.0 repertoire."
+                            )
+                        }
                     }
                 }
             } finally {
@@ -185,8 +215,53 @@ object StructuredTextDiagnostics {
             }
         } catch (error: XmlException) {
             invalidXml(error.message ?: "Invalid XML.")
+        } catch (error: IllegalStateException) {
+            invalidXml(error.message ?: "Invalid XML.")
         }
     }
+
+    private fun hasDuplicateXmlAttributes(reader: XmlReader): Boolean {
+        val expandedNames = mutableSetOf<Pair<String, String>>()
+        for (index in 0 until reader.attributeCount) {
+            val expandedName = reader.getAttributeNamespace(index) to reader.getAttributeLocalName(index)
+            if (!expandedNames.add(expandedName)) return true
+        }
+
+        val namespacePrefixes = mutableSetOf<String>()
+        for (namespace in reader.namespaceDecls) {
+            if (!namespacePrefixes.add(namespace.prefix)) return true
+        }
+        return false
+    }
+
+    private fun hasOnlyXml10Characters(value: String): Boolean {
+        var index = 0
+        while (index < value.length) {
+            val first = value[index].code
+            val codePoint = when {
+                first in 0xD800..0xDBFF -> {
+                    if (index + 1 >= value.length) return false
+                    val second = value[index + 1].code
+                    if (second !in 0xDC00..0xDFFF) return false
+                    index++
+                    0x10000 + ((first - 0xD800) shl 10) + (second - 0xDC00)
+                }
+                first in 0xDC00..0xDFFF -> return false
+                else -> first
+            }
+            if (!isXml10CodePoint(codePoint)) return false
+            index++
+        }
+        return true
+    }
+
+    private fun isXml10CodePoint(codePoint: Int): Boolean =
+        codePoint == 0x9 ||
+            codePoint == 0xA ||
+            codePoint == 0xD ||
+            codePoint in 0x20..0xD7FF ||
+            codePoint in 0xE000..0xFFFD ||
+            codePoint in 0x10000..0x10FFFF
 
     private fun invalidXml(message: String): StructuredTextValidationResult =
         StructuredTextValidationResult(
