@@ -17,6 +17,7 @@ class MarkdownWorkspaceViewModelTest {
         const val PROMPT_NAME = "prompt.md"
         const val EXTERNAL_TEXT = "shared text"
         const val LOCAL_SKILL_NAME = "release-checklist"
+        const val SKILL_FILE_NAME = "SKILL.md"
     }
 
     @Test
@@ -101,7 +102,7 @@ class MarkdownWorkspaceViewModelTest {
             ExternalMarkdownOpenResult.OPENED,
             viewModel.openExternalText(
                 text = EXTERNAL_TEXT,
-                displayName = "SKILL.md",
+                displayName = SKILL_FILE_NAME,
                 origin = origin,
                 markDirty = false
             )
@@ -110,7 +111,7 @@ class MarkdownWorkspaceViewModelTest {
         val state = viewModel.uiState.value
         assertFalse(state.isDirty)
         assertEquals(origin, state.origin)
-        assertEquals("SKILL.md", state.displayName)
+        assertEquals(SKILL_FILE_NAME, state.displayName)
     }
 
     @Test
@@ -124,7 +125,7 @@ class MarkdownWorkspaceViewModelTest {
         val state = viewModel.uiState.value
         assertTrue(state.isDirty)
         assertFalse(state.isExporting)
-        assertEquals("SKILL.md", state.displayName)
+        assertEquals(SKILL_FILE_NAME, state.displayName)
         assertEquals(MarkdownWorkspaceOrigin.LocalSkill(LOCAL_SKILL_NAME), state.origin)
     }
 
@@ -321,7 +322,7 @@ class MarkdownWorkspaceViewModelTest {
                 ExternalMarkdownOpenResult.OPENED,
                 viewModel.openExternalText(
                     text = EXTERNAL_TEXT,
-                    displayName = "SKILL.md",
+                    displayName = SKILL_FILE_NAME,
                     origin = MarkdownWorkspaceOrigin.LocalSkill(LOCAL_SKILL_NAME),
                     markDirty = false
                 )
