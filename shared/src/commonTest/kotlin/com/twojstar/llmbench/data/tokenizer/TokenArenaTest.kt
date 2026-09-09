@@ -13,13 +13,18 @@ class TokenArenaTest {
     }
 
     @Test
-    fun localMeasurementStaysExplicitlyEncodingScoped() {
+    fun localMeasurementStaysExplicitlyEncodingScopedAndBoundToVariantPrompt() {
+        val variant = TokenArenaVariant(
+            id = "short",
+            label = "Short",
+            prompt = "hello"
+        )
         val measurement = FakeCounter.measureForArena(
-            variantId = "short",
-            text = "hello",
+            variant = variant,
             backendLabel = "fake-local"
         )
 
+        assertEquals("short", measurement.variantId)
         assertEquals(5L, measurement.tokens)
         assertEquals(TokenMeasurementMode.LOCAL_EXACT_ENCODING, measurement.mode)
         assertEquals("fake-local", measurement.backendLabel)
@@ -71,20 +76,33 @@ class TokenArenaTest {
     }
 
     @Test
-    fun onlySuccessfulLiveResponsesEnterLiveEfficiencyRanking() {
+    fun onlyCompleteSuccessfulLiveResponsesEnterLiveEfficiencyRanking() {
         fun observation(
             provenance: ArenaResponseProvenance,
-            isError: Boolean = false
+            isError: Boolean = false,
+            isPartial: Boolean = false
         ) = TokenArenaResponseObservation(
             variantId = "a",
             providerId = "provider",
             modelName = "model",
             provenance = provenance,
-            isError = isError
+            isError = isError,
+            isPartial = isPartial
         )
 
         assertTrue(observation(ArenaResponseProvenance.LIVE_PROVIDER).canEnterLiveEfficiencyRanking)
-        assertFalse(observation(ArenaResponseProvenance.LIVE_PROVIDER, isError = true).canEnterLiveEfficiencyRanking)
+        assertFalse(
+            observation(
+                ArenaResponseProvenance.LIVE_PROVIDER,
+                isError = true
+            ).canEnterLiveEfficiencyRanking
+        )
+        assertFalse(
+            observation(
+                ArenaResponseProvenance.LIVE_PROVIDER,
+                isPartial = true
+            ).canEnterLiveEfficiencyRanking
+        )
         assertFalse(observation(ArenaResponseProvenance.CACHED_REPLAY).canEnterLiveEfficiencyRanking)
         assertFalse(observation(ArenaResponseProvenance.SIMULATED_FALLBACK).canEnterLiveEfficiencyRanking)
     }
