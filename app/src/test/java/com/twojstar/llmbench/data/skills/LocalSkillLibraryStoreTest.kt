@@ -175,6 +175,83 @@ class LocalSkillLibraryStoreTest {
     }
 
     @Test
+    fun renameMovesCanonicalSourceAndPreservesActivation() = runBlocking {
+        val original = skillSource(RELEASE_SKILL, FIRST_VERSION)
+        val renamedSource = skillSource(RENAMED_SKILL, SECOND_VERSION)
+        store.add(original)
+        store.setEnabled(RELEASE_SKILL, true)
+        val opened = requireNotNull(store.read(RELEASE_SKILL))
+
+        val renamed = store.rename(RELEASE_SKILL, opened.sourceDigest, renamedSource)
+
+        assertEquals(RENAMED_SKILL, renamed.skill.name)
+        assertEquals(SECOND_VERSION, renamed.skill.description)
+        assertTrue(renamed.skill.enabled)
+        assertEquals(localSkillSourceDigest(renamedSource), renamed.sourceDigest)
+        assertNull(store.read(RELEASE_SKILL))
+        assertEquals(renamedSource, store.read(RENAMED_SKILL)?.source)
+        assertEquals(listOf(RENAMED_SKILL), store.loadEnabledManifests().map(AgentSkillManifest::name))
+    }
+
+    @Test
+    fun renameRejectsExistingTargetWithoutTouchingEitherSkill() = runBlocking {
+        val original = skillSource(RELEASE_SKILL, FIRST_VERSION)
+        val target = skillSource(RENAMED_SKILL, "Existing target.")
+        val renameDraft = skillSource(RENAMED_SKILL, SECOND_VERSION)
+        store.add(original)
+        store.add(target)
+        val opened = requireNotNull(store.read(RELEASE_SKILL))
+
+        val error = runCatching {
+            store.rename(RELEASE_SKILL, opened.sourceDigest, renameDraft)
+        }.exceptionOrNull()
+
+        assertTrue(error is LocalSkillAlreadyExistsException)
+        assertEquals(original, store.read(RELEASE_SKILL)?.source)
+        assertEquals(target, store.read(RENAMED_SKILL)?.source)
+    }
+
+    @Test
+    fun renameRejectsStaleSourceDigestBeforeCreatingTarget() = runBlocking {
+        val original = skillSource(RELEASE_SKILL, FIRST_VERSION)
+        val newer = skillSource(RELEASE_SKILL, SECOND_VERSION)
+        val renameDraft = skillSource(RENAMED_SKILL, "Stale rename.")
+        store.add(original)
+        val opened = requireNotNull(store.read(RELEASE_SKILL))
+        store.add(newer, replaceExisting = true)
+
+        val error = runCatching {
+            store.rename(RELEASE_SKILL, opened.sourceDigest, renameDraft)
+        }.exceptionOrNull()
+
+        assertTrue(error is LocalSkillSourceConflictException)
+        assertEquals(newer, store.read(RELEASE_SKILL)?.source)
+        assertNull(store.read(RENAMED_SKILL))
+    }
+
+    @Test
+    fun loadFinishesInterruptedRenameAndRestoresActivationMarker() = runBlocking {
+        val original = skillSource(RELEASE_SKILL, FIRST_VERSION)
+        val renamedSource = skillSource(RENAMED_SKILL, SECOND_VERSION)
+        store.add(original)
+        store.setEnabled(RELEASE_SKILL, true)
+        val sourceDirectory = root.listFiles().orEmpty().single()
+        val targetDirectory = root.resolve("skill-${sha256Hex(RENAMED_SKILL.encodeToByteArray())}")
+        targetDirectory.mkdirs()
+        targetDirectory.resolve(RENAME_FROM_FILE_NAME).writeText(sourceDirectory.name)
+        targetDirectory.resolve(SKILL_FILE_NAME).writeText(renamedSource)
+
+        val loaded = store.load()
+
+        assertEquals(listOf(RENAMED_SKILL), loaded.map(LocalSkillSummary::name))
+        assertTrue(loaded.single().enabled)
+        assertFalse(sourceDirectory.exists())
+        assertFalse(targetDirectory.resolve(RENAME_FROM_FILE_NAME).exists())
+        assertTrue(targetDirectory.resolve(ENABLED_FILE_NAME).isFile)
+        assertEquals(listOf(RENAMED_SKILL), store.loadEnabledManifests().map(AgentSkillManifest::name))
+    }
+
+    @Test
     fun invalidTargetDirectoryIsReclaimedOnRetry() = runBlocking {
         val original = skillSource(RETRY_SKILL, "First attempt.")
         val retry = skillSource(RETRY_SKILL, "Retry succeeds.")
@@ -351,6 +428,7 @@ class LocalSkillLibraryStoreTest {
         const val REPLACEMENT_SLOT = "replacement-slot"
         const val SKILL_FILE_NAME = "SKILL.md"
         const val ENABLED_FILE_NAME = ".enabled"
+        const val RENAME_FROM_FILE_NAME = ".rename-from"
         const val FIRST_VERSION = "First version."
         const val SECOND_VERSION = "Second version."
         const val ALPHA_DESCRIPTION = "Alpha."
