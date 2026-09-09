@@ -69,6 +69,16 @@ class TokenArenaMetricsTest {
     }
 
     @Test
+    fun tokenEfficiencyAvoidsIntermediateOverflow() {
+        val efficiency = observation(
+            usage = ProviderUsage(inputTokens = 1_000),
+            qualityScore = Double.MAX_VALUE
+        ).efficiencyMetrics()
+
+        assertEquals(Double.MAX_VALUE, efficiency.qualityPerThousandInputTokens)
+    }
+
+    @Test
     fun missingProviderUsageDoesNotBorrowLocalTokenMeasurement() {
         val prompt = variant(REFERENCE_ID, PROMPT_TEXT)
         val observation = observation(qualityScore = 1.0)
