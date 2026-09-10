@@ -26,6 +26,10 @@ class StructuredTextFormatDetectionTest {
             detectStructuredTextFormat(null, "application/json; charset=\"utf-8\"")
         )
         assertEquals(
+            StructuredTextFormat.JSON,
+            detectStructuredTextFormat(null, "application/json; note=\"escaped\\\"quote\"")
+        )
+        assertEquals(
             StructuredTextFormat.YAML,
             detectStructuredTextFormat(null, APPLICATION_YAML)
         )
@@ -62,7 +66,10 @@ class StructuredTextFormatDetectionTest {
             "application/xml;",
             MALFORMED_XML_PARAMETER,
             "application/xml;charset=",
-            "application/xml;charset=\"unterminated"
+            "application/xml;charset=\"unterminated",
+            escapedXmlParameter('\n'),
+            escapedXmlParameter('\u0000'),
+            escapedXmlParameter('\u007F')
         ).forEach { mimeType ->
             assertEquals(
                 StructuredTextFormat.YAML,
@@ -77,14 +84,19 @@ class StructuredTextFormatDetectionTest {
 
     @Test
     fun malformedParameterizedHintDoesNotSuppressRecognizedFileName() {
-        assertEquals(
-            StructuredTextFormat.JSON,
-            detectStructuredTextFormat(SETTINGS_JSON, "application/xml;")
-        )
-        assertEquals(
-            StructuredTextFormat.JSON,
-            detectStructuredTextFormat(SETTINGS_JSON, MALFORMED_XML_PARAMETER)
-        )
+        listOf(
+            "application/xml;",
+            MALFORMED_XML_PARAMETER,
+            escapedXmlParameter('\n'),
+            escapedXmlParameter('\u0000'),
+            escapedXmlParameter('\u007F')
+        ).forEach { mimeType ->
+            assertEquals(
+                StructuredTextFormat.JSON,
+                detectStructuredTextFormat(SETTINGS_JSON, mimeType),
+                mimeType
+            )
+        }
     }
 
     @Test
@@ -124,6 +136,9 @@ class StructuredTextFormatDetectionTest {
             )
         )
     }
+
+    private fun escapedXmlParameter(control: Char): String =
+        "application/xml; note=\"safe\\" + control + "unsafe\""
 
     private companion object {
         const val SETTINGS_JSON = "settings.json"
