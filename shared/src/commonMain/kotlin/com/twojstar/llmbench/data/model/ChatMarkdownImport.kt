@@ -141,10 +141,12 @@ private fun String.endIndexAfterUtf8Bytes(startIndex: Int, byteCount: Int): Int?
     var index = startIndex
     var remaining = byteCount
     while (remaining > 0) {
-        val span = utf8CodeUnitSpanAt(index) ?: return null
-        if (span.byteCount > remaining) return null
-        remaining -= span.byteCount
-        index += span.codeUnitCount
+        val span = packedUtf8SpanAt(index)
+        if (span == 0) return null
+        val utf8Bytes = packedUtf8SpanByteCount(span)
+        if (utf8Bytes > remaining) return null
+        remaining -= utf8Bytes
+        index += packedUtf8SpanCodeUnitCount(span)
     }
     return index
 }
