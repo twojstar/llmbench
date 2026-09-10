@@ -4,7 +4,7 @@ internal const val CHAT_MARKDOWN_TITLE = "LlmBench chat"
 internal const val CHAT_MARKDOWN_VERSION = 1
 internal const val CHAT_MARKDOWN_VERSION_MARKER = "<!-- llmbench-chat:v1 -->"
 internal const val CHAT_MARKDOWN_MESSAGE_PREFIX = "<!-- llmbench-message:v1 role="
-internal const val CHAT_MARKDOWN_MESSAGE_CHARS = " chars="
+internal const val CHAT_MARKDOWN_MESSAGE_BYTES = " bytes="
 internal const val CHAT_MARKDOWN_MESSAGE_META_SUFFIX = " -->"
 internal const val CHAT_MARKDOWN_MESSAGE_END = "<!-- llmbench-message-end -->"
 private const val MAX_HEADING_METADATA_CHARS = 160
@@ -15,7 +15,7 @@ private const val MAX_HEADING_METADATA_CHARS = 160
  * Export starts at the first user turn so app welcome content is omitted. Only user and assistant
  * messages are included by construction; internal/system roles, profile notes, latency and other
  * diagnostics are intentionally excluded from the export boundary. Invisible HTML comments frame
- * each message with its role and exact UTF-16 body length so canonical exports can later be imported
+ * each message with its role and exact UTF-8 body length so canonical exports can later be imported
  * without mistaking Markdown headings or marker-like text inside a message for new turns.
  *
  * When [maxUtf8Bytes] is set, output is bounded incrementally before message bodies are appended, so
@@ -45,9 +45,11 @@ fun renderChatMarkdown(
     return output.toString()
 }
 
-private fun ModelChatMessage.markdownFrameStart(): String =
-    "$CHAT_MARKDOWN_MESSAGE_PREFIX$sender$CHAT_MARKDOWN_MESSAGE_CHARS${text.length}" +
+private fun ModelChatMessage.markdownFrameStart(): String {
+    val bodyUtf8Bytes = requireNotNull(utf8ByteCountAtMost(text, Int.MAX_VALUE))
+    return "$CHAT_MARKDOWN_MESSAGE_PREFIX$sender$CHAT_MARKDOWN_MESSAGE_BYTES$bodyUtf8Bytes" +
         "$CHAT_MARKDOWN_MESSAGE_META_SUFFIX\n"
+}
 
 private fun ModelChatMessage.markdownHeading(): String = when (sender) {
     CHAT_ROLE_USER -> "You"
@@ -85,7 +87,7 @@ private class BoundedUtf8StringBuilder(maxUtf8Bytes: Int) {
     override fun toString(): String = builder.toString()
 }
 
-private fun utf8ByteCountAtMost(value: String, limit: Int): Int? {
+internal fun utf8ByteCountAtMost(value: String, limit: Int): Int? {
     var bytes = 0
     var index = 0
     while (index < value.length) {
