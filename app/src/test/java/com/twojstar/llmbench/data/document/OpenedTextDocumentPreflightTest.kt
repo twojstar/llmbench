@@ -11,29 +11,28 @@ import org.junit.Test
 class OpenedTextDocumentPreflightTest {
     @Test
     fun forwardsProviderSafMetadataAndInjectedCounterToPortablePreflight() {
-        val source = "<root />"
         val opened = OpenedTextDocument(
-            document = textDocument(source),
+            document = textDocument(ROOT_XML),
             displayName = "payload.xml",
             hasProviderDisplayName = true,
-            mimeType = "application/xml"
+            mimeType = APPLICATION_XML
         )
 
         val report = opened.buildPreflightReport(FakeCounter)
 
         assertEquals(StructuredTextFormat.XML, report.structuredValidation?.format)
         assertTrue(report.structuredValidation?.isValid == true)
-        assertEquals(source.length, report.tokenSummary?.count)
+        assertEquals(ROOT_XML.length, report.tokenSummary?.count)
         assertEquals(FakeCounter.encodingLabel, report.tokenSummary?.encodingLabel)
     }
 
     @Test
     fun syntheticFallbackNameCannotConflictWithProviderMime() {
         val opened = OpenedTextDocument(
-            document = textDocument("<root />"),
+            document = textDocument(ROOT_XML),
             displayName = "payload.json",
             hasProviderDisplayName = false,
-            mimeType = "application/xml"
+            mimeType = APPLICATION_XML
         )
 
         val report = opened.buildPreflightReport(FakeCounter)
@@ -45,10 +44,10 @@ class OpenedTextDocumentPreflightTest {
     @Test
     fun defaultBridgeUsesTheRealLocalTokenizerBackend() {
         val opened = OpenedTextDocument(
-            document = textDocument("hello world"),
-            displayName = "notes.txt",
+            document = textDocument(HELLO_WORLD),
+            displayName = NOTES_TXT,
             hasProviderDisplayName = true,
-            mimeType = "text/plain"
+            mimeType = TEXT_PLAIN
         )
 
         val report = opened.buildPreflightReport()
@@ -61,10 +60,10 @@ class OpenedTextDocumentPreflightTest {
     @Test
     fun callerCanRequestTokenlessPreflight() {
         val opened = OpenedTextDocument(
-            document = textDocument("hello world"),
-            displayName = "notes.txt",
+            document = textDocument(HELLO_WORLD),
+            displayName = NOTES_TXT,
             hasProviderDisplayName = true,
-            mimeType = "text/plain"
+            mimeType = TEXT_PLAIN
         )
 
         val report = opened.buildPreflightReport(tokenCounter = null)
@@ -79,7 +78,7 @@ class OpenedTextDocumentPreflightTest {
             document = textDocument(source),
             displayName = "large.txt",
             hasProviderDisplayName = true,
-            mimeType = "text/plain"
+            mimeType = TEXT_PLAIN
         )
         val mustNotRun = object : TokenCounter {
             override val encodingLabel: String = "must-not-run"
@@ -100,5 +99,13 @@ class OpenedTextDocumentPreflightTest {
     private object FakeCounter : TokenCounter {
         override val encodingLabel: String = "fake-exact"
         override fun count(text: String): Int = text.length
+    }
+
+    private companion object {
+        const val ROOT_XML = "<root />"
+        const val APPLICATION_XML = "application/xml"
+        const val HELLO_WORLD = "hello world"
+        const val NOTES_TXT = "notes.txt"
+        const val TEXT_PLAIN = "text/plain"
     }
 }
