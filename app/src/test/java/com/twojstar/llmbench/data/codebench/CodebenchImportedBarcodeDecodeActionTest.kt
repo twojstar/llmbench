@@ -45,12 +45,7 @@ class CodebenchImportedBarcodeDecodeActionTest {
 
     @Test
     fun grantedImportedQrDecodesLocally() {
-        val matrix = CodebenchBarcodeCodec.encode(
-            text = SECRET_TEXT,
-            format = CodebenchBarcodeFormat.QR_CODE,
-            width = QR_SIZE,
-            height = QR_SIZE
-        )
+        val matrix = qrMatrix()
 
         val result = CodebenchImportedBarcodeDecodeAction.execute(
             width = matrix.width,
@@ -97,6 +92,31 @@ class CodebenchImportedBarcodeDecodeActionTest {
         val rejected = result as CodebenchImportedBarcodeDecodeActionResult.Rejected
         assertEquals(CodebenchBarcodeDecodeRejection.INVALID_IMAGE, rejected.reason)
     }
+
+    @Test
+    fun emptyFormatSelectionDoesNotMislabelAValidImage() {
+        val matrix = qrMatrix()
+
+        val result = CodebenchImportedBarcodeDecodeAction.execute(
+            width = matrix.width,
+            height = matrix.height,
+            pixels = matrix.toArgbPixels(),
+            possibleFormats = emptySet(),
+            surface = BenchToolSurface.NATIVE_CHAT,
+            isEnabled = true,
+            grantedPermissions = CONTENT_GRANT
+        )
+
+        val rejected = result as CodebenchImportedBarcodeDecodeActionResult.Rejected
+        assertEquals(CodebenchBarcodeDecodeRejection.NO_FORMATS_ENABLED, rejected.reason)
+    }
+
+    private fun qrMatrix(): CodebenchBarcodeMatrix = CodebenchBarcodeCodec.encode(
+        text = SECRET_TEXT,
+        format = CodebenchBarcodeFormat.QR_CODE,
+        width = QR_SIZE,
+        height = QR_SIZE
+    )
 
     private fun CodebenchBarcodeMatrix.toArgbPixels(): IntArray =
         copyDarkPixels().map { dark -> if (dark) BLACK else WHITE }.toIntArray()
