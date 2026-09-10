@@ -52,16 +52,17 @@ object StreambenchM3uParser {
                     title = extinfTitle(line).ifEmpty { attributes["tvg-name"].orEmpty() },
                     group = attributes["group-title"].orEmpty(),
                     logo = if (allowArtwork) {
-                        parseHttpUrlCandidate(attributes["tvg-logo"].orEmpty())?.raw.orEmpty()
+                        parseArtworkUrlCandidate(attributes["tvg-logo"].orEmpty()).orEmpty()
                     } else {
                         ""
                     },
                     country = attributes["tvg-country"].orEmpty(),
                     language = attributes["tvg-language"].orEmpty(),
-                    quality = attributes["tvg-quality"]
-                        ?: attributes["quality"]
-                        ?: attributes["resolution"]
-                        ?: "",
+                    quality = (
+                        attributes["tvg-quality"]
+                            ?: attributes["quality"]
+                            ?: attributes["resolution"]
+                    ).orEmpty(),
                     radio = attributes["radio"] == "true" || attributes["type"] == "radio"
                 )
                 return@forEachLine
@@ -122,6 +123,12 @@ object StreambenchM3uParser {
         return -1
     }
 
+    private fun parseArtworkUrlCandidate(value: String): String? {
+        val url = parseHttpUrlCandidate(value) ?: return null
+        if (url.scheme != "https" || !isPublicArtworkHostname(url.host)) return null
+        return url.raw
+    }
+
     private fun parseHttpUrlCandidate(value: String): HttpUrlCandidate? {
         val candidate = value.trim()
         if (candidate.isEmpty() || candidate.any(::isForbiddenUrlCharacter)) return null
@@ -145,6 +152,7 @@ object StreambenchM3uParser {
             val closing = hostPort.indexOf(']')
             if (closing <= 1) return null
             host = hostPort.substring(1, closing)
+            if (!isIpv6Literal(host)) return null
             val remainder = hostPort.substring(closing + 1)
             port = when {
                 remainder.isEmpty() -> null
@@ -167,8 +175,79 @@ object StreambenchM3uParser {
             val portNumber = port.toIntOrNull() ?: return null
             if (portNumber !in 0..65_535) return null
         }
-        return HttpUrlCandidate(raw = candidate, host = host)
+        return HttpUrlCandidate(raw = candidate, scheme = scheme, host = host)
     }
+
+    private fun isIpv6Literal(host: String): Boolean {
+        if (host.isEmpty() || '%' in host) return false
+        val compression = host.indexOf("::")
+        if (compression >= 0) {
+            if (host.indexOf("::", compression + 2) >= 0) return false
+            val leftUnits = ipv6SectionUnits(host.substring(0, compression), allowIpv4Tail = false)
+                ?: return false
+            val rightUnits = ipv6SectionUnits(host.substring(compression + 2), allowIpv4Tail = true)
+                ?: return false
+            return leftUnits + rightUnits < 8
+        }
+        return ipv6SectionUnits(host, allowIpv4Tail = true) == 8
+    }
+
+    private fun ipv6SectionUnits(section: String, allowIpv4Tail: Boolean): Int? {
+        if (section.isEmpty()) return 0
+        val groups = section.split(':')
+        var units = 0
+        groups.forEachIndexed { index, group ->
+            if (group.isEmpty()) return null
+            if ('.' in group) {
+                if (!allowIpv4Tail || index != groups.lastIndex || !isIpv4Literal(group)) return null
+                units += 2
+            } else {
+                if (group.length !in 1..4 || group.any { !it.isAsciiHexDigit() }) return null
+                units += 1
+            }
+        }
+        return units
+    }
+
+    /**
+     * Artwork metadata is stricter than stream URLs: accept only HTTPS DNS hostnames and leave DNS/IP
+     * revalidation to the eventual network loader immediately before a request.
+     */
+    private fun isPublicArtworkHostname(host: String): Boolean {
+        val normalized = host.lowercase().trimEnd('.')
+        if (normalized.isEmpty() || '.' !in normalized || ':' in normalized) return false
+        if (
+            normalized == "localhost" ||
+            normalized.endsWith(".localhost") ||
+            normalized.endsWith(".local") ||
+            normalized.endsWith(".lan") ||
+            normalized.endsWith(".internal")
+        ) return false
+        if (isIpv4Literal(normalized) || normalized.all { it.isDigit() || it == '.' }) return false
+
+        return normalized.split('.').all { label ->
+            label.length in 1..63 &&
+                label.first().isAsciiLetterOrDigit() &&
+                label.last().isAsciiLetterOrDigit() &&
+                label.all { it.isAsciiLetterOrDigit() || it == '-' }
+        }
+    }
+
+    private fun isIpv4Literal(value: String): Boolean {
+        val parts = value.split('.')
+        return parts.size == 4 && parts.all { part ->
+            part.isNotEmpty() &&
+                part.length <= 3 &&
+                part.all { it in '0'..'9' } &&
+                part.toIntOrNull()?.let { it in 0..255 } == true
+        }
+    }
+
+    private fun Char.isAsciiHexDigit(): Boolean =
+        this in '0'..'9' || this in 'a'..'f' || this in 'A'..'F'
+
+    private fun Char.isAsciiLetterOrDigit(): Boolean =
+        this in 'a'..'z' || this in 'A'..'Z' || this in '0'..'9'
 
     private fun isForbiddenUrlCharacter(character: Char): Boolean =
         character <= ' ' || character == '\u007F' || character == '\\'
@@ -176,17 +255,18 @@ object StreambenchM3uParser {
     private inline fun forEachLine(source: String, block: (String) -> Unit) {
         var start = if (source.firstOrNull() == '\uFEFF') 1 else 0
         while (start <= source.length) {
-            val newline = source.indexOf('\n', start)
+            val newline = source.indexOfAny(charArrayOf('\r', '\n'), start)
             val end = if (newline >= 0) newline else source.length
-            val contentEnd = if (end > start && source[end - 1] == '\r') end - 1 else end
-            block(source.substring(start, contentEnd).trim())
+            block(source.substring(start, end).trim())
             if (newline < 0) break
             start = newline + 1
+            if (source[newline] == '\r' && source.getOrNull(start) == '\n') start += 1
         }
     }
 
     private data class HttpUrlCandidate(
         val raw: String,
+        val scheme: String,
         val host: String
     )
 

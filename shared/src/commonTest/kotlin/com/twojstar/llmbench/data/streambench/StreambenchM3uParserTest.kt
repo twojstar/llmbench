@@ -57,14 +57,26 @@ class StreambenchM3uParserTest {
     }
 
     @Test
-    fun artworkIsOptInAndMustUseHttpOrHttps() {
+    fun artworkIsOptInAndRestrictedToPublicHttpsHostnames() {
         val validLogo = """
             #EXTINF:-1 tvg-logo="https://example.com/logo.png",One
             https://example.com/one
         """.trimIndent()
-        val invalidLogo = """
+        val dataLogo = """
             #EXTINF:-1 tvg-logo="data:image/png;base64,abc",Two
             https://example.com/two
+        """.trimIndent()
+        val insecureLogo = """
+            #EXTINF:-1 tvg-logo="http://example.com/logo.png",Three
+            https://example.com/three
+        """.trimIndent()
+        val localLogo = """
+            #EXTINF:-1 tvg-logo="https://127.0.0.1/logo.png",Four
+            https://example.com/four
+        """.trimIndent()
+        val localNameLogo = """
+            #EXTINF:-1 tvg-logo="https://device.local/logo.png",Five
+            https://example.com/five
         """.trimIndent()
 
         assertEquals("", StreambenchM3uParser.parse(validLogo).single().logo)
@@ -72,7 +84,10 @@ class StreambenchM3uParserTest {
             "https://example.com/logo.png",
             StreambenchM3uParser.parse(validLogo, allowArtwork = true).single().logo
         )
-        assertEquals("", StreambenchM3uParser.parse(invalidLogo, allowArtwork = true).single().logo)
+        assertEquals("", StreambenchM3uParser.parse(dataLogo, allowArtwork = true).single().logo)
+        assertEquals("", StreambenchM3uParser.parse(insecureLogo, allowArtwork = true).single().logo)
+        assertEquals("", StreambenchM3uParser.parse(localLogo, allowArtwork = true).single().logo)
+        assertEquals("", StreambenchM3uParser.parse(localNameLogo, allowArtwork = true).single().logo)
     }
 
     @Test
@@ -115,6 +130,29 @@ class StreambenchM3uParserTest {
 
         assertEquals("::1", entry.title)
         assertEquals("https://[::1]:8080/live", entry.url)
+    }
+
+    @Test
+    fun malformedBracketedIpv6AuthoritiesAreIgnored() {
+        val source = """
+            https://[not-an-ip]/live
+            https://[1:2:3]/live
+            https://[::1]/live
+        """.trimIndent()
+
+        val entries = StreambenchM3uParser.parse(source)
+
+        assertEquals(1, entries.size)
+        assertEquals("https://[::1]/live", entries.single().url)
+    }
+
+    @Test
+    fun carriageReturnOnlyPlaylistsAreParsed() {
+        val source = "#EXTM3U\r#EXTINF:-1,One\rhttps://example.com/one\r#EXTINF:-1,Two\rhttps://example.com/two"
+
+        val entries = StreambenchM3uParser.parse(source)
+
+        assertEquals(listOf("One", "Two"), entries.map { it.title })
     }
 
     @Test
