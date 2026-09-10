@@ -16,7 +16,10 @@ import java.io.IOException
 data class MarkdownWorkspaceRecoverySource(
     val localSkillName: String,
     val sourceDigest: String
-)
+) {
+    /** Skill names and source digests can reveal user-owned asset metadata. */
+    override fun toString(): String = "MarkdownWorkspaceRecoverySource(<redacted>)"
+}
 
 data class MarkdownWorkspaceRecoverySnapshot(
     val text: String,
@@ -24,7 +27,12 @@ data class MarkdownWorkspaceRecoverySnapshot(
     val displayName: String,
     val isDirty: Boolean,
     val source: MarkdownWorkspaceRecoverySource? = null
-)
+) {
+    /** Recovery payloads contain drafts and local file metadata; keep only structural state visible. */
+    override fun toString(): String =
+        "MarkdownWorkspaceRecoverySnapshot(text=<redacted>, displayName=<redacted>, " +
+            "hadUtf8Bom=$hadUtf8Bom, isDirty=$isDirty, sourcePresent=${source != null})"
+}
 
 internal class MarkdownWorkspaceRecoveryStore(
     directory: File
