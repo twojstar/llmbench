@@ -28,8 +28,7 @@ import com.twojstar.llmbench.data.streambench.StreambenchImportedPlaylistActionR
 import com.twojstar.llmbench.data.streambench.StreambenchPlaylistEntry
 import com.twojstar.llmbench.data.streambench.executeStreambenchPlaylistImportAction
 import java.io.IOException
-import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
 private val STREAMBENCH_PLAYLIST_MIME_TYPES = arrayOf(
@@ -57,7 +56,7 @@ private suspend fun importStreambenchPlaylist(
     context: Context,
     uri: Uri,
     isEnabled: Boolean
-): StreambenchImportUiResult = try {
+): StreambenchImportUiResult = runCatching {
     val opened = TextDocumentFileAccess.import(
         context = context,
         uri = uri,
@@ -83,8 +82,8 @@ private suspend fun importStreambenchPlaylist(
             "Could not import this playlist. Check its format and size."
         )
     }
-} catch (error: Exception) {
-    currentCoroutineContext().ensureActive()
+}.getOrElse { error ->
+    if (error is CancellationException) throw error
     StreambenchImportUiResult(
         entries = emptyList(),
         message = when (error) {
