@@ -39,9 +39,14 @@ class ChatMarkdownExportTest {
 
         assertEquals(
             "# LlmBench chat\n\n" +
-                "## You\n\n**Question**\n\n" +
-                "## OpenAI · gpt-5.6\n\nAnswer\n\n" +
-                "## Claude · claude-sonnet-5 · simulated\n\nOther answer\n",
+                "<!-- llmbench-chat:v1 -->\n\n" +
+                "<!-- llmbench-message:v1 role=user bytes=12 -->\n" +
+                "## You\n\n**Question**\n<!-- llmbench-message-end -->\n\n" +
+                "<!-- llmbench-message:v1 role=assistant bytes=6 -->\n" +
+                "## OpenAI · gpt-5.6\n\nAnswer\n<!-- llmbench-message-end -->\n\n" +
+                "<!-- llmbench-message:v1 role=assistant bytes=12 -->\n" +
+                "## Claude · claude-sonnet-5 · simulated\n\n" +
+                "Other answer\n<!-- llmbench-message-end -->\n\n",
             assertNotNull(markdown)
         )
     }
@@ -85,16 +90,19 @@ class ChatMarkdownExportTest {
         )
 
         assertTrue(markdown.contains(body))
+        assertTrue(markdown.contains("bytes=${body.encodeToByteArray().size}"))
     }
 
     @Test
     fun respectsUtf8ByteLimitIncludingMultibyteText() {
+        val body = "Zażółć 😀"
         val messages = listOf(
-            ModelChatMessage(id = "u1", sender = CHAT_ROLE_USER, text = "Zażółć 😀")
+            ModelChatMessage(id = "u1", sender = CHAT_ROLE_USER, text = body)
         )
         val markdown = assertNotNull(renderChatMarkdown(messages))
         val exactUtf8Bytes = markdown.encodeToByteArray().size
 
+        assertTrue(markdown.contains("bytes=${body.encodeToByteArray().size}"))
         assertEquals(markdown, renderChatMarkdown(messages, maxUtf8Bytes = exactUtf8Bytes))
         assertNull(renderChatMarkdown(messages, maxUtf8Bytes = exactUtf8Bytes - 1))
     }
