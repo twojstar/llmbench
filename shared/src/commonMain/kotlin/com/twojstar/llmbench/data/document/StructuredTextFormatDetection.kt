@@ -111,15 +111,19 @@ private fun String.skipQuotedMimeValue(start: Int): Int? {
         when {
             char == '"' -> return index + 1
             char == '\\' -> {
-                if (index + 1 >= length) return null
+                val escaped = getOrNull(index + 1) ?: return null
+                if (escaped.isInvalidMimeQuotedChar()) return null
                 index += 2
             }
-            char.code < 0x20 && char != '\t' -> return null
+            char.isInvalidMimeQuotedChar() -> return null
             else -> index++
         }
     }
     return null
 }
+
+private fun Char.isInvalidMimeQuotedChar(): Boolean =
+    (code < 0x20 && this != '\t') || code == 0x7F
 
 private fun String.skipMimeWhitespace(start: Int): Int {
     var index = start
