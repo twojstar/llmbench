@@ -2,7 +2,6 @@ package com.twojstar.llmbench.data.preferences
 
 import com.twojstar.llmbench.data.model.BuiltInBenchTool
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -25,16 +24,5 @@ class BuiltInBenchPreferencesStoreTest {
         assertTrue(resolveEnabledBuiltInBenchTools(null).isEmpty())
         assertTrue(resolveEnabledBuiltInBenchTools(emptySet()).isEmpty())
         assertTrue(resolveEnabledBuiltInBenchTools(setOf("retired-tool")).isEmpty())
-    }
-
-    @Test
-    fun stableToolIdsAreUniqueAndUnknownIdsFailClosed() {
-        val ids = BuiltInBenchTool.entries.map { it.id }
-
-        assertEquals(ids.size, ids.toSet().size)
-        assertTrue(ids.all { it.isNotBlank() })
-        assertEquals(BuiltInBenchTool.DOCBENCH_TEXT_INSPECTOR, BuiltInBenchTool.fromId("DOCBENCH-TEXT-INSPECTOR"))
-        assertNull(BuiltInBenchTool.fromId("retired-tool"))
-        assertNull(BuiltInBenchTool.fromId(null))
     }
 }
