@@ -27,6 +27,7 @@ data class StreambenchPlaylistEntry(
 object StreambenchM3uParser {
     const val MAX_SOURCE_UTF16_UNITS: Int = 8 * 1024 * 1024
     const val MAX_ENTRIES: Int = 10_000
+    const val MAX_REMOTE_URL_UTF16_UNITS: Int = 4_096
 
     private val quotedAttribute = Regex("""([\w-]+)="([^"]*)"""")
 
@@ -96,6 +97,27 @@ object StreambenchM3uParser {
         return items
     }
 
+    /**
+     * Strict remote-playback policy for untrusted playlist entries.
+     *
+     * Only bounded HTTPS URLs using public-looking DNS hostnames are handed to a platform player.
+     * IP literals, local-only suffixes and credential-bearing authorities are rejected here. The
+     * eventual network loader must still revalidate DNS results immediately before connecting to
+     * prevent a public hostname from resolving or rebinding to a private address.
+     */
+    fun validateRemotePlaybackUrl(value: String): String? {
+        val candidate = value.trim()
+        if (candidate.length !in 1..MAX_REMOTE_URL_UTF16_UNITS) return null
+        val url = parseHttpUrlCandidate(candidate) ?: return null
+        if (
+            url.raw != candidate ||
+            url.scheme != "https" ||
+            url.hasUserInfo ||
+            !isPublicRemoteHostname(url.host)
+        ) return null
+        return url.raw
+    }
+
     private fun parseAttributes(line: String): Map<String, String> {
         val separator = extinfSeparatorIndex(line)
         val metadata = if (separator >= 0) line.substring(0, separator) else line
@@ -125,7 +147,7 @@ object StreambenchM3uParser {
 
     private fun parseArtworkUrlCandidate(value: String): String? {
         val url = parseHttpUrlCandidate(value) ?: return null
-        if (url.scheme != "https" || !isPublicArtworkHostname(url.host)) return null
+        if (url.scheme != "https" || url.hasUserInfo || !isPublicRemoteHostname(url.host)) return null
         return url.raw
     }
 
@@ -143,6 +165,7 @@ object StreambenchM3uParser {
             ?: candidate.length
         if (authorityEnd <= authorityStart) return null
         val authority = candidate.substring(authorityStart, authorityEnd)
+        val hasUserInfo = '@' in authority
         val hostPort = authority.substringAfterLast('@')
         if (hostPort.isEmpty()) return null
 
@@ -175,7 +198,12 @@ object StreambenchM3uParser {
             val portNumber = port.toIntOrNull() ?: return null
             if (portNumber !in 0..65_535) return null
         }
-        return HttpUrlCandidate(raw = candidate, scheme = scheme, host = host)
+        return HttpUrlCandidate(
+            raw = candidate,
+            scheme = scheme,
+            host = host,
+            hasUserInfo = hasUserInfo
+        )
     }
 
     private fun isIpv6Literal(host: String): Boolean {
@@ -209,11 +237,8 @@ object StreambenchM3uParser {
         return units
     }
 
-    /**
-     * Artwork metadata is stricter than stream URLs: accept only HTTPS DNS hostnames and leave DNS/IP
-     * revalidation to the eventual network loader immediately before a request.
-     */
-    private fun isPublicArtworkHostname(host: String): Boolean {
+    /** Public-looking DNS hostnames only. The network loader must still validate resolved addresses. */
+    private fun isPublicRemoteHostname(host: String): Boolean {
         val normalized = host.lowercase().trimEnd('.')
         if (normalized.isEmpty() || normalized.length > 253 || '.' !in normalized || ':' in normalized) return false
         if (
@@ -267,7 +292,8 @@ object StreambenchM3uParser {
     private data class HttpUrlCandidate(
         val raw: String,
         val scheme: String,
-        val host: String
+        val host: String,
+        val hasUserInfo: Boolean
     )
 
     private data class PendingEntry(
