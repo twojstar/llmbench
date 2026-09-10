@@ -35,10 +35,10 @@ internal sealed interface CodebenchImportedBarcodeDecodeActionResult {
 /**
  * Explicit-user Codebench `IMAGE -> TEXT` boundary for an already opened user-selected image.
  *
- * The canonical Codebench registry keeps content-read permission optional because text generation does
- * not need it. This concrete imported-image operation promotes READ_USER_SELECTED_CONTENT to a required
- * grant before any pixel validation or decoding runs. Camera capture is deliberately a separate future
- * action with its own CAMERA permission and lifecycle boundary.
+ * The broad Codebench registry capability covers multiple routes, so content-read permission remains
+ * optional there. This imported-image operation promotes READ_USER_SELECTED_CONTENT to a required
+ * grant for its route before any pixel validation or decoding runs. Camera capture is deliberately a
+ * separate future action with its own CAMERA permission and lifecycle boundary.
  */
 internal object CodebenchImportedBarcodeDecodeAction {
     private val importedImagePermissions = setOf(BenchToolPermission.READ_USER_SELECTED_CONTENT)
@@ -87,7 +87,10 @@ internal object CodebenchImportedBarcodeDecodeAction {
                 CodebenchBarcodeDecodeRejection.INVALID_IMAGE
             )
         }
-        return decoded?.let(CodebenchImportedBarcodeDecodeActionResult::Completed)
-            ?: CodebenchImportedBarcodeDecodeActionResult.NotFound
+        return if (decoded == null) {
+            CodebenchImportedBarcodeDecodeActionResult.NotFound
+        } else {
+            CodebenchImportedBarcodeDecodeActionResult.Completed(decoded)
+        }
     }
 }
