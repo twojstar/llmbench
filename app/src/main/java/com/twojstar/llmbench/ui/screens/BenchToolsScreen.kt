@@ -1,5 +1,6 @@
 package com.twojstar.llmbench.ui.screens
 
+import android.content.ActivityNotFoundException
 import android.content.Context
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -228,7 +229,13 @@ fun BenchToolsScreen(modifier: Modifier = Modifier) {
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                                 Button(
-                                    onClick = { streambenchImportLauncher.launch(STREAMBENCH_PLAYLIST_MIME_TYPES) },
+                                    onClick = {
+                                        try {
+                                            streambenchImportLauncher.launch(STREAMBENCH_PLAYLIST_MIME_TYPES)
+                                        } catch (_: ActivityNotFoundException) {
+                                            streambenchImportMessage = "No document picker is available."
+                                        }
+                                    },
                                     enabled = !streambenchImporting,
                                     modifier = Modifier.testTag("streambench_import_playlist")
                                 ) {
