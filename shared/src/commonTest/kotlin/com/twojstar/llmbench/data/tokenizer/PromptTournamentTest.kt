@@ -4,7 +4,9 @@ import kotlinx.serialization.json.Json
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertNotSame
+import kotlin.test.assertTrue
 
 class PromptTournamentTest {
     @Test
@@ -144,6 +146,30 @@ class PromptTournamentTest {
         assertEquals(plan.plannedRuns().toList(), decoded.plannedRuns().toList())
     }
 
+    @Test
+    fun debugStringsDoNotExposePromptOrIntentContent() {
+        val privateVariant = variant(PRIVATE_ID, SENSITIVE_PROMPT)
+        val alternateVariant = variant(ALTERNATE_ID, ALTERNATE_PROMPT)
+        val arena = TokenArenaExperiment.create(
+            id = PRIVATE_ARENA_ID,
+            intentLabel = SENSITIVE_INTENT,
+            variants = listOf(privateVariant, alternateVariant)
+        )
+        val plan = PromptTournamentPlan.create(
+            experiment = arena,
+            targets = listOf(defaultTarget()),
+            profiles = profiles(privateVariant, alternateVariant)
+        )
+
+        listOf(privateVariant.toString(), arena.toString(), plan.toString()).forEach { debug ->
+            assertFalse(SENSITIVE_PROMPT in debug)
+            assertFalse(SENSITIVE_INTENT in debug)
+        }
+        assertTrue("prompt=<redacted>" in privateVariant.toString())
+        assertTrue("variantCount=2" in arena.toString())
+        assertTrue("plannedRunCount=2" in plan.toString())
+    }
+
     private fun variant(id: String, prompt: String) = TokenArenaVariant(id, id, prompt)
 
     private fun experiment(vararg variants: TokenArenaVariant) = TokenArenaExperiment.create(
@@ -176,6 +202,9 @@ class PromptTournamentTest {
         private const val ONLY_ID = "only"
         private const val CONCISE_ID = "concise"
         private const val MARKDOWN_ID = "markdown"
+        private const val PRIVATE_ID = "private"
+        private const val ALTERNATE_ID = "alternate"
+        private const val PRIVATE_ARENA_ID = "private-arena"
         private const val DEFAULT_PROVIDER = "provider"
         private const val DEFAULT_MODEL = "model"
         private const val OPENAI_PROVIDER = "openai"
@@ -186,5 +215,8 @@ class PromptTournamentTest {
         private const val ANSWER_SENTENCE = "Answer in one sentence."
         private const val EDITED_PROMPT = "edited"
         private const val EXPLAIN_RESULT = "Explain the result."
+        private const val SENSITIVE_PROMPT = "sk-proj-demo-never-log-this prompt body"
+        private const val SENSITIVE_INTENT = "customer confidential migration plan"
+        private const val ALTERNATE_PROMPT = "public alternative"
     }
 }

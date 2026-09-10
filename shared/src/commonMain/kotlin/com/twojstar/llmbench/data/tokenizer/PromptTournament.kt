@@ -136,8 +136,10 @@ class PromptTournamentPlan private constructor(
         return result
     }
 
+    /** Keep nested prompt-bearing experiment state and target details out of incidental debug output. */
     override fun toString(): String =
-        "PromptTournamentPlan(experiment=$experiment, targets=$targetSnapshot, profiles=$profileSnapshot)"
+        "PromptTournamentPlan(experimentId=${experiment.id}, targetCount=${targetSnapshot.size}, " +
+            "profileCount=${profileSnapshot.size}, plannedRunCount=$plannedRunCount)"
 
     companion object {
         fun create(
