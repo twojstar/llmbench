@@ -141,30 +141,13 @@ private fun String.endIndexAfterUtf8Bytes(startIndex: Int, byteCount: Int): Int?
     var index = startIndex
     var remaining = byteCount
     while (remaining > 0) {
-        if (index >= length) return null
-        val span = utf8SpanAt(index) ?: return null
+        val span = utf8CodeUnitSpanAt(index) ?: return null
         if (span.byteCount > remaining) return null
         remaining -= span.byteCount
         index += span.codeUnitCount
     }
     return index
 }
-
-private fun String.utf8SpanAt(index: Int): Utf8Span? {
-    val codeUnit = getOrNull(index)?.code ?: return null
-    return when {
-        codeUnit <= 0x7F -> Utf8Span(codeUnitCount = 1, byteCount = 1)
-        codeUnit <= 0x7FF -> Utf8Span(codeUnitCount = 1, byteCount = 2)
-        codeUnit in 0xD800..0xDBFF &&
-            getOrNull(index + 1)?.code in 0xDC00..0xDFFF -> Utf8Span(codeUnitCount = 2, byteCount = 4)
-        else -> Utf8Span(codeUnitCount = 1, byteCount = 3)
-    }
-}
-
-private data class Utf8Span(
-    val codeUnitCount: Int,
-    val byteCount: Int
-)
 
 private fun invalidChatMarkdown(message: String): ChatMarkdownImportResult = ChatMarkdownImportResult(
     chat = null,
