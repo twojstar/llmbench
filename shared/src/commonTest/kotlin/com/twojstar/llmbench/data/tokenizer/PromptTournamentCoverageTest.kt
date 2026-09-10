@@ -2,6 +2,7 @@ package com.twojstar.llmbench.data.tokenizer
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotSame
 
 class PromptTournamentCoverageTest {
     @Test
@@ -40,6 +41,7 @@ class PromptTournamentCoverageTest {
         assertEquals(1, coverage.completeLiveRunCount)
         assertEquals(2, coverage.nonRankableObservedRunCount)
         assertEquals(1, coverage.missingRunCount)
+        assertNotSame(coverage.runs, coverage.runs)
         assertEquals(
             listOf(
                 PromptTournamentRunCoverageState.COMPLETE_LIVE,
@@ -49,7 +51,10 @@ class PromptTournamentCoverageTest {
             ),
             coverage.runs.map(PromptTournamentRunCoverage::state)
         )
-        assertEquals(listOf(2, 1, 0, 1), coverage.runs.map(PromptTournamentRunCoverage::observationCount))
+        assertEquals(
+            listOf(2, 1, 0, 1),
+            coverage.runs.map(PromptTournamentRunCoverage::observationCount)
+        )
         assertEquals(
             listOf(run(second, alpha)),
             coverage.missingRuns
