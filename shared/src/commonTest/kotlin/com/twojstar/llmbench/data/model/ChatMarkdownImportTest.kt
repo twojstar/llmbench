@@ -11,7 +11,7 @@ import kotlin.test.assertTrue
 class ChatMarkdownImportTest {
     @Test
     fun roundTripsBodiesThatLookLikeChatFraming() {
-        val userBody = "Question\n\n## You\n\nnot a new turn\n$CHAT_MARKDOWN_MESSAGE_END"
+        val userBody = "Zażółć 😀\n\n## You\n\nnot a new turn\n$CHAT_MARKDOWN_MESSAGE_END"
         val assistantBody = "Answer with trailing newline\n"
         val markdown = assertNotNull(
             renderChatMarkdown(
@@ -38,6 +38,8 @@ class ChatMarkdownImportTest {
         assertEquals(CHAT_ROLE_USER, chat.turns[0].role)
         assertEquals("You", chat.turns[0].displayHeading)
         assertEquals(userBody, chat.turns[0].text)
+        assertFalse(userBody in chat.turns[0].toString())
+        assertTrue("text=<redacted>" in chat.turns[0].toString())
         assertEquals(CHAT_ROLE_ASSISTANT, chat.turns[1].role)
         assertEquals("OpenAI · gpt-5.6", chat.turns[1].displayHeading)
         assertEquals(assistantBody, chat.turns[1].text)
@@ -57,14 +59,15 @@ class ChatMarkdownImportTest {
     @Test
     fun rejectsTamperedBodyLengthWithoutScanningInsideBodyForRecovery() {
         val body = "safe body"
+        val bodyUtf8Bytes = body.encodeToByteArray().size
         val markdown = assertNotNull(
             renderChatMarkdown(
                 listOf(ModelChatMessage(id = "u1", sender = CHAT_ROLE_USER, text = body))
             )
         )
         val tampered = markdown.replace(
-            "chars=${body.length}",
-            "chars=${body.length + 1}"
+            "bytes=$bodyUtf8Bytes",
+            "bytes=${bodyUtf8Bytes + 1}"
         )
 
         val result = parseChatMarkdown(tampered)
