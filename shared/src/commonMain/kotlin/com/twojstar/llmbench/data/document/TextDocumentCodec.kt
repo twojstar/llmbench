@@ -37,7 +37,11 @@ data class TextDocument(
     val text: String,
     val hadUtf8Bom: Boolean,
     val lineEndings: LineEndingCounts
-)
+) {
+    /** Document contents are user data; keep only structural metadata in incidental debug output. */
+    override fun toString(): String =
+        "TextDocument(text=<redacted>, hadUtf8Bom=$hadUtf8Bom, lineEndings=$lineEndings)"
+}
 
 /**
  * Portable UTF-8 text codec for local prompt/document tooling.
