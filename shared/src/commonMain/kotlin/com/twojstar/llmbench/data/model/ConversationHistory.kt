@@ -14,8 +14,15 @@ data class ProviderTextTurn(
     val modelName: String? = null
 ) {
     /** Provider replay payloads and conversation text are sensitive debug content. */
-    override fun toString(): String =
-        "ProviderTextTurn(role=$role, text=<redacted>, providerReplayState=<redacted>, modelName=<redacted>)"
+    override fun toString(): String {
+        val safeRole = when (role) {
+            CHAT_ROLE_USER -> CHAT_ROLE_USER
+            CHAT_ROLE_ASSISTANT -> CHAT_ROLE_ASSISTANT
+            else -> "other"
+        }
+        return "ProviderTextTurn(role=$safeRole, text=<redacted>, " +
+            "providerReplayState=<redacted>, modelName=<redacted>)"
+    }
 }
 
 fun ModelChatMessage.isCompletedAssistantResponse(): Boolean =
