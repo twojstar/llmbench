@@ -9,7 +9,8 @@ import com.twojstar.llmbench.data.model.BuiltInBenchToolAvailability
 import com.twojstar.llmbench.data.model.availability
 
 internal enum class CodebenchBarcodeDecodeRejection {
-    INVALID_IMAGE
+    INVALID_IMAGE,
+    NO_FORMATS_ENABLED
 }
 
 /** Result of one explicit, policy-gated decode of an already opened user-selected image. */
@@ -73,6 +74,11 @@ internal object CodebenchImportedBarcodeDecodeAction {
         )
         if (!availability.canOffer) {
             return CodebenchImportedBarcodeDecodeActionResult.Blocked(availability)
+        }
+        if (possibleFormats.isEmpty()) {
+            return CodebenchImportedBarcodeDecodeActionResult.Rejected(
+                CodebenchBarcodeDecodeRejection.NO_FORMATS_ENABLED
+            )
         }
 
         val decoded = try {
