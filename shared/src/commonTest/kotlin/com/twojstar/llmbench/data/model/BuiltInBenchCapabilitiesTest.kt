@@ -5,6 +5,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertNotSame
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class BuiltInBenchCapabilitiesTest {
@@ -35,6 +36,20 @@ class BuiltInBenchCapabilitiesTest {
         BuiltInBenchTool.entries.forEach { tool ->
             assertFalse(BenchToolInvocationMode.MODEL_TOOL_CALL in tool.capabilities().invocationModes)
         }
+    }
+
+    @Test
+    fun stableToolIdsAreUniqueAndUnknownIdsFailClosed() {
+        val ids = BuiltInBenchTool.entries.map { it.id }
+
+        assertEquals(ids.size, ids.toSet().size)
+        assertTrue(ids.all { it.isNotBlank() })
+        assertEquals(
+            BuiltInBenchTool.DOCBENCH_TEXT_INSPECTOR,
+            BuiltInBenchTool.fromId("DOCBENCH-TEXT-INSPECTOR")
+        )
+        assertNull(BuiltInBenchTool.fromId("retired-tool"))
+        assertNull(BuiltInBenchTool.fromId(null))
     }
 
     @Test

@@ -1,11 +1,17 @@
 package com.twojstar.llmbench.data.model
 
 /** First-party Bench capabilities that LlmBench can expose without copying a whole web app. */
-enum class BuiltInBenchTool {
-    DOCBENCH_DOCUMENT,
-    DOCBENCH_TEXT_INSPECTOR,
-    CODEBENCH_QR_BARCODE,
-    STREAMBENCH_PLAYER
+enum class BuiltInBenchTool(val id: String) {
+    DOCBENCH_DOCUMENT("docbench-document"),
+    DOCBENCH_TEXT_INSPECTOR("docbench-text-inspector"),
+    CODEBENCH_QR_BARCODE("codebench-qr-barcode"),
+    STREAMBENCH_PLAYER("streambench-player");
+
+    companion object {
+        fun fromId(id: String?): BuiltInBenchTool? = entries.firstOrNull { tool ->
+            id?.equals(tool.id, ignoreCase = true) == true
+        }
+    }
 }
 
 /** Coarse data classes used to keep tool routing explicit without binding the core to one UI. */
