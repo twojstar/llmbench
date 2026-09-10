@@ -11,7 +11,7 @@ class ProfileStateDebugStringTest {
     fun profileDebugStringRedactsUserAuthoredState() {
         val secrets = listOf(
             "private-schema",
-            "private-profile-id",
+            PRIVATE_PROFILE_ID,
             "private-locale",
             "private-personality",
             "private-preamble",
@@ -26,7 +26,7 @@ class ProfileStateDebugStringTest {
             personality = PersonalityConfig(base = secrets[3]),
             collaboration = CollaborationConfig(preamble = secrets[4]),
             output = OutputConfig(defaultFormat = secrets[5]),
-            extensions = mapOf(secrets[6] to mapOf("note" to secrets[7]))
+            extensions = mapOf(secrets[6] to mapOf(LOCAL_NOTE_KEY to secrets[7]))
         )
 
         val debug = profile.toString()
@@ -70,8 +70,8 @@ class ProfileStateDebugStringTest {
         val language = "private-language"
         val snapshot = StudioStateSnapshot(
             baseProfile = Profile(
-                id = "private-profile-id",
-                extensions = mapOf("local" to mapOf("note" to profileSecret))
+                id = PRIVATE_PROFILE_ID,
+                extensions = mapOf("local" to mapOf(LOCAL_NOTE_KEY to profileSecret))
             ),
             selectedBuiltInOverlayId = builtInOverlayId,
             selectedCustomOverlayIndex = 2,
@@ -82,16 +82,22 @@ class ProfileStateDebugStringTest {
         val debug = snapshot.toString()
         val decodeDebug = StudioStateDecodeResult.Success(snapshot).toString()
 
-        listOf(profileSecret, overlaySecret, builtInOverlayId, language, "private-profile-id").forEach { secret ->
+        listOf(profileSecret, overlaySecret, builtInOverlayId, language, PRIVATE_PROFILE_ID).forEach { secret ->
             assertFalse(secret in debug)
             assertFalse(secret in decodeDebug)
         }
-        assertTrue("selectedCustomOverlayIndex=2" in debug)
+        assertTrue("hasSelectedCustomOverlay=true" in debug)
+        assertFalse("selectedCustomOverlayIndex=2" in debug)
         assertTrue("customOverlayCount=1" in debug)
 
         val encoded = StudioStateCodec.encode(snapshot)
         assertTrue(profileSecret in encoded)
         assertTrue(overlaySecret in encoded)
         assertEquals(snapshot, assertNotNull(StudioStateCodec.decode(encoded)))
+    }
+
+    private companion object {
+        const val PRIVATE_PROFILE_ID = "private-profile-id"
+        const val LOCAL_NOTE_KEY = "note"
     }
 }
