@@ -215,7 +215,7 @@ object StreambenchM3uParser {
      */
     private fun isPublicArtworkHostname(host: String): Boolean {
         val normalized = host.lowercase().trimEnd('.')
-        if (normalized.isEmpty() || '.' !in normalized || ':' in normalized) return false
+        if (normalized.isEmpty() || normalized.length > 253 || '.' !in normalized || ':' in normalized) return false
         if (
             normalized == "localhost" ||
             normalized.endsWith(".localhost") ||
