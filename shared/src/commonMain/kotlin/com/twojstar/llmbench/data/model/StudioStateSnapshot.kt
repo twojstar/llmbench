@@ -24,7 +24,13 @@ data class StudioStateSnapshot(
     val selectedCustomOverlayIndex: Int? = null,
     val customOverlays: List<ProfileOverlay> = emptyList(),
     val language: String = "auto"
-)
+) {
+    /** Persisted Studio state may contain user-authored profiles, overlays and identifiers. */
+    override fun toString(): String =
+        "StudioStateSnapshot(version=$version, baseProfile=<redacted>, " +
+            "selectedBuiltInOverlayId=<redacted>, hasSelectedCustomOverlay=${selectedCustomOverlayIndex != null}, " +
+            "customOverlayCount=${customOverlays.size}, language=<redacted>)"
+}
 
 object StudioStateCodec {
     private val json = Json {
