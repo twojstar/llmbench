@@ -12,6 +12,13 @@ enum class StreambenchPlaybackRejection {
     INVALID_STREAM_URL
 }
 
+/**
+ * Sanitized playback candidate. This is not authorization to connect.
+ *
+ * Platform playback must route this request through a network loader that resolves the hostname and
+ * rejects private, loopback, link-local and otherwise non-public destinations immediately before the
+ * socket is opened.
+ */
 data class StreambenchPlaybackRequest(
     val url: String,
     val title: String,
@@ -23,8 +30,12 @@ data class StreambenchPlaybackRequest(
 }
 
 sealed interface StreambenchPlaybackRequestActionResult {
-    data class Ready(val request: StreambenchPlaybackRequest) : StreambenchPlaybackRequestActionResult {
-        override fun toString(): String = "StreambenchPlaybackRequestActionResult.Ready(request=<redacted>)"
+    /** Eligible only for a guarded loader that performs resolved-address validation before connect. */
+    data class EligibleForGuardedLoader(
+        val request: StreambenchPlaybackRequest
+    ) : StreambenchPlaybackRequestActionResult {
+        override fun toString(): String =
+            "StreambenchPlaybackRequestActionResult.EligibleForGuardedLoader(request=<redacted>)"
     }
 
     data class Blocked(
@@ -37,12 +48,12 @@ sealed interface StreambenchPlaybackRequestActionResult {
 }
 
 /**
- * Side-effect-free handoff immediately before a platform player is allowed to open a stream.
+ * Side-effect-free policy and sanitization boundary before a guarded platform loader sees a stream.
  *
  * The action promotes the registry-declared NETWORK scope to required, requires live connectivity,
- * applies the canonical strict remote-stream URL policy immediately before playback, and bounds
- * user-controlled display metadata without splitting Unicode surrogate pairs. It never performs a
- * network request itself.
+ * applies the canonical strict remote-stream URL policy, and bounds user-controlled display metadata
+ * without splitting Unicode surrogate pairs. It intentionally does not resolve DNS or perform a
+ * network request; resolved-address enforcement belongs to the loader that owns the actual socket.
  */
 object StreambenchPlaybackRequestAction {
     const val MAX_TITLE_CHARS: Int = 160
@@ -87,7 +98,7 @@ object StreambenchPlaybackRequestAction {
                 StreambenchPlaybackRejection.INVALID_STREAM_URL
             )
 
-        return StreambenchPlaybackRequestActionResult.Ready(
+        return StreambenchPlaybackRequestActionResult.EligibleForGuardedLoader(
             StreambenchPlaybackRequest(
                 url = validatedUrl,
                 title = boundedMetadata(entry.title, MAX_TITLE_CHARS),
