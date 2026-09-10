@@ -183,12 +183,13 @@ fun BuiltInBenchTool.capabilities(): BuiltInBenchToolCapabilities = when (this) 
             BenchToolDataKind.MEDIA_METADATA,
             BenchToolDataKind.PLAYLIST
         ),
-        requiredPermissions = setOf(BenchToolPermission.NETWORK),
+        requiredPermissions = emptySet(),
         optionalPermissions = setOf(
             BenchToolPermission.READ_USER_SELECTED_CONTENT,
-            BenchToolPermission.WRITE_USER_EXPORT
+            BenchToolPermission.WRITE_USER_EXPORT,
+            BenchToolPermission.NETWORK
         ),
-        networkBehavior = BenchToolNetworkBehavior.NETWORK_REQUIRED,
+        networkBehavior = BenchToolNetworkBehavior.NETWORK_OPTIONAL,
         surfaces = setOf(BenchToolSurface.COMPANION_UI),
         invocationModes = setOf(BenchToolInvocationMode.EXPLICIT_USER_ACTION)
     )
