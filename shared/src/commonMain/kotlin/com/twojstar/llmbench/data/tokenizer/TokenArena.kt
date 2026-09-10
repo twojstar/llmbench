@@ -34,6 +34,9 @@ data class TokenArenaVariant(
 
     val promptFingerprint: String
         get() = stablePromptFingerprint(prompt)
+
+    /** Keep exact prompt text out of incidental logs, crash breadcrumbs and debugger stringification. */
+    override fun toString(): String = "TokenArenaVariant(id=$id, prompt=<redacted>)"
 }
 
 /**
@@ -173,9 +176,11 @@ class TokenArenaExperiment private constructor(
         return result
     }
 
+    /** Avoid rendering user-authored intent labels or prompt-bearing variants in debug strings. */
     override fun toString(): String =
-        "TokenArenaExperiment(id=$id, intentLabel=$intentLabel, variants=$variantSnapshot, " +
-            "tokenMeasurements=$tokenMeasurementSnapshot, responseObservations=$responseObservationSnapshot)"
+        "TokenArenaExperiment(id=$id, variantCount=${variantSnapshot.size}, " +
+            "tokenMeasurementCount=${tokenMeasurementSnapshot.size}, " +
+            "responseObservationCount=${responseObservationSnapshot.size})"
 
     companion object {
         fun create(
