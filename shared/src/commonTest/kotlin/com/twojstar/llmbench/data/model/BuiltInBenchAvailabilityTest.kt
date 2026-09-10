@@ -2,6 +2,7 @@ package com.twojstar.llmbench.data.model
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
@@ -158,5 +159,55 @@ class BuiltInBenchAvailabilityTest {
         assertTrue(availability.canOffer)
         assertTrue(availability.missingRequiredPermissions.isEmpty())
         assertTrue(availability.blockers.isEmpty())
+    }
+
+    @Test
+    fun concreteActionCanPromoteADeclaredOptionalPermission() {
+        val blocked = BuiltInBenchTool.CODEBENCH_QR_BARCODE.availability(
+            surface = BenchToolSurface.NATIVE_CHAT,
+            invocationMode = BenchToolInvocationMode.EXPLICIT_USER_ACTION,
+            inputKind = BenchToolDataKind.IMAGE,
+            isEnabled = true,
+            grantedPermissions = emptySet(),
+            networkAvailable = false,
+            actionRequiredPermissions = setOf(BenchToolPermission.READ_USER_SELECTED_CONTENT)
+        )
+
+        assertFalse(blocked.canOffer)
+        assertEquals(
+            setOf(BenchToolPermission.READ_USER_SELECTED_CONTENT),
+            blocked.missingRequiredPermissions
+        )
+        assertEquals(
+            setOf(BenchToolAvailabilityBlocker.MISSING_REQUIRED_PERMISSION),
+            blocked.blockers
+        )
+
+        val available = BuiltInBenchTool.CODEBENCH_QR_BARCODE.availability(
+            surface = BenchToolSurface.NATIVE_CHAT,
+            invocationMode = BenchToolInvocationMode.EXPLICIT_USER_ACTION,
+            inputKind = BenchToolDataKind.IMAGE,
+            isEnabled = true,
+            grantedPermissions = setOf(BenchToolPermission.READ_USER_SELECTED_CONTENT),
+            networkAvailable = false,
+            actionRequiredPermissions = setOf(BenchToolPermission.READ_USER_SELECTED_CONTENT)
+        )
+
+        assertTrue(available.canOffer)
+    }
+
+    @Test
+    fun concreteActionCannotRequireAnUndeclaredPermission() {
+        assertFailsWith<IllegalArgumentException> {
+            BuiltInBenchTool.DOCBENCH_TEXT_INSPECTOR.availability(
+                surface = BenchToolSurface.NATIVE_CHAT,
+                invocationMode = BenchToolInvocationMode.EXPLICIT_USER_ACTION,
+                inputKind = BenchToolDataKind.TEXT,
+                isEnabled = true,
+                grantedPermissions = emptySet(),
+                networkAvailable = false,
+                actionRequiredPermissions = setOf(BenchToolPermission.CAMERA)
+            )
+        }
     }
 }
