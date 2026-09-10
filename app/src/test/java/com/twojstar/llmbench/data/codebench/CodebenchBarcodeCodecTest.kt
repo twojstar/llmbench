@@ -11,7 +11,7 @@ class CodebenchBarcodeCodecTest {
     @Test
     fun qrRoundTripPreservesUnicodeTextAndFormat() {
         val matrix = CodebenchBarcodeCodec.encode(
-            text = QR_TEXT,
+            text = UNICODE_TEXT,
             format = CodebenchBarcodeFormat.QR_CODE,
             width = QR_SIZE,
             height = QR_SIZE
@@ -24,8 +24,28 @@ class CodebenchBarcodeCodecTest {
             possibleFormats = setOf(CodebenchBarcodeFormat.QR_CODE)
         )
 
-        assertEquals(QR_TEXT, decoded?.text)
+        assertEquals(UNICODE_TEXT, decoded?.text)
         assertEquals(CodebenchBarcodeFormat.QR_CODE, decoded?.format)
+    }
+
+    @Test
+    fun dataMatrixRoundTripPreservesUnicodeText() {
+        val matrix = CodebenchBarcodeCodec.encode(
+            text = UNICODE_TEXT,
+            format = CodebenchBarcodeFormat.DATA_MATRIX,
+            width = QR_SIZE,
+            height = QR_SIZE
+        )
+
+        val decoded = CodebenchBarcodeCodec.decodeArgb(
+            width = matrix.width,
+            height = matrix.height,
+            pixels = matrix.toArgbPixels(),
+            possibleFormats = setOf(CodebenchBarcodeFormat.DATA_MATRIX)
+        )
+
+        assertEquals(UNICODE_TEXT, decoded?.text)
+        assertEquals(CodebenchBarcodeFormat.DATA_MATRIX, decoded?.format)
     }
 
     @Test
@@ -51,7 +71,7 @@ class CodebenchBarcodeCodecTest {
     @Test
     fun decoderHonorsTheExplicitFormatAllowlist() {
         val matrix = CodebenchBarcodeCodec.encode(
-            text = QR_TEXT,
+            text = UNICODE_TEXT,
             format = CodebenchBarcodeFormat.QR_CODE,
             width = QR_SIZE,
             height = QR_SIZE
@@ -68,6 +88,28 @@ class CodebenchBarcodeCodecTest {
     }
 
     @Test
+    fun decoderHandlesInvertedQrPixels() {
+        val matrix = CodebenchBarcodeCodec.encode(
+            text = UNICODE_TEXT,
+            format = CodebenchBarcodeFormat.QR_CODE,
+            width = QR_SIZE,
+            height = QR_SIZE
+        )
+        val invertedPixels = matrix.copyDarkPixels()
+            .map { dark -> if (dark) WHITE else BLACK }
+            .toIntArray()
+
+        val decoded = CodebenchBarcodeCodec.decodeArgb(
+            width = matrix.width,
+            height = matrix.height,
+            pixels = invertedPixels,
+            possibleFormats = setOf(CodebenchBarcodeFormat.QR_CODE)
+        )
+
+        assertEquals(UNICODE_TEXT, decoded?.text)
+    }
+
+    @Test
     fun blankImageReturnsNoDecodedCarrier() {
         val pixels = IntArray(128 * 128) { WHITE }
 
@@ -78,7 +120,7 @@ class CodebenchBarcodeCodecTest {
     fun codecRejectsUnboundedOrMalformedInputsBeforeWork() {
         assertThrows(IllegalArgumentException::class.java) {
             CodebenchBarcodeCodec.encode(
-                text = "x".repeat(CodebenchBarcodeCodec.MAX_CONTENT_CHARS + 1),
+                text = "x".repeat(CodebenchBarcodeCodec.MAX_CONTENT_UTF16_UNITS + 1),
                 format = CodebenchBarcodeFormat.QR_CODE,
                 width = QR_SIZE,
                 height = QR_SIZE
@@ -86,7 +128,7 @@ class CodebenchBarcodeCodecTest {
         }
         assertThrows(IllegalArgumentException::class.java) {
             CodebenchBarcodeCodec.encode(
-                text = QR_TEXT,
+                text = UNICODE_TEXT,
                 format = CodebenchBarcodeFormat.QR_CODE,
                 width = CodebenchBarcodeCodec.MAX_RENDER_DIMENSION + 1,
                 height = QR_SIZE
@@ -112,7 +154,7 @@ class CodebenchBarcodeCodecTest {
     @Test
     fun matrixSnapshotsPixelsAndDebugStringsRedactPayloads() {
         val matrix = CodebenchBarcodeCodec.encode(
-            text = QR_TEXT,
+            text = UNICODE_TEXT,
             format = CodebenchBarcodeFormat.QR_CODE,
             width = QR_SIZE,
             height = QR_SIZE
@@ -122,11 +164,11 @@ class CodebenchBarcodeCodecTest {
         copy[0] = !copy[0]
 
         assertEquals(originalFirstPixel, matrix[0, 0])
-        assertFalse(QR_TEXT in matrix.toString())
+        assertFalse(UNICODE_TEXT in matrix.toString())
         assertTrue("darkPixels=<redacted>" in matrix.toString())
 
-        val decoded = CodebenchDecodedBarcode(QR_TEXT, CodebenchBarcodeFormat.QR_CODE)
-        assertFalse(QR_TEXT in decoded.toString())
+        val decoded = CodebenchDecodedBarcode(UNICODE_TEXT, CodebenchBarcodeFormat.QR_CODE)
+        assertFalse(UNICODE_TEXT in decoded.toString())
         assertTrue("text=<redacted>" in decoded.toString())
     }
 
@@ -134,7 +176,7 @@ class CodebenchBarcodeCodecTest {
         copyDarkPixels().map { dark -> if (dark) BLACK else WHITE }.toIntArray()
 
     private companion object {
-        const val QR_TEXT = "Zażółć gęślą jaźń · 你好"
+        const val UNICODE_TEXT = "Zażółć gęślą jaźń · 你好"
         const val CODE_128_TEXT = "CODEBENCH-128"
         const val QR_SIZE = 256
         val BLACK: Int = 0xFF000000.toInt()
