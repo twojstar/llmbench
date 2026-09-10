@@ -5,6 +5,7 @@ enum class BenchToolAvailabilityBlocker {
     DISABLED,
     UNSUPPORTED_SURFACE,
     UNSUPPORTED_INVOCATION_MODE,
+    UNSUPPORTED_INPUT,
     MISSING_REQUIRED_PERMISSION,
     NETWORK_UNAVAILABLE
 }
@@ -23,10 +24,11 @@ data class BuiltInBenchToolAvailability(
         get() = blockers.isEmpty()
 }
 
-/** Evaluate the canonical registry policy for one concrete tool route. */
+/** Evaluate the canonical registry policy for one concrete tool route and input kind. */
 fun BuiltInBenchTool.availability(
     surface: BenchToolSurface,
     invocationMode: BenchToolInvocationMode,
+    inputKind: BenchToolDataKind,
     isEnabled: Boolean,
     grantedPermissions: Set<BenchToolPermission>,
     networkAvailable: Boolean
@@ -40,6 +42,9 @@ fun BuiltInBenchTool.availability(
         }
         if (invocationMode !in capabilities.invocationModes) {
             add(BenchToolAvailabilityBlocker.UNSUPPORTED_INVOCATION_MODE)
+        }
+        if (inputKind !in capabilities.inputs) {
+            add(BenchToolAvailabilityBlocker.UNSUPPORTED_INPUT)
         }
         if (missingPermissions.isNotEmpty()) {
             add(BenchToolAvailabilityBlocker.MISSING_REQUIRED_PERMISSION)

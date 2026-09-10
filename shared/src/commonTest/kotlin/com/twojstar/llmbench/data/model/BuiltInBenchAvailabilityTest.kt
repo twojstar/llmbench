@@ -11,6 +11,7 @@ class BuiltInBenchAvailabilityTest {
         val blocked = BuiltInBenchTool.DOCBENCH_DOCUMENT.availability(
             surface = BenchToolSurface.NATIVE_CHAT,
             invocationMode = BenchToolInvocationMode.EXPLICIT_USER_ACTION,
+            inputKind = BenchToolDataKind.DOCUMENT,
             isEnabled = true,
             grantedPermissions = emptySet(),
             networkAvailable = false
@@ -29,6 +30,7 @@ class BuiltInBenchAvailabilityTest {
         val available = BuiltInBenchTool.DOCBENCH_DOCUMENT.availability(
             surface = BenchToolSurface.NATIVE_CHAT,
             invocationMode = BenchToolInvocationMode.EXPLICIT_USER_ACTION,
+            inputKind = BenchToolDataKind.DOCUMENT,
             isEnabled = true,
             grantedPermissions = setOf(BenchToolPermission.READ_USER_SELECTED_CONTENT),
             networkAvailable = false
@@ -40,9 +42,11 @@ class BuiltInBenchAvailabilityTest {
     @Test
     fun currentRegistryNeverOffersModelToolCalling() {
         BuiltInBenchTool.entries.forEach { tool ->
+            val capabilities = tool.capabilities()
             val availability = tool.availability(
-                surface = tool.capabilities().surfaces.first(),
+                surface = capabilities.surfaces.first(),
                 invocationMode = BenchToolInvocationMode.MODEL_TOOL_CALL,
+                inputKind = capabilities.inputs.first(),
                 isEnabled = true,
                 grantedPermissions = BenchToolPermission.entries.toSet(),
                 networkAvailable = true
@@ -60,6 +64,7 @@ class BuiltInBenchAvailabilityTest {
         val missingScopeAndOffline = BuiltInBenchTool.STREAMBENCH_PLAYER.availability(
             surface = BenchToolSurface.COMPANION_UI,
             invocationMode = BenchToolInvocationMode.EXPLICIT_USER_ACTION,
+            inputKind = BenchToolDataKind.MEDIA_STREAM,
             isEnabled = true,
             grantedPermissions = emptySet(),
             networkAvailable = false
@@ -80,6 +85,7 @@ class BuiltInBenchAvailabilityTest {
         val online = BuiltInBenchTool.STREAMBENCH_PLAYER.availability(
             surface = BenchToolSurface.COMPANION_UI,
             invocationMode = BenchToolInvocationMode.EXPLICIT_USER_ACTION,
+            inputKind = BenchToolDataKind.MEDIA_STREAM,
             isEnabled = true,
             grantedPermissions = setOf(BenchToolPermission.NETWORK),
             networkAvailable = true
@@ -93,6 +99,7 @@ class BuiltInBenchAvailabilityTest {
         val availability = BuiltInBenchTool.STREAMBENCH_PLAYER.availability(
             surface = BenchToolSurface.NATIVE_CHAT,
             invocationMode = BenchToolInvocationMode.EXPLICIT_USER_ACTION,
+            inputKind = BenchToolDataKind.MEDIA_STREAM,
             isEnabled = false,
             grantedPermissions = setOf(BenchToolPermission.NETWORK),
             networkAvailable = true
@@ -109,10 +116,40 @@ class BuiltInBenchAvailabilityTest {
     }
 
     @Test
+    fun unsupportedInputIsAnIndependentBlocker() {
+        val unsupported = BuiltInBenchTool.DOCBENCH_TEXT_INSPECTOR.availability(
+            surface = BenchToolSurface.NATIVE_CHAT,
+            invocationMode = BenchToolInvocationMode.EXPLICIT_USER_ACTION,
+            inputKind = BenchToolDataKind.IMAGE,
+            isEnabled = true,
+            grantedPermissions = setOf(BenchToolPermission.READ_USER_SELECTED_CONTENT),
+            networkAvailable = true
+        )
+
+        assertFalse(unsupported.canOffer)
+        assertEquals(
+            setOf(BenchToolAvailabilityBlocker.UNSUPPORTED_INPUT),
+            unsupported.blockers
+        )
+
+        val supported = BuiltInBenchTool.DOCBENCH_TEXT_INSPECTOR.availability(
+            surface = BenchToolSurface.NATIVE_CHAT,
+            invocationMode = BenchToolInvocationMode.EXPLICIT_USER_ACTION,
+            inputKind = BenchToolDataKind.TEXT,
+            isEnabled = true,
+            grantedPermissions = setOf(BenchToolPermission.READ_USER_SELECTED_CONTENT),
+            networkAvailable = true
+        )
+
+        assertTrue(supported.canOffer)
+    }
+
+    @Test
     fun optionalPermissionsNeverBlockTheBaseAction() {
         val availability = BuiltInBenchTool.CODEBENCH_QR_BARCODE.availability(
             surface = BenchToolSurface.ACCOUNT_WEB_CHAT,
             invocationMode = BenchToolInvocationMode.EXPLICIT_USER_ACTION,
+            inputKind = BenchToolDataKind.TEXT,
             isEnabled = true,
             grantedPermissions = emptySet(),
             networkAvailable = false
