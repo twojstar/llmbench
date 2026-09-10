@@ -19,7 +19,7 @@ private const val MAX_HEADING_METADATA_CHARS = 160
  * without mistaking Markdown headings or marker-like text inside a message for new turns.
  *
  * When [maxUtf8Bytes] is set, output is bounded incrementally before message bodies are appended, so
- * oversized chats do not require building the complete export first.
+ * oversized chats do not require building or scanning the complete export first.
  */
 fun renderChatMarkdown(
     messages: List<ModelChatMessage>,
@@ -36,7 +36,8 @@ fun renderChatMarkdown(
         val message = messages[index]
         if (message.sender != CHAT_ROLE_USER && message.sender != CHAT_ROLE_ASSISTANT) continue
 
-        if (!output.append(message.markdownFrameStart())) return null
+        val frameStart = message.markdownFrameStart(output.remainingUtf8Bytes) ?: return null
+        if (!output.append(frameStart)) return null
         if (!output.append("## ${message.markdownHeading()}\n\n")) return null
         if (!output.append(message.text)) return null
         if (!output.append("\n$CHAT_MARKDOWN_MESSAGE_END\n\n")) return null
@@ -45,8 +46,8 @@ fun renderChatMarkdown(
     return output.toString()
 }
 
-private fun ModelChatMessage.markdownFrameStart(): String {
-    val bodyUtf8Bytes = requireNotNull(utf8ByteCountAtMost(text, Int.MAX_VALUE))
+private fun ModelChatMessage.markdownFrameStart(maxBodyUtf8Bytes: Int): String? {
+    val bodyUtf8Bytes = utf8ByteCountAtMost(text, maxBodyUtf8Bytes) ?: return null
     return "$CHAT_MARKDOWN_MESSAGE_PREFIX$sender$CHAT_MARKDOWN_MESSAGE_BYTES$bodyUtf8Bytes" +
         "$CHAT_MARKDOWN_MESSAGE_META_SUFFIX\n"
 }
@@ -75,7 +76,8 @@ private fun String.safeHeadingMetadata(): String =
 
 private class BoundedUtf8StringBuilder(maxUtf8Bytes: Int) {
     private val builder = StringBuilder()
-    private var remainingUtf8Bytes = maxUtf8Bytes
+    var remainingUtf8Bytes: Int = maxUtf8Bytes
+        private set
 
     fun append(value: String): Boolean {
         val byteCount = utf8ByteCountAtMost(value, remainingUtf8Bytes) ?: return false
