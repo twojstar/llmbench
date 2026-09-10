@@ -39,9 +39,14 @@ class ChatMarkdownExportTest {
 
         assertEquals(
             "# LlmBench chat\n\n" +
-                "## You\n\n**Question**\n\n" +
-                "## OpenAI · gpt-5.6\n\nAnswer\n\n" +
-                "## Claude · claude-sonnet-5 · simulated\n\nOther answer\n",
+                "<!-- llmbench-chat:v1 -->\n\n" +
+                "<!-- llmbench-message:v1 role=user chars=12 -->\n" +
+                "## You\n\n**Question**\n<!-- llmbench-message-end -->\n\n" +
+                "<!-- llmbench-message:v1 role=assistant chars=6 -->\n" +
+                "## OpenAI · gpt-5.6\n\nAnswer\n<!-- llmbench-message-end -->\n\n" +
+                "<!-- llmbench-message:v1 role=assistant chars=12 -->\n" +
+                "## Claude · claude-sonnet-5 · simulated\n\n" +
+                "Other answer\n<!-- llmbench-message-end -->\n\n",
             assertNotNull(markdown)
         )
     }
@@ -85,6 +90,7 @@ class ChatMarkdownExportTest {
         )
 
         assertTrue(markdown.contains(body))
+        assertTrue(markdown.contains("chars=${body.length}"))
     }
 
     @Test
