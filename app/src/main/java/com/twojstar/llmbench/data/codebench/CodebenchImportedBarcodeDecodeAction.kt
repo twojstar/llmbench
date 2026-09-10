@@ -1,6 +1,5 @@
 package com.twojstar.llmbench.data.codebench
 
-import com.twojstar.llmbench.data.model.BenchToolAvailabilityBlocker
 import com.twojstar.llmbench.data.model.BenchToolDataKind
 import com.twojstar.llmbench.data.model.BenchToolInvocationMode
 import com.twojstar.llmbench.data.model.BenchToolPermission
@@ -42,27 +41,21 @@ internal sealed interface CodebenchImportedBarcodeDecodeActionResult {
  * action with its own CAMERA permission and lifecycle boundary.
  */
 internal object CodebenchImportedBarcodeDecodeAction {
-    private val contentReadPermission = BenchToolPermission.READ_USER_SELECTED_CONTENT
+    private val importedImagePermissions = setOf(BenchToolPermission.READ_USER_SELECTED_CONTENT)
 
     fun availability(
         surface: BenchToolSurface,
         isEnabled: Boolean,
         grantedPermissions: Set<BenchToolPermission>
-    ): BuiltInBenchToolAvailability {
-        val base = BuiltInBenchTool.CODEBENCH_QR_BARCODE.availability(
-            surface = surface,
-            invocationMode = BenchToolInvocationMode.EXPLICIT_USER_ACTION,
-            inputKind = BenchToolDataKind.IMAGE,
-            isEnabled = isEnabled,
-            grantedPermissions = grantedPermissions,
-            networkAvailable = false
-        )
-        if (contentReadPermission in grantedPermissions) return base
-        return base.copy(
-            blockers = base.blockers + BenchToolAvailabilityBlocker.MISSING_REQUIRED_PERMISSION,
-            missingRequiredPermissions = base.missingRequiredPermissions + contentReadPermission
-        )
-    }
+    ): BuiltInBenchToolAvailability = BuiltInBenchTool.CODEBENCH_QR_BARCODE.availability(
+        surface = surface,
+        invocationMode = BenchToolInvocationMode.EXPLICIT_USER_ACTION,
+        inputKind = BenchToolDataKind.IMAGE,
+        isEnabled = isEnabled,
+        grantedPermissions = grantedPermissions,
+        networkAvailable = false,
+        actionRequiredPermissions = importedImagePermissions
+    )
 
     fun execute(
         width: Int,
