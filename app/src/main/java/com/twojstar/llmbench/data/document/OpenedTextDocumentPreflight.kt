@@ -1,5 +1,7 @@
 package com.twojstar.llmbench.data.document
 
+import com.twojstar.llmbench.data.model.BenchToolPermission
+import com.twojstar.llmbench.data.model.BenchToolSurface
 import com.twojstar.llmbench.data.tokenizer.LocalTokenCounter
 import com.twojstar.llmbench.data.tokenizer.MAX_INTERACTIVE_TOKENIZED_CHARS
 import com.twojstar.llmbench.data.tokenizer.TokenCounter
@@ -19,7 +21,29 @@ internal fun OpenedTextDocument.buildPreflightReport(
     document = document,
     displayName = displayName.takeIf { hasProviderDisplayName },
     mimeType = mimeType,
-    tokenCounter = tokenCounter?.takeIf {
-        document.text.length <= MAX_INTERACTIVE_TOKENIZED_CHARS
-    }
+    tokenCounter = interactiveTokenCounter(tokenCounter)
 )
+
+/**
+ * Runs the first-party Docbench document action for an already opened Android SAF document.
+ *
+ * File access stays outside this function. The caller supplies the current app-level Bench grant and
+ * route, while the shared action performs the canonical policy check before document inspection.
+ */
+internal fun OpenedTextDocument.executeDocbenchPreflightAction(
+    surface: BenchToolSurface,
+    isEnabled: Boolean,
+    grantedPermissions: Set<BenchToolPermission>,
+    tokenCounter: TokenCounter? = LocalTokenCounter
+): DocbenchDocumentPreflightActionResult = DocbenchDocumentPreflightAction.execute(
+    document = document,
+    displayName = displayName.takeIf { hasProviderDisplayName },
+    mimeType = mimeType,
+    surface = surface,
+    isEnabled = isEnabled,
+    grantedPermissions = grantedPermissions,
+    tokenCounter = interactiveTokenCounter(tokenCounter)
+)
+
+private fun OpenedTextDocument.interactiveTokenCounter(tokenCounter: TokenCounter?): TokenCounter? =
+    tokenCounter?.takeIf { document.text.length <= MAX_INTERACTIVE_TOKENIZED_CHARS }
