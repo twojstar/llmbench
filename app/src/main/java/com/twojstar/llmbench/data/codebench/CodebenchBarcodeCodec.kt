@@ -114,10 +114,11 @@ internal object CodebenchBarcodeCodec {
                 height,
                 mapOf(EncodeHintType.CHARACTER_SET to UTF_8_CHARSET)
             )
-        } catch (_: WriterException) {
-            throw IllegalArgumentException("Barcode content is not valid for ${format.name}")
-        } catch (_: IllegalArgumentException) {
-            throw IllegalArgumentException("Barcode content is not valid for ${format.name}")
+        } catch (error: Exception) {
+            if (error is WriterException || error is IllegalArgumentException) {
+                throw IllegalArgumentException("Barcode content is not valid for ${format.name}")
+            }
+            throw error
         }
         validateDimensions(matrix.width, matrix.height)
         return CodebenchBarcodeMatrix.fromBitMatrix(matrix)
