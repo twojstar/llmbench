@@ -48,30 +48,10 @@ internal fun isPublicStreambenchAddress(address: InetAddress): Boolean {
 
     val bytes = address.address
     return when (bytes.size) {
-        IPV4_SIZE -> !isBlockedIpv4(bytes)
+        IPV4_SIZE -> blockedIpv4Ranges.none { it.contains(bytes.toIpv4Long()) }
         IPV6_SIZE -> !isBlockedIpv6(bytes)
         else -> false
     }
-}
-
-private fun isBlockedIpv4(bytes: ByteArray): Boolean {
-    val first = bytes[0].unsigned()
-    val second = bytes[1].unsigned()
-    val third = bytes[2].unsigned()
-
-    return first == 0 ||
-        first == 10 ||
-        first == 127 ||
-        first >= 224 ||
-        (first == 100 && second in 64..127) ||
-        (first == 169 && second == 254) ||
-        (first == 172 && second in 16..31) ||
-        (first == 192 && second == 0 && third == 0) ||
-        (first == 192 && second == 0 && third == 2) ||
-        (first == 192 && second == 168) ||
-        (first == 198 && second in 18..19) ||
-        (first == 198 && second == 51 && third == 100) ||
-        (first == 203 && second == 0 && third == 113)
 }
 
 private fun isBlockedIpv6(bytes: ByteArray): Boolean {
@@ -84,7 +64,9 @@ private fun isBlockedIpv6(bytes: ByteArray): Boolean {
     }
 
     val mappedIpv4 = ipv4MappedAddress(bytes)
-    return mappedIpv4?.let(::isBlockedIpv4) == true
+    return mappedIpv4?.let { address ->
+        blockedIpv4Ranges.any { it.contains(address.toIpv4Long()) }
+    } == true
 }
 
 private fun ipv4MappedAddress(bytes: ByteArray): ByteArray? {
@@ -94,7 +76,35 @@ private fun ipv4MappedAddress(bytes: ByteArray): ByteArray? {
     return if (hasMappedPrefix) bytes.copyOfRange(12, 16) else null
 }
 
+private fun ByteArray.toIpv4Long(): Long =
+    fold(0L) { value, byte -> (value shl 8) or byte.unsigned().toLong() }
+
 private fun Byte.unsigned(): Int = toInt() and 0xFF
+
+private data class Ipv4Range(
+    val network: Long,
+    val prefixBits: Int
+) {
+    private val mask: Long = (0xFFFF_FFFFL shl (32 - prefixBits)) and 0xFFFF_FFFFL
+
+    fun contains(address: Long): Boolean = address and mask == network and mask
+}
+
+private val blockedIpv4Ranges = listOf(
+    Ipv4Range(0x0000_0000L, 8),
+    Ipv4Range(0x0A00_0000L, 8),
+    Ipv4Range(0x6440_0000L, 10),
+    Ipv4Range(0x7F00_0000L, 8),
+    Ipv4Range(0xA9FE_0000L, 16),
+    Ipv4Range(0xAC10_0000L, 12),
+    Ipv4Range(0xC000_0000L, 24),
+    Ipv4Range(0xC000_0200L, 24),
+    Ipv4Range(0xC0A8_0000L, 16),
+    Ipv4Range(0xC612_0000L, 15),
+    Ipv4Range(0xC633_6400L, 24),
+    Ipv4Range(0xCB00_7100L, 24),
+    Ipv4Range(0xE000_0000L, 3)
+)
 
 private const val IPV4_SIZE = 4
 private const val IPV6_SIZE = 16
