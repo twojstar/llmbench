@@ -11,7 +11,11 @@ import com.twojstar.llmbench.data.tokenizer.TokenCounter
 
 /** Result of one explicit, policy-gated Docbench document pre-flight action. */
 sealed interface DocbenchDocumentPreflightActionResult {
-    data class Completed(val report: DocumentPreflightReport) : DocbenchDocumentPreflightActionResult
+    data class Completed(val report: DocumentPreflightReport) : DocbenchDocumentPreflightActionResult {
+        /** Inspector findings may contain bounded previews of user-selected content. */
+        override fun toString(): String = "DocbenchDocumentPreflightActionResult.Completed(report=<redacted>)"
+    }
+
     data class Blocked(val availability: BuiltInBenchToolAvailability) : DocbenchDocumentPreflightActionResult
 }
 
