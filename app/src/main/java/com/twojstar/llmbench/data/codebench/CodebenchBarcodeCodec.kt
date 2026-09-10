@@ -92,7 +92,8 @@ internal data class CodebenchDecodedBarcode(
 
 /** Local, camera-free Codebench encoding/decoding core for Android. */
 internal object CodebenchBarcodeCodec {
-    const val MAX_CONTENT_CHARS: Int = 4_096
+    /** Kotlin String.length units, not Unicode code points or UTF-8 bytes. */
+    const val MAX_CONTENT_UTF16_UNITS: Int = 4_096
     const val MAX_RENDER_DIMENSION: Int = 2_048
     private const val UTF_8_CHARSET = "UTF-8"
 
@@ -103,22 +104,27 @@ internal object CodebenchBarcodeCodec {
         height: Int
     ): CodebenchBarcodeMatrix {
         require(text.isNotEmpty()) { "Barcode content must not be empty" }
-        require(text.length <= MAX_CONTENT_CHARS) { "Barcode content exceeds the local input limit" }
+        require(text.length <= MAX_CONTENT_UTF16_UNITS) {
+            "Barcode content exceeds the local UTF-16 input limit"
+        }
         validateDimensions(width, height)
 
+        val encodeHints = buildMap<EncodeHintType, Any> {
+            put(EncodeHintType.CHARACTER_SET, UTF_8_CHARSET)
+            if (format == CodebenchBarcodeFormat.DATA_MATRIX) {
+                put(EncodeHintType.DATA_MATRIX_COMPACT, true)
+            }
+        }
         val matrix = try {
             MultiFormatWriter().encode(
                 text,
                 format.zxingFormat,
                 width,
                 height,
-                mapOf(EncodeHintType.CHARACTER_SET to UTF_8_CHARSET)
+                encodeHints
             )
-        } catch (error: Exception) {
-            if (error is WriterException || error is IllegalArgumentException) {
-                throw IllegalArgumentException("Barcode content is not valid for ${format.name}")
-            }
-            throw error
+        } catch (_: WriterException) {
+            throw IllegalArgumentException("Barcode content is not valid for ${format.name}")
         }
         validateDimensions(matrix.width, matrix.height)
         return CodebenchBarcodeMatrix.fromBitMatrix(matrix)
@@ -135,7 +141,9 @@ internal object CodebenchBarcodeCodec {
         require(possibleFormats.isNotEmpty()) { "At least one barcode format must be allowed" }
 
         val hints = mapOf(
-            DecodeHintType.POSSIBLE_FORMATS to possibleFormats.map { it.zxingFormat }
+            DecodeHintType.POSSIBLE_FORMATS to possibleFormats.map { it.zxingFormat },
+            DecodeHintType.TRY_HARDER to true,
+            DecodeHintType.ALSO_INVERTED to true
         )
         val bitmap = BinaryBitmap(
             HybridBinarizer(RGBLuminanceSource(width, height, pixels))
