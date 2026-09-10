@@ -43,6 +43,20 @@ class StreambenchM3uParserTest {
     }
 
     @Test
+    fun titleTextCannotInjectExtinfAttributes() {
+        val source = """
+            #EXTINF:-1 tvg-id="real-id" group-title="Real group",Title tvg-id="evil-id" group-title="Evil group"
+            https://example.com/live
+        """.trimIndent()
+
+        val entry = StreambenchM3uParser.parse(source).single()
+
+        assertEquals("real-id", entry.id)
+        assertEquals("Real group", entry.group)
+        assertEquals("Title tvg-id=\"evil-id\" group-title=\"Evil group\"", entry.title)
+    }
+
+    @Test
     fun artworkIsOptInAndMustUseHttpOrHttps() {
         val validLogo = """
             #EXTINF:-1 tvg-logo="https://example.com/logo.png",One
@@ -78,12 +92,14 @@ class StreambenchM3uParserTest {
     }
 
     @Test
-    fun nonHttpSourcesAndUnsafeWhitespaceAreIgnored() {
+    fun nonHttpSourcesUnsafeWhitespaceAndInvalidPortsAreIgnored() {
         val source = """
             #EXTM3U
             relative/stream.m3u8
             ftp://example.com/live
             https://example.com/has space
+            https://example.com:abc/live
+            https://example.com:70000/live
             https://example.com/live
         """.trimIndent()
 
@@ -91,6 +107,14 @@ class StreambenchM3uParserTest {
 
         assertEquals(1, entries.size)
         assertEquals("https://example.com/live", entries.single().url)
+    }
+
+    @Test
+    fun bracketedIpv6WithPortProducesAHostFallbackTitle() {
+        val entry = StreambenchM3uParser.parse("https://[::1]:8080/live").single()
+
+        assertEquals("::1", entry.title)
+        assertEquals("https://[::1]:8080/live", entry.url)
     }
 
     @Test
