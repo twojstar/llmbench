@@ -46,6 +46,23 @@ class ChatMarkdownImportTest {
     }
 
     @Test
+    fun preservesCrLfAlreadyPresentInsideFramedMessageBody() {
+        val body = "first\r\nsecond\r\n"
+        val markdown = assertNotNull(
+            renderChatMarkdown(
+                listOf(ModelChatMessage(id = "u1", sender = CHAT_ROLE_USER, text = body))
+            )
+        )
+
+        val result = parseChatMarkdown(markdown)
+        val chat = assertNotNull(result.chat)
+
+        assertTrue(result.isValid)
+        assertTrue("bytes=${body.encodeToByteArray().size}" in markdown)
+        assertEquals(body, chat.turns.single().text)
+    }
+
+    @Test
     fun rejectsLegacyUnframedMarkdownInsteadOfGuessingTurnBoundaries() {
         val legacy = "# LlmBench chat\n\n## You\n\nQuestion\n\n## Assistant\n\nAnswer\n"
 
