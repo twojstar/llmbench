@@ -1,0 +1,58 @@
+package com.twojstar.llmbench.data.model
+
+/** Why a first-party Bench action cannot currently be offered on a requested route. */
+enum class BenchToolAvailabilityBlocker {
+    DISABLED,
+    UNSUPPORTED_SURFACE,
+    UNSUPPORTED_INVOCATION_MODE,
+    MISSING_REQUIRED_PERMISSION,
+    NETWORK_UNAVAILABLE
+}
+
+/**
+ * Derived, side-effect-free availability for one requested first-party Bench action.
+ *
+ * This does not grant permissions, perform network checks or execute a tool. Callers provide the
+ * current state and receive the policy blockers that must be cleared before an action is offered.
+ */
+data class BuiltInBenchToolAvailability(
+    val blockers: Set<BenchToolAvailabilityBlocker>,
+    val missingRequiredPermissions: Set<BenchToolPermission>
+) {
+    val canOffer: Boolean
+        get() = blockers.isEmpty()
+}
+
+/** Evaluate the canonical registry policy for one concrete tool route. */
+fun BuiltInBenchTool.availability(
+    surface: BenchToolSurface,
+    invocationMode: BenchToolInvocationMode,
+    isEnabled: Boolean,
+    grantedPermissions: Set<BenchToolPermission>,
+    networkAvailable: Boolean
+): BuiltInBenchToolAvailability {
+    val capabilities = capabilities()
+    val missingPermissions = capabilities.requiredPermissions - grantedPermissions
+    val blockers = buildSet {
+        if (!isEnabled) add(BenchToolAvailabilityBlocker.DISABLED)
+        if (surface !in capabilities.surfaces) {
+            add(BenchToolAvailabilityBlocker.UNSUPPORTED_SURFACE)
+        }
+        if (invocationMode !in capabilities.invocationModes) {
+            add(BenchToolAvailabilityBlocker.UNSUPPORTED_INVOCATION_MODE)
+        }
+        if (missingPermissions.isNotEmpty()) {
+            add(BenchToolAvailabilityBlocker.MISSING_REQUIRED_PERMISSION)
+        }
+        if (
+            capabilities.networkBehavior == BenchToolNetworkBehavior.NETWORK_REQUIRED &&
+            !networkAvailable
+        ) {
+            add(BenchToolAvailabilityBlocker.NETWORK_UNAVAILABLE)
+        }
+    }
+    return BuiltInBenchToolAvailability(
+        blockers = blockers,
+        missingRequiredPermissions = missingPermissions
+    )
+}
