@@ -1,8 +1,7 @@
 package com.twojstar.llmbench.ui.screens
 
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.weight
+import androidx.compose.foundation.layout.*
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
@@ -26,6 +25,7 @@ internal enum class StudioToolsSection {
  * explicit modifier below selects that overload, while this wrapper adds Benches without copying or
  * restructuring the existing browser.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SkillsBrowserScreen(viewModel: StudioViewModel) {
     var section by rememberSaveable { mutableStateOf(StudioToolsSection.SKILLS) }
