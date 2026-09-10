@@ -3,6 +3,7 @@ package com.twojstar.llmbench.data.codebench
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.BinaryBitmap
 import com.google.zxing.DecodeHintType
+import com.google.zxing.EncodeHintType
 import com.google.zxing.MultiFormatReader
 import com.google.zxing.MultiFormatWriter
 import com.google.zxing.NotFoundException
@@ -93,7 +94,7 @@ internal data class CodebenchDecodedBarcode(
 internal object CodebenchBarcodeCodec {
     const val MAX_CONTENT_CHARS: Int = 4_096
     const val MAX_RENDER_DIMENSION: Int = 2_048
-    private const val MAX_RENDER_PIXELS: Int = MAX_RENDER_DIMENSION * MAX_RENDER_DIMENSION
+    private const val UTF_8_CHARSET = "UTF-8"
 
     fun encode(
         text: String,
@@ -106,7 +107,13 @@ internal object CodebenchBarcodeCodec {
         validateDimensions(width, height)
 
         val matrix = try {
-            MultiFormatWriter().encode(text, format.zxingFormat, width, height)
+            MultiFormatWriter().encode(
+                text,
+                format.zxingFormat,
+                width,
+                height,
+                mapOf(EncodeHintType.CHARACTER_SET to UTF_8_CHARSET)
+            )
         } catch (_: WriterException) {
             throw IllegalArgumentException("Barcode content is not valid for ${format.name}")
         } catch (_: IllegalArgumentException) {
@@ -144,9 +151,6 @@ internal object CodebenchBarcodeCodec {
     private fun validateDimensions(width: Int, height: Int) {
         require(width in 1..MAX_RENDER_DIMENSION && height in 1..MAX_RENDER_DIMENSION) {
             "Barcode dimensions exceed the local render limit"
-        }
-        require(width.toLong() * height <= MAX_RENDER_PIXELS) {
-            "Barcode pixel count exceeds the local render limit"
         }
     }
 }
