@@ -1,36 +1,16 @@
 package com.twojstar.llmbench.ui.screens
 
-import android.content.ActivityNotFoundException
+import android.content.Context
+import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Extension
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Switch
-import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -48,7 +28,8 @@ import com.twojstar.llmbench.data.streambench.StreambenchImportedPlaylistActionR
 import com.twojstar.llmbench.data.streambench.StreambenchPlaylistEntry
 import com.twojstar.llmbench.data.streambench.executeStreambenchPlaylistImportAction
 import java.io.IOException
-import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 
 private val STREAMBENCH_PLAYLIST_MIME_TYPES = arrayOf(
@@ -59,6 +40,11 @@ private val STREAMBENCH_PLAYLIST_MIME_TYPES = arrayOf(
     "application/octet-stream"
 )
 
+private data class StreambenchImportUiResult(
+    val entries: List<StreambenchPlaylistEntry>,
+    val message: String
+)
+
 internal fun updatedBenchSelection(
     current: Set<BuiltInBenchTool>,
     tool: BuiltInBenchTool,
@@ -66,6 +52,48 @@ internal fun updatedBenchSelection(
 ): Set<BuiltInBenchTool> = current.toMutableSet().apply {
     if (enabled) add(tool) else remove(tool)
 }.toSet()
+
+private suspend fun importStreambenchPlaylist(
+    context: Context,
+    uri: Uri,
+    isEnabled: Boolean
+): StreambenchImportUiResult = try {
+    val opened = TextDocumentFileAccess.import(
+        context = context,
+        uri = uri,
+        fallbackName = "playlist.m3u"
+    )
+    when (
+        val result = opened.executeStreambenchPlaylistImportAction(
+            surface = BenchToolSurface.COMPANION_UI,
+            isEnabled = isEnabled,
+            grantedPermissions = setOf(BenchToolPermission.READ_USER_SELECTED_CONTENT)
+        )
+    ) {
+        is StreambenchImportedPlaylistActionResult.Completed -> {
+            val suffix = if (result.entries.size == 1) "station" else "stations"
+            StreambenchImportUiResult(result.entries, "Loaded ${result.entries.size} $suffix locally.")
+        }
+        is StreambenchImportedPlaylistActionResult.Blocked -> StreambenchImportUiResult(
+            emptyList(),
+            "Playlist import is blocked by the current Bench policy."
+        )
+        is StreambenchImportedPlaylistActionResult.Rejected -> StreambenchImportUiResult(
+            emptyList(),
+            "Could not import this playlist. Check its format and size."
+        )
+    }
+} catch (error: Exception) {
+    currentCoroutineContext().ensureActive()
+    StreambenchImportUiResult(
+        entries = emptyList(),
+        message = when (error) {
+            is SecurityException -> "LlmBench could not access the selected playlist."
+            is IOException -> error.message ?: "Could not read the selected playlist."
+            else -> "Could not import the selected playlist."
+        }
+    )
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -79,56 +107,23 @@ fun BenchToolsScreen(modifier: Modifier = Modifier) {
     var streambenchImporting by remember { mutableStateOf(false) }
 
     val streambenchImportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) {
+        uri?.let { selectedUri ->
             scope.launch {
                 streambenchImporting = true
-                try {
-                    val opened = TextDocumentFileAccess.import(
-                        context = context,
-                        uri = uri,
-                        fallbackName = "playlist.m3u"
-                    )
-                    when (
-                        val result = opened.executeStreambenchPlaylistImportAction(
-                            surface = BenchToolSurface.COMPANION_UI,
-                            isEnabled = BuiltInBenchTool.STREAMBENCH_PLAYER in enabledTools,
-                            grantedPermissions = setOf(BenchToolPermission.READ_USER_SELECTED_CONTENT)
-                        )
-                    ) {
-                        is StreambenchImportedPlaylistActionResult.Completed -> {
-                            streambenchEntries = result.entries
-                            val suffix = if (result.entries.size == 1) "station" else "stations"
-                            streambenchImportMessage = "Loaded ${result.entries.size} $suffix locally."
-                        }
-                        is StreambenchImportedPlaylistActionResult.Blocked -> {
-                            streambenchEntries = emptyList()
-                            streambenchImportMessage = "Playlist import is blocked by the current Bench policy."
-                        }
-                        is StreambenchImportedPlaylistActionResult.Rejected -> {
-                            streambenchEntries = emptyList()
-                            streambenchImportMessage = "Could not import this playlist. Check its format and size."
-                        }
-                    }
-                } catch (error: CancellationException) {
-                    throw error
-                } catch (error: IOException) {
+                val imported = importStreambenchPlaylist(
+                    context = context,
+                    uri = selectedUri,
+                    isEnabled = BuiltInBenchTool.STREAMBENCH_PLAYER in enabledTools
+                )
+                if (BuiltInBenchTool.STREAMBENCH_PLAYER in store.loadEnabledTools()) {
+                    streambenchEntries = imported.entries
+                    streambenchImportMessage = imported.message
+                } else {
                     streambenchEntries = emptyList()
-                    streambenchImportMessage = error.message ?: "Could not read the selected playlist."
-                } catch (_: SecurityException) {
-                    streambenchEntries = emptyList()
-                    streambenchImportMessage = "LlmBench could not access the selected playlist."
-                } finally {
-                    streambenchImporting = false
+                    streambenchImportMessage = null
                 }
+                streambenchImporting = false
             }
-        }
-    }
-
-    fun launchStreambenchImport() {
-        try {
-            streambenchImportLauncher.launch(STREAMBENCH_PLAYLIST_MIME_TYPES)
-        } catch (_: ActivityNotFoundException) {
-            streambenchImportMessage = "No document picker is available."
         }
     }
 
@@ -210,11 +205,7 @@ fun BenchToolsScreen(modifier: Modifier = Modifier) {
                             Switch(
                                 checked = enabled,
                                 onCheckedChange = { shouldEnable ->
-                                    val updated = updatedBenchSelection(
-                                        current = enabledTools,
-                                        tool = tool,
-                                        enabled = shouldEnable
-                                    )
+                                    val updated = updatedBenchSelection(enabledTools, tool, shouldEnable)
                                     enabledTools = updated
                                     store.saveEnabledTools(updated)
                                     if (tool == BuiltInBenchTool.STREAMBENCH_PLAYER && !shouldEnable) {
@@ -238,7 +229,7 @@ fun BenchToolsScreen(modifier: Modifier = Modifier) {
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                                 Button(
-                                    onClick = ::launchStreambenchImport,
+                                    onClick = { streambenchImportLauncher.launch(STREAMBENCH_PLAYLIST_MIME_TYPES) },
                                     enabled = !streambenchImporting,
                                     modifier = Modifier.testTag("streambench_import_playlist")
                                 ) {
@@ -249,11 +240,7 @@ fun BenchToolsScreen(modifier: Modifier = Modifier) {
                                 }
                                 streambenchEntries.take(5).forEach { entry ->
                                     Text(
-                                        buildString {
-                                            append("• ")
-                                            append(entry.title)
-                                            entry.group?.takeIf(String::isNotBlank)?.let { append(" · ").append(it) }
-                                        },
+                                        "• ${entry.title.take(160)}${entry.group.takeIf(String::isNotBlank)?.let { " · ${it.take(96)}" }.orEmpty()}",
                                         style = MaterialTheme.typography.bodySmall
                                     )
                                 }
