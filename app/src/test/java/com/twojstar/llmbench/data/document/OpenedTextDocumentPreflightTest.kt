@@ -1,6 +1,7 @@
 package com.twojstar.llmbench.data.document
 
 import com.twojstar.llmbench.data.tokenizer.LocalTokenCounter
+import com.twojstar.llmbench.data.tokenizer.MAX_INTERACTIVE_TOKENIZED_CHARS
 import com.twojstar.llmbench.data.tokenizer.TokenCounter
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -9,7 +10,7 @@ import org.junit.Test
 
 class OpenedTextDocumentPreflightTest {
     @Test
-    fun forwardsSafMetadataAndInjectedCounterToPortablePreflight() {
+    fun forwardsProviderSafMetadataAndInjectedCounterToPortablePreflight() {
         val source = "<root />"
         val opened = OpenedTextDocument(
             document = textDocument(source),
@@ -27,6 +28,21 @@ class OpenedTextDocumentPreflightTest {
     }
 
     @Test
+    fun syntheticFallbackNameCannotConflictWithProviderMime() {
+        val opened = OpenedTextDocument(
+            document = textDocument("<root />"),
+            displayName = "payload.json",
+            hasProviderDisplayName = false,
+            mimeType = "application/xml"
+        )
+
+        val report = opened.buildPreflightReport(FakeCounter)
+
+        assertEquals(StructuredTextFormat.XML, report.structuredValidation?.format)
+        assertTrue(report.structuredValidation?.isValid == true)
+    }
+
+    @Test
     fun defaultBridgeUsesTheRealLocalTokenizerBackend() {
         val opened = OpenedTextDocument(
             document = textDocument("hello world"),
@@ -40,6 +56,25 @@ class OpenedTextDocumentPreflightTest {
         assertNull(report.structuredValidation)
         assertEquals(LocalTokenCounter.ENCODING_LABEL, report.tokenSummary?.encodingLabel)
         assertEquals(2, report.tokenSummary?.count)
+    }
+
+    @Test
+    fun interactiveBridgeSkipsTokenizationAboveSharedResponsivenessLimit() {
+        val source = "x".repeat(MAX_INTERACTIVE_TOKENIZED_CHARS + 1)
+        val opened = OpenedTextDocument(
+            document = textDocument(source),
+            displayName = "large.txt",
+            hasProviderDisplayName = true,
+            mimeType = "text/plain"
+        )
+        val mustNotRun = object : TokenCounter {
+            override val encodingLabel: String = "must-not-run"
+            override fun count(text: String): Int = error("Oversized interactive input was tokenized")
+        }
+
+        val report = opened.buildPreflightReport(mustNotRun)
+
+        assertNull(report.tokenSummary)
     }
 
     private fun textDocument(text: String): TextDocument = TextDocument(
