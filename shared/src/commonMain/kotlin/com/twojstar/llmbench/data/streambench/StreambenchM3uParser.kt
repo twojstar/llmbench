@@ -76,7 +76,7 @@ object StreambenchM3uParser {
             items += StreambenchPlaylistEntry(
                 id = pending?.id.orEmpty(),
                 url = url,
-                title = pending?.title?.ifEmpty { null } ?: hostFromHttpUrl(url),
+                title = pending?.title?.takeIf { it.isNotEmpty() } ?: hostFromHttpUrl(url),
                 group = pending?.group.orEmpty(),
                 logo = pending?.logo.orEmpty(),
                 country = pending?.country.orEmpty(),
@@ -125,7 +125,7 @@ object StreambenchM3uParser {
         val authority = candidate.substring(authorityStart, authorityEnd)
         val hostPort = authority.substringAfterLast('@')
         if (hostPort.isEmpty()) return null
-        if (hostPort.startsWith('[')) {
+        if (hostPort.firstOrNull() == '[') {
             if (hostPort.indexOf(']') <= 1) return null
         } else {
             val host = hostPort.substringBeforeLast(':', hostPort)
@@ -140,7 +140,7 @@ object StreambenchM3uParser {
             .takeIf { it >= 0 }
             ?: url.length
         val hostPort = url.substring(authorityStart, authorityEnd).substringAfterLast('@')
-        if (hostPort.startsWith('[')) {
+        if (hostPort.firstOrNull() == '[') {
             val closing = hostPort.indexOf(']')
             if (closing > 1) return hostPort.substring(1, closing)
         }
@@ -156,7 +156,7 @@ object StreambenchM3uParser {
         character <= ' ' || character == '\u007F' || character == '\\'
 
     private inline fun forEachLine(source: String, block: (String) -> Unit) {
-        var start = if (source.startsWith('\uFEFF')) 1 else 0
+        var start = if (source.firstOrNull() == '\uFEFF') 1 else 0
         while (start <= source.length) {
             val newline = source.indexOf('\n', start)
             val end = if (newline >= 0) newline else source.length
