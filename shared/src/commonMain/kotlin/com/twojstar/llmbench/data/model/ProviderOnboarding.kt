@@ -54,3 +54,17 @@ fun WebAiService.onboardingCapabilities(): ProviderOnboardingCapabilities = when
         embeddedSessionHandoff = EmbeddedSessionHandoff.UNSUPPORTED
     )
 }
+
+/**
+ * Resolves the locally preferred identity method against this provider's verified capabilities.
+ *
+ * A supported user preference wins. Otherwise the provider's first verified method is the safe
+ * provider-specific fallback. Providers without a verified identity-assisted path return null.
+ * This selects a sign-in option only; it does not change or imply embedded-session handoff support.
+ */
+fun WebAiService.resolveOnboardingIdentityMethod(
+    preferred: ProviderIdentityMethod?
+): ProviderIdentityMethod? {
+    val supported = onboardingCapabilities().preferredIdentityMethods
+    return preferred?.takeIf(supported::contains) ?: supported.firstOrNull()
+}
