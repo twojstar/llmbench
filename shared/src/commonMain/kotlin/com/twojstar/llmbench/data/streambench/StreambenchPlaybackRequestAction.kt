@@ -40,8 +40,9 @@ sealed interface StreambenchPlaybackRequestActionResult {
  * Side-effect-free handoff immediately before a platform player is allowed to open a stream.
  *
  * The action promotes the registry-declared NETWORK scope to required, requires live connectivity,
- * revalidates the complete stream URL with the same canonical parser policy used during import, and
- * bounds user-controlled display metadata. It never performs a network request itself.
+ * applies the canonical strict remote-stream URL policy immediately before playback, and bounds
+ * user-controlled display metadata without splitting Unicode surrogate pairs. It never performs a
+ * network request itself.
  */
 object StreambenchPlaybackRequestAction {
     const val MAX_TITLE_CHARS: Int = 160
@@ -81,11 +82,7 @@ object StreambenchPlaybackRequestAction {
             return StreambenchPlaybackRequestActionResult.Blocked(availability)
         }
 
-        val candidate = entry.url.trim()
-        val validatedUrl = runCatching {
-            StreambenchM3uParser.parse(candidate).singleOrNull()?.url
-        }.getOrNull()
-            ?.takeIf { it == candidate }
+        val validatedUrl = StreambenchM3uParser.validateRemotePlaybackUrl(entry.url)
             ?: return StreambenchPlaybackRequestActionResult.Rejected(
                 StreambenchPlaybackRejection.INVALID_STREAM_URL
             )
@@ -100,10 +97,29 @@ object StreambenchPlaybackRequestAction {
         )
     }
 
-    private fun boundedMetadata(value: String, maxChars: Int): String =
-        value.asSequence()
-            .filterNot { it < ' ' || it == '\u007F' }
-            .take(maxChars)
-            .joinToString("")
-            .trim()
+    private fun boundedMetadata(value: String, maxUtf16Units: Int): String = buildString {
+        var index = 0
+        while (index < value.length && length < maxUtf16Units) {
+            val character = value[index]
+            when {
+                character < ' ' || character == '\u007F' -> index += 1
+                character in '\uD800'..'\uDBFF' -> {
+                    val lowSurrogate = value.getOrNull(index + 1)
+                    if (lowSurrogate != null && lowSurrogate in '\uDC00'..'\uDFFF') {
+                        if (length + 2 > maxUtf16Units) break
+                        append(character)
+                        append(lowSurrogate)
+                        index += 2
+                    } else {
+                        index += 1
+                    }
+                }
+                character in '\uDC00'..'\uDFFF' -> index += 1
+                else -> {
+                    append(character)
+                    index += 1
+                }
+            }
+        }
+    }.trim()
 }
