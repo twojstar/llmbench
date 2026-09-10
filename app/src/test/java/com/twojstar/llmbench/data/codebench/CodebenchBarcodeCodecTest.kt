@@ -9,7 +9,7 @@ import org.junit.Test
 
 class CodebenchBarcodeCodecTest {
     @Test
-    fun qrRoundTripPreservesTextAndFormat() {
+    fun qrRoundTripPreservesUnicodeTextAndFormat() {
         val matrix = CodebenchBarcodeCodec.encode(
             text = QR_TEXT,
             format = CodebenchBarcodeFormat.QR_CODE,
@@ -134,7 +134,7 @@ class CodebenchBarcodeCodecTest {
         copyDarkPixels().map { dark -> if (dark) BLACK else WHITE }.toIntArray()
 
     private companion object {
-        const val QR_TEXT = "https://codebench.trfny.com/"
+        const val QR_TEXT = "Zażółć gęślą jaźń · 你好"
         const val CODE_128_TEXT = "CODEBENCH-128"
         const val QR_SIZE = 256
         val BLACK: Int = 0xFF000000.toInt()
