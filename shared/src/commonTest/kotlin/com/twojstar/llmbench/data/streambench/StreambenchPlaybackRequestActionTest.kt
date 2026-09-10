@@ -77,6 +77,29 @@ class StreambenchPlaybackRequestActionTest {
     }
 
     @Test
+    fun unsafeRemoteStreamUrlsAreRejectedAfterPolicyPasses() {
+        listOf(
+            "http://stream.example/live",
+            "https://127.0.0.1/live",
+            "https://192.168.1.20/live",
+            "https://[::1]/live",
+            "https://router.local/live",
+            "https://user:pass@stream.example/live"
+        ).forEach { url ->
+            val result = StreambenchPlaybackRequestAction.execute(
+                entry = entry(url = url),
+                surface = BenchToolSurface.COMPANION_UI,
+                isEnabled = true,
+                grantedPermissions = setOf(BenchToolPermission.NETWORK),
+                networkAvailable = true
+            )
+
+            val rejected = assertIs<StreambenchPlaybackRequestActionResult.Rejected>(result)
+            assertEquals(StreambenchPlaybackRejection.INVALID_STREAM_URL, rejected.reason)
+        }
+    }
+
+    @Test
     fun malformedStreamUrlIsRejectedAfterPolicyPasses() {
         val result = StreambenchPlaybackRequestAction.execute(
             entry = entry(url = "file:///etc/passwd"),
@@ -102,6 +125,41 @@ class StreambenchPlaybackRequestActionTest {
 
         val rejected = assertIs<StreambenchPlaybackRequestActionResult.Rejected>(result)
         assertEquals(StreambenchPlaybackRejection.INVALID_STREAM_URL, rejected.reason)
+    }
+
+    @Test
+    fun metadataTruncationDoesNotSplitUnicodeSurrogatePairs() {
+        val titlePrefix = "x".repeat(StreambenchPlaybackRequestAction.MAX_TITLE_CHARS - 1)
+        val groupPrefix = "g".repeat(StreambenchPlaybackRequestAction.MAX_GROUP_CHARS - 1)
+        val result = StreambenchPlaybackRequestAction.execute(
+            entry = entry(
+                title = titlePrefix + "😀" + "ignored",
+                group = groupPrefix + "😀" + "ignored"
+            ),
+            surface = BenchToolSurface.COMPANION_UI,
+            isEnabled = true,
+            grantedPermissions = setOf(BenchToolPermission.NETWORK),
+            networkAvailable = true
+        )
+
+        val ready = assertIs<StreambenchPlaybackRequestActionResult.Ready>(result)
+        assertEquals(titlePrefix, ready.request.title)
+        assertEquals(groupPrefix, ready.request.group)
+    }
+
+    @Test
+    fun malformedSurrogatesAreRemovedFromPlaybackMetadata() {
+        val malformedTitle = "safe" + '\uD83D' + "middle" + '\uDE00' + "end"
+        val result = StreambenchPlaybackRequestAction.execute(
+            entry = entry(title = malformedTitle),
+            surface = BenchToolSurface.COMPANION_UI,
+            isEnabled = true,
+            grantedPermissions = setOf(BenchToolPermission.NETWORK),
+            networkAvailable = true
+        )
+
+        val ready = assertIs<StreambenchPlaybackRequestActionResult.Ready>(result)
+        assertEquals("safemiddleend", ready.request.title)
     }
 
     @Test
