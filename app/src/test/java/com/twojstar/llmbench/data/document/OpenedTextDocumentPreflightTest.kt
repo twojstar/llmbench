@@ -59,6 +59,20 @@ class OpenedTextDocumentPreflightTest {
     }
 
     @Test
+    fun callerCanRequestTokenlessPreflight() {
+        val opened = OpenedTextDocument(
+            document = textDocument("hello world"),
+            displayName = "notes.txt",
+            hasProviderDisplayName = true,
+            mimeType = "text/plain"
+        )
+
+        val report = opened.buildPreflightReport(tokenCounter = null)
+
+        assertNull(report.tokenSummary)
+    }
+
+    @Test
     fun interactiveBridgeSkipsTokenizationAboveSharedResponsivenessLimit() {
         val source = "x".repeat(MAX_INTERACTIVE_TOKENIZED_CHARS + 1)
         val opened = OpenedTextDocument(
