@@ -8,6 +8,8 @@ internal const val CHAT_MARKDOWN_MESSAGE_BYTES = " bytes="
 internal const val CHAT_MARKDOWN_MESSAGE_META_SUFFIX = " -->"
 internal const val CHAT_MARKDOWN_MESSAGE_END = "<!-- llmbench-message-end -->"
 private const val MAX_HEADING_METADATA_CHARS = 160
+private const val UTF8_SPAN_BYTE_MASK = 0x0F
+private const val UTF8_SPAN_CODE_UNIT_SHIFT = 4
 
 /**
  * Renders the user-visible native chat as portable, round-trip-safe Markdown.
@@ -89,31 +91,36 @@ private class BoundedUtf8StringBuilder(maxUtf8Bytes: Int) {
     override fun toString(): String = builder.toString()
 }
 
-internal data class Utf8CodeUnitSpan(
-    val codeUnitCount: Int,
-    val byteCount: Int
-)
-
-internal fun String.utf8CodeUnitSpanAt(index: Int): Utf8CodeUnitSpan? {
-    val codeUnit = getOrNull(index)?.code ?: return null
+/** Packed as `(UTF-16 code units << 4) | UTF-8 bytes`; zero means no code unit at [index]. */
+internal fun String.packedUtf8SpanAt(index: Int): Int {
+    val codeUnit = getOrNull(index)?.code ?: return 0
     val nextCodeUnit = getOrNull(index + 1)?.code
     return when {
-        codeUnit <= 0x7F -> Utf8CodeUnitSpan(codeUnitCount = 1, byteCount = 1)
-        codeUnit <= 0x7FF -> Utf8CodeUnitSpan(codeUnitCount = 1, byteCount = 2)
+        codeUnit <= 0x7F -> packUtf8Span(codeUnitCount = 1, byteCount = 1)
+        codeUnit <= 0x7FF -> packUtf8Span(codeUnitCount = 1, byteCount = 2)
         codeUnit in 0xD800..0xDBFF && nextCodeUnit?.let { it in 0xDC00..0xDFFF } == true ->
-            Utf8CodeUnitSpan(codeUnitCount = 2, byteCount = 4)
-        else -> Utf8CodeUnitSpan(codeUnitCount = 1, byteCount = 3)
+            packUtf8Span(codeUnitCount = 2, byteCount = 4)
+        else -> packUtf8Span(codeUnitCount = 1, byteCount = 3)
     }
 }
+
+internal fun packedUtf8SpanCodeUnitCount(span: Int): Int = span ushr UTF8_SPAN_CODE_UNIT_SHIFT
+
+internal fun packedUtf8SpanByteCount(span: Int): Int = span and UTF8_SPAN_BYTE_MASK
+
+private fun packUtf8Span(codeUnitCount: Int, byteCount: Int): Int =
+    (codeUnitCount shl UTF8_SPAN_CODE_UNIT_SHIFT) or byteCount
 
 internal fun utf8ByteCountAtMost(value: String, limit: Int): Int? {
     var bytes = 0
     var index = 0
     while (index < value.length) {
-        val span = value.utf8CodeUnitSpanAt(index) ?: return null
-        if (bytes > limit - span.byteCount) return null
-        bytes += span.byteCount
-        index += span.codeUnitCount
+        val span = value.packedUtf8SpanAt(index)
+        if (span == 0) return null
+        val byteCount = packedUtf8SpanByteCount(span)
+        if (bytes > limit - byteCount) return null
+        bytes += byteCount
+        index += packedUtf8SpanCodeUnitCount(span)
     }
     return bytes
 }
