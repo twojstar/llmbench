@@ -272,7 +272,10 @@ data class ApiKeyConfig(
     val kimiKey: String = "",
     val openRouterKey: String = "",
     val aiHubMixKey: String = ""
-)
+) {
+    /** API credentials must never appear in logs, crash breadcrumbs or debugger stringification. */
+    override fun toString(): String = "ApiKeyConfig(<redacted>)"
+}
 
 fun ApiKeyConfig.hasKeyFor(provider: AiProvider): Boolean = when (provider) {
     AiProvider.GEMINI -> geminiKey.isNotBlank()
@@ -333,4 +336,10 @@ data class ModelChatMessage(
     val usage: ProviderUsage? = null,
     val activeProfileNotes: List<String> = emptyList(),
     @Transient val providerReplayState: String? = null
-)
+) {
+    /** User text, profile notes and opaque replay state are all sensitive debug payloads. */
+    override fun toString(): String =
+        "ModelChatMessage(id=$id, sender=$sender, provider=${provider?.id}, " +
+            "text=<redacted>, activeProfileNotes=<redacted>, providerReplayState=<redacted>, " +
+            "isError=$isError, isSimulated=$isSimulated, isPartial=$isPartial)"
+}
