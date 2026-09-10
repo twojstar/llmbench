@@ -21,6 +21,12 @@ class PromptTournamentCoverageTest {
                 observation(first, alpha, ArenaResponseProvenance.CACHED_REPLAY),
                 observation(first, beta, ArenaResponseProvenance.CACHED_REPLAY),
                 observation(
+                    first,
+                    beta,
+                    ArenaResponseProvenance.LIVE_PROVIDER,
+                    isError = true
+                ),
+                observation(
                     second,
                     beta,
                     ArenaResponseProvenance.LIVE_PROVIDER,
@@ -52,7 +58,7 @@ class PromptTournamentCoverageTest {
             coverage.runs.map(PromptTournamentRunCoverage::state)
         )
         assertEquals(
-            listOf(2, 1, 0, 1),
+            listOf(2, 2, 0, 1),
             coverage.runs.map(PromptTournamentRunCoverage::observationCount)
         )
         assertEquals(
@@ -71,6 +77,7 @@ class PromptTournamentCoverageTest {
         variant: TokenArenaVariant,
         target: PromptTournamentTarget,
         provenance: ArenaResponseProvenance,
+        isError: Boolean = false,
         isPartial: Boolean = false
     ) = TokenArenaResponseObservation(
         variantId = variant.id,
@@ -78,6 +85,7 @@ class PromptTournamentCoverageTest {
         providerId = target.providerId,
         modelName = target.modelName,
         provenance = provenance,
+        isError = isError,
         isPartial = isPartial
     )
 
