@@ -45,6 +45,24 @@ class DocumentPreflightTest {
     }
 
     @Test
+    fun derivesLineEndingsFromCurrentTextInsteadOfStaleDocumentMetadata() {
+        val source = "one\ntwo\n"
+        val document = TextDocument(
+            text = source,
+            hadUtf8Bom = false,
+            lineEndings = LineEndingCounts(lf = 0, crlf = 2, cr = 0)
+        )
+
+        val report = DocumentPreflight.inspect(
+            document = document,
+            displayName = "notes.md"
+        )
+
+        assertEquals(LineEndingStyle.LF, report.lineEndings.style)
+        assertTrue(report.diagnostics.isEmpty())
+    }
+
+    @Test
     fun invalidRecognizedStructuredTextStillReturnsTheOtherPreflightSignals() {
         val source = "<root>\u0000</root>"
         val document = TextDocument(
