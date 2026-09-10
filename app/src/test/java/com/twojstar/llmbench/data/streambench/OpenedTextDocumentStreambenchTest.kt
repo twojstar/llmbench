@@ -67,7 +67,7 @@ class OpenedTextDocumentStreambenchTest {
             allowArtwork = true
         ) as StreambenchImportedPlaylistActionResult.Completed
 
-        assertEquals(null, withoutArtwork.entries.single().artworkUrl)
-        assertEquals("https://cdn.example/logo.png", withArtwork.entries.single().artworkUrl)
+        assertEquals("", withoutArtwork.entries.single().logo)
+        assertEquals("https://cdn.example/logo.png", withArtwork.entries.single().logo)
     }
 }
