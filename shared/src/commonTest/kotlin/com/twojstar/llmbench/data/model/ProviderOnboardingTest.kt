@@ -3,6 +3,7 @@ package com.twojstar.llmbench.data.model
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class ProviderOnboardingTest {
@@ -19,6 +20,41 @@ class ProviderOnboardingTest {
         assertEquals(
             listOf(ProviderIdentityMethod.GOOGLE, ProviderIdentityMethod.GITHUB),
             WebAiService.ZAI.onboardingCapabilities().preferredIdentityMethods
+        )
+    }
+
+    @Test
+    fun resolvesSupportedUserPreferenceBeforeProviderFallback() {
+        assertEquals(
+            ProviderIdentityMethod.GITHUB,
+            WebAiService.QWEN.resolveOnboardingIdentityMethod(ProviderIdentityMethod.GITHUB)
+        )
+        assertEquals(
+            ProviderIdentityMethod.GOOGLE,
+            WebAiService.ZAI.resolveOnboardingIdentityMethod(ProviderIdentityMethod.GOOGLE)
+        )
+    }
+
+    @Test
+    fun fallsBackToFirstVerifiedProviderMethodWhenPreferenceIsUnavailable() {
+        assertEquals(
+            ProviderIdentityMethod.GOOGLE,
+            WebAiService.QWEN.resolveOnboardingIdentityMethod(ProviderIdentityMethod.MICROSOFT)
+        )
+        assertEquals(
+            ProviderIdentityMethod.MICROSOFT,
+            WebAiService.COPILOT.resolveOnboardingIdentityMethod(ProviderIdentityMethod.GOOGLE)
+        )
+        assertEquals(
+            ProviderIdentityMethod.GOOGLE,
+            WebAiService.QWEN.resolveOnboardingIdentityMethod(null)
+        )
+    }
+
+    @Test
+    fun unsupportedProvidersResolveNoIdentityMethod() {
+        assertNull(
+            WebAiService.CLAUDE.resolveOnboardingIdentityMethod(ProviderIdentityMethod.GOOGLE)
         )
     }
 
