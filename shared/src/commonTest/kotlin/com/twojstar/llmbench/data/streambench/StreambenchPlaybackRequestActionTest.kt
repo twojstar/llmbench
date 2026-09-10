@@ -58,7 +58,7 @@ class StreambenchPlaybackRequestActionTest {
     }
 
     @Test
-    fun readyRequestRevalidatesUrlAndBoundsDisplayMetadata() {
+    fun eligibleRequestRevalidatesUrlAndBoundsDisplayMetadata() {
         val title = "x".repeat(StreambenchPlaybackRequestAction.MAX_TITLE_CHARS + 20) + "\u0000hidden"
         val group = "g".repeat(StreambenchPlaybackRequestAction.MAX_GROUP_CHARS + 20)
         val result = StreambenchPlaybackRequestAction.execute(
@@ -69,11 +69,11 @@ class StreambenchPlaybackRequestActionTest {
             networkAvailable = true
         )
 
-        val ready = assertIs<StreambenchPlaybackRequestActionResult.Ready>(result)
-        assertEquals("https://stream.example/live", ready.request.url)
-        assertEquals(StreambenchPlaybackRequestAction.MAX_TITLE_CHARS, ready.request.title.length)
-        assertEquals(StreambenchPlaybackRequestAction.MAX_GROUP_CHARS, ready.request.group.length)
-        assertTrue(ready.request.radio)
+        val eligible = assertIs<StreambenchPlaybackRequestActionResult.EligibleForGuardedLoader>(result)
+        assertEquals("https://stream.example/live", eligible.request.url)
+        assertEquals(StreambenchPlaybackRequestAction.MAX_TITLE_CHARS, eligible.request.title.length)
+        assertEquals(StreambenchPlaybackRequestAction.MAX_GROUP_CHARS, eligible.request.group.length)
+        assertTrue(eligible.request.radio)
     }
 
     @Test
@@ -142,9 +142,9 @@ class StreambenchPlaybackRequestActionTest {
             networkAvailable = true
         )
 
-        val ready = assertIs<StreambenchPlaybackRequestActionResult.Ready>(result)
-        assertEquals(titlePrefix, ready.request.title)
-        assertEquals(groupPrefix, ready.request.group)
+        val eligible = assertIs<StreambenchPlaybackRequestActionResult.EligibleForGuardedLoader>(result)
+        assertEquals(titlePrefix, eligible.request.title)
+        assertEquals(groupPrefix, eligible.request.group)
     }
 
     @Test
@@ -158,8 +158,8 @@ class StreambenchPlaybackRequestActionTest {
             networkAvailable = true
         )
 
-        val ready = assertIs<StreambenchPlaybackRequestActionResult.Ready>(result)
-        assertEquals("safemiddleend", ready.request.title)
+        val eligible = assertIs<StreambenchPlaybackRequestActionResult.EligibleForGuardedLoader>(result)
+        assertEquals("safemiddleend", eligible.request.title)
     }
 
     @Test
@@ -172,8 +172,8 @@ class StreambenchPlaybackRequestActionTest {
             networkAvailable = true
         )
 
-        val ready = assertIs<StreambenchPlaybackRequestActionResult.Ready>(result)
-        val debug = ready.toString() + ready.request.toString()
+        val eligible = assertIs<StreambenchPlaybackRequestActionResult.EligibleForGuardedLoader>(result)
+        val debug = eligible.toString() + eligible.request.toString()
         assertFalse("token=private" in debug)
         assertFalse("secret station" in debug)
         assertTrue("<redacted>" in debug)
