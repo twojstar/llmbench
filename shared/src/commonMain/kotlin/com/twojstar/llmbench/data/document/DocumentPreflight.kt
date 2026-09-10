@@ -21,7 +21,8 @@ data class DocumentPreflightReport(
 /**
  * Composes the existing portable document checks into one read-only pre-flight report.
  *
- * The report intentionally does not retain the source text. Structured syntax is validated only when
+ * The report does not retain the complete source text, though Text Inspector findings can contain
+ * bounded previews needed to explain suspicious carriers. Structured syntax is validated only when
  * filename/MIME metadata identifies a supported format, and token counting is optional so platform
  * clients can inject an exact local backend without making the portable core depend on one tokenizer.
  * This work is CPU-bound; UI callers should run it away from the main thread for non-trivial inputs.
@@ -43,7 +44,7 @@ object DocumentPreflight {
 
         return DocumentPreflightReport(
             hadUtf8Bom = document.hadUtf8Bom,
-            lineEndings = document.lineEndings,
+            lineEndings = TextDocumentCodec.detectLineEndings(text),
             diagnostics = DocumentDiagnostics.inspect(document).toList(),
             textInspection = TextInspector.inspect(text),
             structuredValidation = validateStructuredTextDocument(
