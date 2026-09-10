@@ -21,27 +21,35 @@ data class PromptTournamentRunCoverage(
  * simulated, failed or partial observation proves that a run was observed, but it does not count as
  * a complete live result. Unplanned provider/model observations never fill a planned matrix cell.
  */
-data class PromptTournamentCoverage(
-    val runs: List<PromptTournamentRunCoverage>
+class PromptTournamentCoverage private constructor(
+    private val runSnapshot: List<PromptTournamentRunCoverage>
 ) {
+    val runs: List<PromptTournamentRunCoverage>
+        get() = runSnapshot.toList()
+
     val plannedRunCount: Int
-        get() = runs.size
+        get() = runSnapshot.size
 
     val missingRunCount: Int
-        get() = runs.count { it.state == PromptTournamentRunCoverageState.MISSING }
+        get() = runSnapshot.count { it.state == PromptTournamentRunCoverageState.MISSING }
 
     val nonRankableObservedRunCount: Int
-        get() = runs.count { it.state == PromptTournamentRunCoverageState.NON_RANKABLE_OBSERVED }
+        get() = runSnapshot.count { it.state == PromptTournamentRunCoverageState.NON_RANKABLE_OBSERVED }
 
     val completeLiveRunCount: Int
-        get() = runs.count { it.state == PromptTournamentRunCoverageState.COMPLETE_LIVE }
+        get() = runSnapshot.count { it.state == PromptTournamentRunCoverageState.COMPLETE_LIVE }
 
     val missingRuns: List<PromptTournamentRun>
-        get() = runs
+        get() = runSnapshot
             .asSequence()
             .filter { coverage -> coverage.state == PromptTournamentRunCoverageState.MISSING }
             .map(PromptTournamentRunCoverage::run)
             .toList()
+
+    companion object {
+        internal fun create(runs: List<PromptTournamentRunCoverage>): PromptTournamentCoverage =
+            PromptTournamentCoverage(runs.toList())
+    }
 }
 
 fun PromptTournamentPlan.coverage(): PromptTournamentCoverage {
@@ -69,7 +77,7 @@ fun PromptTournamentPlan.coverage(): PromptTournamentCoverage {
         )
     }.toList()
 
-    return PromptTournamentCoverage(coverage)
+    return PromptTournamentCoverage.create(coverage)
 }
 
 private data class TournamentRunKey(
