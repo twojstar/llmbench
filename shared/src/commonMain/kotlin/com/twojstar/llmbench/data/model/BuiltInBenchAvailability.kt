@@ -55,10 +55,7 @@ fun BuiltInBenchTool.availability(
         if (missingPermissions.isNotEmpty()) {
             add(BenchToolAvailabilityBlocker.MISSING_REQUIRED_PERMISSION)
         }
-        if (
-            capabilities.networkBehavior == BenchToolNetworkBehavior.NETWORK_REQUIRED &&
-            !networkAvailable
-        ) {
+        if (BenchToolPermission.NETWORK in requiredPermissions && !networkAvailable) {
             add(BenchToolAvailabilityBlocker.NETWORK_UNAVAILABLE)
         }
     }

@@ -61,14 +61,31 @@ class BuiltInBenchAvailabilityTest {
     }
 
     @Test
-    fun streambenchSeparatesNetworkScopeFromActualConnectivity() {
+    fun streambenchBaseCapabilityLeavesNetworkToConcreteActions() {
+        val availability = BuiltInBenchTool.STREAMBENCH_PLAYER.availability(
+            surface = BenchToolSurface.COMPANION_UI,
+            invocationMode = BenchToolInvocationMode.EXPLICIT_USER_ACTION,
+            inputKind = BenchToolDataKind.PLAYLIST,
+            isEnabled = true,
+            grantedPermissions = emptySet(),
+            networkAvailable = false
+        )
+
+        assertTrue(availability.canOffer)
+        assertTrue(availability.missingRequiredPermissions.isEmpty())
+        assertTrue(availability.blockers.isEmpty())
+    }
+
+    @Test
+    fun concreteActionCanRequireDeclaredNetworkScopeAndConnectivity() {
         val missingScopeAndOffline = BuiltInBenchTool.STREAMBENCH_PLAYER.availability(
             surface = BenchToolSurface.COMPANION_UI,
             invocationMode = BenchToolInvocationMode.EXPLICIT_USER_ACTION,
             inputKind = BenchToolDataKind.MEDIA_STREAM,
             isEnabled = true,
             grantedPermissions = emptySet(),
-            networkAvailable = false
+            networkAvailable = false,
+            actionRequiredPermissions = setOf(BenchToolPermission.NETWORK)
         )
 
         assertEquals(
@@ -83,13 +100,29 @@ class BuiltInBenchAvailabilityTest {
             missingScopeAndOffline.blockers
         )
 
+        val grantedButOffline = BuiltInBenchTool.STREAMBENCH_PLAYER.availability(
+            surface = BenchToolSurface.COMPANION_UI,
+            invocationMode = BenchToolInvocationMode.EXPLICIT_USER_ACTION,
+            inputKind = BenchToolDataKind.MEDIA_STREAM,
+            isEnabled = true,
+            grantedPermissions = setOf(BenchToolPermission.NETWORK),
+            networkAvailable = false,
+            actionRequiredPermissions = setOf(BenchToolPermission.NETWORK)
+        )
+
+        assertEquals(
+            setOf(BenchToolAvailabilityBlocker.NETWORK_UNAVAILABLE),
+            grantedButOffline.blockers
+        )
+
         val online = BuiltInBenchTool.STREAMBENCH_PLAYER.availability(
             surface = BenchToolSurface.COMPANION_UI,
             invocationMode = BenchToolInvocationMode.EXPLICIT_USER_ACTION,
             inputKind = BenchToolDataKind.MEDIA_STREAM,
             isEnabled = true,
             grantedPermissions = setOf(BenchToolPermission.NETWORK),
-            networkAvailable = true
+            networkAvailable = true,
+            actionRequiredPermissions = setOf(BenchToolPermission.NETWORK)
         )
 
         assertTrue(online.canOffer)

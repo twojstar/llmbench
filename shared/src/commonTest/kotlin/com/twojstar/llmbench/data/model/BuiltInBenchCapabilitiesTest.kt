@@ -95,12 +95,13 @@ class BuiltInBenchCapabilitiesTest {
     }
 
     @Test
-    fun streambenchRemainsACompanionSurfaceWithExplicitNetworkScope() {
+    fun streambenchRemainsACompanionSurfaceWithActionScopedNetwork() {
         val capabilities = BuiltInBenchTool.STREAMBENCH_PLAYER.capabilities()
 
         assertEquals(setOf(BenchToolSurface.COMPANION_UI), capabilities.surfaces)
-        assertEquals(BenchToolNetworkBehavior.NETWORK_REQUIRED, capabilities.networkBehavior)
-        assertTrue(BenchToolPermission.NETWORK in capabilities.requiredPermissions)
+        assertEquals(BenchToolNetworkBehavior.NETWORK_OPTIONAL, capabilities.networkBehavior)
+        assertFalse(BenchToolPermission.NETWORK in capabilities.requiredPermissions)
+        assertTrue(BenchToolPermission.NETWORK in capabilities.optionalPermissions)
         assertEquals(
             setOf(BenchToolInvocationMode.EXPLICIT_USER_ACTION),
             capabilities.invocationModes
