@@ -12,7 +12,10 @@ data class Profile(
     val knowledge: KnowledgeConfig = KnowledgeConfig(),
     val output: OutputConfig = OutputConfig(),
     val extensions: Map<String, Map<String, String>> = emptyMap()
-)
+) {
+    /** Profile identifiers, settings and extensions may contain user-authored data. */
+    override fun toString(): String = "Profile(<redacted>)"
+}
 
 @Serializable
 data class PersonalityConfig(
@@ -104,4 +107,7 @@ data class ProfileOverlay(
     val codeExamples: String? = null,
     val citations: String? = null,
     val customNote: String? = null
-)
+) {
+    /** Overlay names, policy fields and notes may all originate from user-authored YAML. */
+    override fun toString(): String = "ProfileOverlay(<redacted>)"
+}
