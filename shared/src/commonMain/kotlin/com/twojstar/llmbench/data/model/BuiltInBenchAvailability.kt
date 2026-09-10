@@ -31,10 +31,16 @@ fun BuiltInBenchTool.availability(
     inputKind: BenchToolDataKind,
     isEnabled: Boolean,
     grantedPermissions: Set<BenchToolPermission>,
-    networkAvailable: Boolean
+    networkAvailable: Boolean,
+    actionRequiredPermissions: Set<BenchToolPermission> = emptySet()
 ): BuiltInBenchToolAvailability {
     val capabilities = capabilities()
-    val missingPermissions = capabilities.requiredPermissions - grantedPermissions
+    val declaredPermissions = capabilities.requiredPermissions + capabilities.optionalPermissions
+    require(actionRequiredPermissions.all { it in declaredPermissions }) {
+        "Action-required permissions must be declared by the Bench tool registry"
+    }
+    val requiredPermissions = capabilities.requiredPermissions + actionRequiredPermissions
+    val missingPermissions = requiredPermissions - grantedPermissions
     val blockers = buildSet {
         if (!isEnabled) add(BenchToolAvailabilityBlocker.DISABLED)
         if (surface !in capabilities.surfaces) {
