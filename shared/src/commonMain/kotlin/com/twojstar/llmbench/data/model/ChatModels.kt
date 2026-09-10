@@ -337,9 +337,9 @@ data class ModelChatMessage(
     val activeProfileNotes: List<String> = emptyList(),
     @Transient val providerReplayState: String? = null
 ) {
-    /** User text, profile notes and opaque replay state are all sensitive debug payloads. */
+    /** User text, identifiers, profile notes and opaque replay state are sensitive debug payloads. */
     override fun toString(): String =
-        "ModelChatMessage(id=$id, sender=$sender, provider=${provider?.id}, " +
+        "ModelChatMessage(id=<redacted>, sender=$sender, provider=${provider?.id ?: "none"}, " +
             "text=<redacted>, activeProfileNotes=<redacted>, providerReplayState=<redacted>, " +
             "isError=$isError, isSimulated=$isSimulated, isPartial=$isPartial)"
 }
