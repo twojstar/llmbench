@@ -87,25 +87,31 @@ private class BoundedUtf8StringBuilder(maxUtf8Bytes: Int) {
     override fun toString(): String = builder.toString()
 }
 
+internal data class Utf8CodeUnitSpan(
+    val codeUnitCount: Int,
+    val byteCount: Int
+)
+
+internal fun String.utf8CodeUnitSpanAt(index: Int): Utf8CodeUnitSpan? {
+    val codeUnit = getOrNull(index)?.code ?: return null
+    val nextCodeUnit = getOrNull(index + 1)?.code
+    return when {
+        codeUnit <= 0x7F -> Utf8CodeUnitSpan(codeUnitCount = 1, byteCount = 1)
+        codeUnit <= 0x7FF -> Utf8CodeUnitSpan(codeUnitCount = 1, byteCount = 2)
+        codeUnit in 0xD800..0xDBFF && nextCodeUnit?.let { it in 0xDC00..0xDFFF } == true ->
+            Utf8CodeUnitSpan(codeUnitCount = 2, byteCount = 4)
+        else -> Utf8CodeUnitSpan(codeUnitCount = 1, byteCount = 3)
+    }
+}
+
 internal fun utf8ByteCountAtMost(value: String, limit: Int): Int? {
     var bytes = 0
     var index = 0
     while (index < value.length) {
-        val codeUnit = value[index].code
-        val byteCount = when {
-            codeUnit <= 0x7F -> 1
-            codeUnit <= 0x7FF -> 2
-            codeUnit in 0xD800..0xDBFF &&
-                index + 1 < value.length &&
-                value[index + 1].code in 0xDC00..0xDFFF -> {
-                index++
-                4
-            }
-            else -> 3
-        }
-        if (bytes > limit - byteCount) return null
-        bytes += byteCount
-        index++
+        val span = value.utf8CodeUnitSpanAt(index) ?: return null
+        if (bytes > limit - span.byteCount) return null
+        bytes += span.byteCount
+        index += span.codeUnitCount
     }
     return bytes
 }
