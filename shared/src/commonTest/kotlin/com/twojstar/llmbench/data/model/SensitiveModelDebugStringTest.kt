@@ -35,7 +35,7 @@ class SensitiveModelDebugStringTest {
     @Test
     fun chatMessageDebugStringRedactsUserAndOpaqueProviderState() {
         val message = ModelChatMessage(
-            id = "message-123",
+            id = "private-message-id",
             sender = CHAT_ROLE_ASSISTANT,
             provider = AiProvider.CHATGPT,
             modelName = "private-model-route",
@@ -46,12 +46,27 @@ class SensitiveModelDebugStringTest {
 
         val debug = message.toString()
 
+        assertFalse(message.id in debug)
         assertFalse(message.text in debug)
         assertFalse(message.activeProfileNotes.single() in debug)
         assertFalse(requireNotNull(message.providerReplayState) in debug)
         assertFalse(requireNotNull(message.modelName) in debug)
-        assertTrue("id=message-123" in debug)
+        assertTrue("id=<redacted>" in debug)
+        assertTrue("provider=chatgpt" in debug)
         assertTrue("text=<redacted>" in debug)
         assertTrue("providerReplayState=<redacted>" in debug)
+    }
+
+    @Test
+    fun chatMessageDebugStringUsesExplicitNonSensitiveMissingProviderMarker() {
+        val debug = ModelChatMessage(
+            id = "private-id",
+            sender = CHAT_ROLE_USER,
+            text = "private text"
+        ).toString()
+
+        assertFalse("private-id" in debug)
+        assertFalse("private text" in debug)
+        assertTrue("provider=none" in debug)
     }
 }
