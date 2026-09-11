@@ -10,6 +10,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -33,6 +34,7 @@ internal fun DocbenchJsonFormatterPanel(
 ) {
     val scope = rememberCoroutineScope()
     var source by remember { mutableStateOf("") }
+    var sourceGeneration by remember { mutableIntStateOf(0) }
     var message by remember { mutableStateOf<String?>(null) }
     var inputError by remember { mutableStateOf<String?>(null) }
     var formatting by remember { mutableStateOf(false) }
@@ -49,6 +51,7 @@ internal fun DocbenchJsonFormatterPanel(
         OutlinedTextField(
             value = source,
             onValueChange = { updated ->
+                sourceGeneration += 1
                 if (updated.length > MAX_INTERACTIVE_TOKENIZED_CHARS) {
                     inputError =
                         "Interactive formatting is limited to $MAX_INTERACTIVE_TOKENIZED_CHARS characters."
@@ -72,6 +75,7 @@ internal fun DocbenchJsonFormatterPanel(
         Button(
             onClick = {
                 val sourceToFormat = source
+                val generation = sourceGeneration
                 scope.launch {
                     formatting = true
                     try {
@@ -85,7 +89,7 @@ internal fun DocbenchJsonFormatterPanel(
                                 )
                             )
                         }
-                        if (!isEnabled() || source != sourceToFormat) return@launch
+                        if (!isEnabled() || generation != sourceGeneration) return@launch
                         when (action) {
                             is DocbenchJsonFormatActionResult.Completed -> {
                                 if (action.text.length > MAX_INTERACTIVE_TOKENIZED_CHARS) {
