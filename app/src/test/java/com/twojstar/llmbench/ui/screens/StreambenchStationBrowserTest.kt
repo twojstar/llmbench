@@ -10,7 +10,7 @@ class StreambenchStationBrowserTest {
         val rows = rows()
 
         assertEquals(
-            listOf("News PL"),
+            listOf(TITLE_NEWS),
             filterStreambenchStationRows(
                 rows = rows,
                 query = "polish",
@@ -26,7 +26,7 @@ class StreambenchStationBrowserTest {
         val rows = rows()
 
         assertEquals(
-            listOf("Jazz", "Rock"),
+            listOf(TITLE_JAZZ, TITLE_ROCK),
             filterStreambenchStationRows(
                 rows = rows,
                 query = "",
@@ -42,7 +42,7 @@ class StreambenchStationBrowserTest {
         val rows = rows()
 
         assertEquals(
-            listOf("Rock", "News PL"),
+            listOf(TITLE_ROCK, TITLE_NEWS),
             filterStreambenchStationRows(
                 rows = rows,
                 query = "",
@@ -54,9 +54,9 @@ class StreambenchStationBrowserTest {
     }
 
     private fun rows(): List<StreambenchStationRow> = listOf(
-        row(KEY_NEWS, 0, "News PL", "News", "PL", "Polish"),
-        row(KEY_JAZZ, 1, "Jazz", "Music", "US", "English"),
-        row(KEY_ROCK, 2, "Rock", "Music", "GB", "English")
+        row(KEY_NEWS, 0, TITLE_NEWS, "News", "PL", "Polish"),
+        row(KEY_JAZZ, 1, TITLE_JAZZ, GROUP_MUSIC, "US", LANGUAGE_ENGLISH),
+        row(KEY_ROCK, 2, TITLE_ROCK, GROUP_MUSIC, "GB", LANGUAGE_ENGLISH)
     )
 
     private fun row(
@@ -77,8 +77,8 @@ class StreambenchStationBrowserTest {
             language = language,
             quality = "",
             radio = true,
-            providerId = "local",
-            providerLabel = "Local"
+            providerId = PROVIDER_LOCAL,
+            providerLabel = PROVIDER_LOCAL
         ),
         key = key,
         sourceIndex = index
@@ -88,5 +88,11 @@ class StreambenchStationBrowserTest {
         const val KEY_NEWS = "news"
         const val KEY_JAZZ = "jazz"
         const val KEY_ROCK = "rock"
+        const val TITLE_NEWS = "News PL"
+        const val TITLE_JAZZ = "Jazz"
+        const val TITLE_ROCK = "Rock"
+        const val GROUP_MUSIC = "Music"
+        const val LANGUAGE_ENGLISH = "English"
+        const val PROVIDER_LOCAL = "local"
     }
 }
