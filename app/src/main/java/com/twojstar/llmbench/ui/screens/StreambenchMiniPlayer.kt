@@ -105,15 +105,15 @@ internal fun StreambenchMiniPlayer(
             IconButton(
                 onClick = {
                     controller?.let { activeController ->
-                        if (playback.isPlaying) activeController.pause() else activeController.play()
+                        if (playback.playWhenReady) activeController.pause() else activeController.play()
                     }
                 },
                 enabled = controller != null,
                 modifier = Modifier.testTag("streambench_mini_player_toggle")
             ) {
                 Icon(
-                    if (playback.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                    contentDescription = if (playback.isPlaying) "Pause Streambench" else "Resume Streambench"
+                    if (playback.playWhenReady) Icons.Default.Pause else Icons.Default.PlayArrow,
+                    contentDescription = if (playback.playWhenReady) "Pause Streambench" else "Resume Streambench"
                 )
             }
             IconButton(
