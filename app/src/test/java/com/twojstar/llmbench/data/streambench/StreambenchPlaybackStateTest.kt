@@ -16,7 +16,8 @@ class StreambenchPlaybackStateTest {
     fun mediaAndPlaybackIntentStayCoherent() {
         StreambenchPlaybackState.setMedia(
             title = STATION_TITLE,
-            group = STATION_GROUP
+            group = STATION_GROUP,
+            playWhenReady = false
         )
 
         val loaded = StreambenchPlaybackState.state.value
@@ -31,8 +32,19 @@ class StreambenchPlaybackStateTest {
     }
 
     @Test
+    fun replacementMediaCanPreserveExistingPlaybackIntent() {
+        StreambenchPlaybackState.setMedia(
+            title = STATION_TITLE,
+            group = STATION_GROUP,
+            playWhenReady = true
+        )
+
+        assertTrue(StreambenchPlaybackState.state.value.playWhenReady)
+    }
+
+    @Test
     fun clearResetsMiniPlayerSnapshot() {
-        StreambenchPlaybackState.setMedia(STATION_TITLE, STATION_GROUP)
+        StreambenchPlaybackState.setMedia(STATION_TITLE, STATION_GROUP, playWhenReady = false)
         StreambenchPlaybackState.setPlayWhenReady(true)
 
         StreambenchPlaybackState.clear()
