@@ -18,8 +18,8 @@ import okhttp3.OkHttpClient
 /** Private Media3 session for explicit Streambench playback started from LlmBench UI. */
 @OptIn(UnstableApi::class)
 class StreambenchPlaybackService : MediaSessionService() {
-    private lateinit var player: ExoPlayer
-    private lateinit var mediaSession: MediaSession
+    private var player: ExoPlayer? = null
+    private var mediaSession: MediaSession? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -36,10 +36,11 @@ class StreambenchPlaybackService : MediaSessionService() {
         val mediaSourceFactory = DefaultMediaSourceFactory(this)
             .setDataSourceFactory(dataSourceFactory)
 
-        player = ExoPlayer.Builder(this)
+        val createdPlayer = ExoPlayer.Builder(this)
             .setMediaSourceFactory(mediaSourceFactory)
             .setHandleAudioBecomingNoisy(true)
             .build()
+        player = createdPlayer
 
         val sessionActivity = PendingIntent.getActivity(
             this,
@@ -47,12 +48,12 @@ class StreambenchPlaybackService : MediaSessionService() {
             Intent(this, MainActivity::class.java),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
-        mediaSession = MediaSession.Builder(this, player)
+        mediaSession = MediaSession.Builder(this, createdPlayer)
             .setSessionActivity(sessionActivity)
             .build()
     }
 
-    override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession = mediaSession
+    override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = mediaSession
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val result = super.onStartCommand(intent, flags, startId)
@@ -63,6 +64,7 @@ class StreambenchPlaybackService : MediaSessionService() {
     }
 
     private fun playFromIntent(intent: Intent) {
+        val activePlayer = player ?: return
         val rawUrl = intent.getStringExtra(EXTRA_URL) ?: return
         val url = StreambenchM3uParser.validateRemotePlaybackUrl(rawUrl) ?: return
         val title = intent.getStringExtra(EXTRA_TITLE).orEmpty()
@@ -78,14 +80,16 @@ class StreambenchPlaybackService : MediaSessionService() {
             .setUri(url)
             .setMediaMetadata(metadataBuilder.build())
             .build()
-        player.setMediaItem(mediaItem)
-        player.prepare()
-        player.play()
+        activePlayer.setMediaItem(mediaItem)
+        activePlayer.prepare()
+        activePlayer.play()
     }
 
     override fun onDestroy() {
-        mediaSession.release()
-        player.release()
+        mediaSession?.release()
+        mediaSession = null
+        player?.release()
+        player = null
         super.onDestroy()
     }
 
