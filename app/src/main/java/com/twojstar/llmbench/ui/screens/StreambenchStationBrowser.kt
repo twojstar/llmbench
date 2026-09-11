@@ -51,7 +51,11 @@ internal fun filterStreambenchStationRows(
         StreambenchStationView.ALL -> rows
         StreambenchStationView.FAVORITES -> rows.filter { it.key in favoriteKeys }
         StreambenchStationView.RECENT -> {
-            val firstByKey = rows.associateBy { it.key }
+            val firstByKey = buildMap {
+                rows.forEach { row ->
+                    if (row.key !in this) put(row.key, row)
+                }
+            }
             recentKeys.mapNotNull(firstByKey::get)
         }
     }
@@ -135,7 +139,7 @@ internal fun StreambenchStationBrowser(
                 onClick = { viewName = StreambenchStationView.FAVORITES.name }
             )
             StationViewChip(
-                label = "Recent ($recentCount)",
+                label = "Recent selections ($recentCount)",
                 selected = view == StreambenchStationView.RECENT,
                 onClick = { viewName = StreambenchStationView.RECENT.name }
             )
@@ -145,7 +149,7 @@ internal fun StreambenchStationBrowser(
                 when {
                     query.isNotBlank() -> "No stations match this search."
                     view == StreambenchStationView.FAVORITES -> "No favorites in this playlist yet."
-                    view == StreambenchStationView.RECENT -> "No recent stations in this playlist yet."
+                    view == StreambenchStationView.RECENT -> "No recent selections in this playlist yet."
                     else -> "No stations available."
                 },
                 style = MaterialTheme.typography.bodySmall,
