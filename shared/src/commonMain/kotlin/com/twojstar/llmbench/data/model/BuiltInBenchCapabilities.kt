@@ -149,7 +149,8 @@ fun BuiltInBenchTool.capabilities(): BuiltInBenchToolCapabilities = when (this) 
         networkBehavior = BenchToolNetworkBehavior.LOCAL_ONLY,
         surfaces = setOf(
             BenchToolSurface.NATIVE_CHAT,
-            BenchToolSurface.ACCOUNT_WEB_CHAT
+            BenchToolSurface.ACCOUNT_WEB_CHAT,
+            BenchToolSurface.COMPANION_UI
         ),
         invocationModes = setOf(BenchToolInvocationMode.EXPLICIT_USER_ACTION)
     )
