@@ -79,53 +79,59 @@ class MainActivity : ComponentActivity() {
                 Scaffold(
                     snackbarHost = { SnackbarHost(snackbarHostState) },
                     bottomBar = {
-                        if (showPrimaryBottomNavigation(uiState.currentTab)) NavigationBar(
-                            containerColor = MaterialTheme.colorScheme.surface,
-                            tonalElevation = 8.dp,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .windowInsetsPadding(WindowInsets.navigationBars)
-                                .testTag("main_bottom_nav")
-                        ) {
-                            NavigationBarItem(
-                                selected = uiState.currentTab == NavigationTab.WEB_CHATS,
-                                onClick = { viewModel.selectTab(NavigationTab.WEB_CHATS) },
-                                icon = { Icon(Icons.Default.Language, contentDescription = "Web AI Accounts") },
-                                label = {
-                                    Text(
-                                        "Web AI",
-                                        fontSize = 11.sp,
-                                        fontWeight = if (uiState.currentTab == NavigationTab.WEB_CHATS) FontWeight.Bold else FontWeight.Normal
+                        val showNavigation = showPrimaryBottomNavigation(uiState.currentTab)
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            StreambenchMiniPlayer(applyNavigationBarInset = !showNavigation)
+                            if (showNavigation) {
+                                NavigationBar(
+                                    containerColor = MaterialTheme.colorScheme.surface,
+                                    tonalElevation = 8.dp,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .windowInsetsPadding(WindowInsets.navigationBars)
+                                        .testTag("main_bottom_nav")
+                                ) {
+                                    NavigationBarItem(
+                                        selected = uiState.currentTab == NavigationTab.WEB_CHATS,
+                                        onClick = { viewModel.selectTab(NavigationTab.WEB_CHATS) },
+                                        icon = { Icon(Icons.Default.Language, contentDescription = "Web AI Accounts") },
+                                        label = {
+                                            Text(
+                                                "Web AI",
+                                                fontSize = 11.sp,
+                                                fontWeight = if (uiState.currentTab == NavigationTab.WEB_CHATS) FontWeight.Bold else FontWeight.Normal
+                                            )
+                                        },
+                                        modifier = Modifier.testTag("nav_tab_web_chats")
                                     )
-                                },
-                                modifier = Modifier.testTag("nav_tab_web_chats")
-                            )
-                            NavigationBarItem(
-                                selected = uiState.currentTab == NavigationTab.COMPARE_HUB,
-                                onClick = { viewModel.selectTab(NavigationTab.COMPARE_HUB) },
-                                icon = { Icon(Icons.Default.Forum, contentDescription = "AI Compare Hub") },
-                                label = {
-                                    Text(
-                                        "Compare",
-                                        fontSize = 11.sp,
-                                        fontWeight = if (uiState.currentTab == NavigationTab.COMPARE_HUB) FontWeight.Bold else FontWeight.Normal
+                                    NavigationBarItem(
+                                        selected = uiState.currentTab == NavigationTab.COMPARE_HUB,
+                                        onClick = { viewModel.selectTab(NavigationTab.COMPARE_HUB) },
+                                        icon = { Icon(Icons.Default.Forum, contentDescription = "AI Compare Hub") },
+                                        label = {
+                                            Text(
+                                                "Compare",
+                                                fontSize = 11.sp,
+                                                fontWeight = if (uiState.currentTab == NavigationTab.COMPARE_HUB) FontWeight.Bold else FontWeight.Normal
+                                            )
+                                        },
+                                        modifier = Modifier.testTag("nav_tab_compare_hub")
                                     )
-                                },
-                                modifier = Modifier.testTag("nav_tab_compare_hub")
-                            )
-                            NavigationBarItem(
-                                selected = uiState.currentTab.belongsToStudioSection(),
-                                onClick = { viewModel.selectTab(NavigationTab.STUDIO) },
-                                icon = { Icon(Icons.Default.Tune, contentDescription = "Studio") },
-                                label = {
-                                    Text(
-                                        "Studio",
-                                        fontSize = 11.sp,
-                                        fontWeight = if (uiState.currentTab.belongsToStudioSection()) FontWeight.Bold else FontWeight.Normal
+                                    NavigationBarItem(
+                                        selected = uiState.currentTab.belongsToStudioSection(),
+                                        onClick = { viewModel.selectTab(NavigationTab.STUDIO) },
+                                        icon = { Icon(Icons.Default.Tune, contentDescription = "Studio") },
+                                        label = {
+                                            Text(
+                                                "Studio",
+                                                fontSize = 11.sp,
+                                                fontWeight = if (uiState.currentTab.belongsToStudioSection()) FontWeight.Bold else FontWeight.Normal
+                                            )
+                                        },
+                                        modifier = Modifier.testTag("nav_tab_studio")
                                     )
-                                },
-                                modifier = Modifier.testTag("nav_tab_studio")
-                            )
+                                }
+                            }
                         }
                     },
                     modifier = Modifier.fillMaxSize()

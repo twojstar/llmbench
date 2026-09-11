@@ -7,6 +7,7 @@ import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
+import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
@@ -42,6 +43,13 @@ class StreambenchPlaybackService : MediaSessionService() {
             .setAudioAttributes(AudioAttributes.DEFAULT, true)
             .setHandleAudioBecomingNoisy(true)
             .build()
+        createdPlayer.addListener(
+            object : Player.Listener {
+                override fun onIsPlayingChanged(isPlaying: Boolean) {
+                    StreambenchPlaybackState.setPlaying(isPlaying)
+                }
+            }
+        )
         player = createdPlayer
 
         val sessionActivity = PendingIntent.getActivity(
@@ -69,11 +77,10 @@ class StreambenchPlaybackService : MediaSessionService() {
         val activePlayer = player ?: return
         val rawUrl = intent.getStringExtra(EXTRA_URL) ?: return
         val url = StreambenchM3uParser.validateRemotePlaybackUrl(rawUrl) ?: return
-        val title = intent.getStringExtra(EXTRA_TITLE).orEmpty()
+        val title = intent.getStringExtra(EXTRA_TITLE).orEmpty().ifBlank { DEFAULT_TITLE }
         val group = intent.getStringExtra(EXTRA_GROUP).orEmpty()
 
-        val metadataBuilder = MediaMetadata.Builder()
-            .setTitle(title.ifBlank { DEFAULT_TITLE })
+        val metadataBuilder = MediaMetadata.Builder().setTitle(title)
         if (group.isNotBlank()) {
             metadataBuilder.setArtist(group)
         }
@@ -82,12 +89,14 @@ class StreambenchPlaybackService : MediaSessionService() {
             .setUri(url)
             .setMediaMetadata(metadataBuilder.build())
             .build()
+        StreambenchPlaybackState.setMedia(title = title, group = group)
         activePlayer.setMediaItem(mediaItem)
         activePlayer.prepare()
         activePlayer.play()
     }
 
     override fun onDestroy() {
+        StreambenchPlaybackState.clear()
         mediaSession?.release()
         mediaSession = null
         player?.release()
