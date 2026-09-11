@@ -6,13 +6,19 @@ import com.twojstar.llmbench.data.streambench.StreambenchPlaylistEntry
 import java.security.MessageDigest
 
 private const val SHA256_HEX_LENGTH = 64
+private const val HEX_DIGITS = "0123456789abcdef"
 internal const val STREAMBENCH_MAX_RECENTS = 30
 
 internal fun streambenchStationKey(entry: StreambenchPlaylistEntry): String {
     val source = "${entry.providerId}\u0000${entry.url}"
-    return MessageDigest.getInstance("SHA-256")
-        .digest(source.toByteArray(Charsets.UTF_8))
-        .joinToString("") { byte -> "%02x".format(byte.toInt() and 0xFF) }
+    val digest = MessageDigest.getInstance("SHA-256").digest(source.toByteArray(Charsets.UTF_8))
+    return CharArray(digest.size * 2).also { output ->
+        digest.forEachIndexed { index, byte ->
+            val value = byte.toInt() and 0xFF
+            output[index * 2] = HEX_DIGITS[value ushr 4]
+            output[index * 2 + 1] = HEX_DIGITS[value and 0x0F]
+        }
+    }.concatToString()
 }
 
 internal fun resolveStreambenchFavoriteKeys(values: Set<String>): Set<String> =
