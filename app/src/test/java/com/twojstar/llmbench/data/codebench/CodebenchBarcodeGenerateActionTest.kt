@@ -24,7 +24,7 @@ class CodebenchBarcodeGenerateActionTest {
     }
 
     @Test
-    fun companionSurfaceRemainsUnavailableForCodebenchGeneration() {
+    fun companionSurfaceAllowsCodebenchGeneration() {
         val result = CodebenchBarcodeGenerateAction.execute(
             text = CONTENT,
             format = CodebenchBarcodeFormat.QR_CODE,
@@ -34,8 +34,8 @@ class CodebenchBarcodeGenerateActionTest {
             isEnabled = true
         )
 
-        val blocked = result as CodebenchBarcodeGenerateActionResult.Blocked
-        assertTrue(BenchToolAvailabilityBlocker.UNSUPPORTED_SURFACE in blocked.availability.blockers)
+        val completed = result as CodebenchBarcodeGenerateActionResult.Completed
+        assertEquals(CodebenchBarcodeFormat.QR_CODE, completed.format)
     }
 
     @Test

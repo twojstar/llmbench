@@ -29,18 +29,19 @@ class CodebenchImportedBarcodeDecodeActionTest {
     }
 
     @Test
-    fun companionSurfaceRemainsBlockedEvenWithContentGrant() {
+    fun companionSurfaceAllowsImportedDecodeWithContentGrant() {
         val result = CodebenchImportedBarcodeDecodeAction.execute(
-            width = 1,
-            height = 1,
-            pixels = intArrayOf(WHITE),
+            width = qrMatrix().width,
+            height = qrMatrix().height,
+            pixels = qrMatrix().toArgbPixels(),
+            possibleFormats = setOf(CodebenchBarcodeFormat.QR_CODE),
             surface = BenchToolSurface.COMPANION_UI,
             isEnabled = true,
             grantedPermissions = CONTENT_GRANT
         )
 
-        val blocked = result as CodebenchImportedBarcodeDecodeActionResult.Blocked
-        assertTrue(BenchToolAvailabilityBlocker.UNSUPPORTED_SURFACE in blocked.availability.blockers)
+        val completed = result as CodebenchImportedBarcodeDecodeActionResult.Completed
+        assertEquals(CodebenchBarcodeFormat.QR_CODE, completed.barcode.format)
     }
 
     @Test
