@@ -9,7 +9,7 @@ internal data class StreambenchPlaybackSnapshot(
     val active: Boolean = false,
     val title: String = "",
     val group: String = "",
-    val isPlaying: Boolean = false
+    val playWhenReady: Boolean = false
 )
 
 /** Lightweight in-process mirror of the active Media3 session for Compose chrome. */
@@ -22,13 +22,13 @@ internal object StreambenchPlaybackState {
             active = true,
             title = title,
             group = group,
-            isPlaying = false
+            playWhenReady = false
         )
     }
 
-    fun setPlaying(isPlaying: Boolean) {
+    fun setPlayWhenReady(playWhenReady: Boolean) {
         mutableState.update { current ->
-            if (current.active) current.copy(isPlaying = isPlaying) else current
+            if (current.active) current.copy(playWhenReady = playWhenReady) else current
         }
     }
 
