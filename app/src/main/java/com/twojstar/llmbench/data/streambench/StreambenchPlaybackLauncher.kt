@@ -24,9 +24,9 @@ internal fun launchStreambenchPlayback(
     return when (result) {
         is StreambenchPlaybackRequestActionResult.EligibleForGuardedLoader -> runCatching {
             StreambenchPlaybackService.play(context, result.request)
-            "Playback started. Media controls stay available outside this screen."
+            "Playback requested. Android media controls will appear if the stream opens successfully."
         }.getOrElse {
-            "Could not start Streambench playback."
+            "Could not request Streambench playback."
         }
         is StreambenchPlaybackRequestActionResult.Blocked -> {
             if (BenchToolAvailabilityBlocker.NETWORK_UNAVAILABLE in result.availability.blockers) {
