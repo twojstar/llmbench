@@ -7,6 +7,8 @@ import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
+import androidx.media3.common.PlaybackException
+import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
@@ -42,6 +44,23 @@ class StreambenchPlaybackService : MediaSessionService() {
             .setAudioAttributes(AudioAttributes.DEFAULT, true)
             .setHandleAudioBecomingNoisy(true)
             .build()
+        createdPlayer.addListener(
+            object : Player.Listener {
+                override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+                    StreambenchPlaybackState.setPlayWhenReady(playWhenReady)
+                }
+
+                override fun onPlaybackStateChanged(playbackState: Int) {
+                    if (playbackState == Player.STATE_ENDED) {
+                        finishPlayback()
+                    }
+                }
+
+                override fun onPlayerError(error: PlaybackException) {
+                    finishPlayback()
+                }
+            }
+        )
         player = createdPlayer
 
         val sessionActivity = PendingIntent.getActivity(
@@ -59,8 +78,9 @@ class StreambenchPlaybackService : MediaSessionService() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val result = super.onStartCommand(intent, flags, startId)
-        if (intent?.action == ACTION_PLAY) {
-            playFromIntent(intent)
+        when (intent?.action) {
+            ACTION_PLAY -> playFromIntent(intent)
+            ACTION_STOP -> finishPlayback()
         }
         return result
     }
@@ -69,11 +89,10 @@ class StreambenchPlaybackService : MediaSessionService() {
         val activePlayer = player ?: return
         val rawUrl = intent.getStringExtra(EXTRA_URL) ?: return
         val url = StreambenchM3uParser.validateRemotePlaybackUrl(rawUrl) ?: return
-        val title = intent.getStringExtra(EXTRA_TITLE).orEmpty()
+        val title = intent.getStringExtra(EXTRA_TITLE).orEmpty().ifBlank { DEFAULT_TITLE }
         val group = intent.getStringExtra(EXTRA_GROUP).orEmpty()
 
-        val metadataBuilder = MediaMetadata.Builder()
-            .setTitle(title.ifBlank { DEFAULT_TITLE })
+        val metadataBuilder = MediaMetadata.Builder().setTitle(title)
         if (group.isNotBlank()) {
             metadataBuilder.setArtist(group)
         }
@@ -82,12 +101,24 @@ class StreambenchPlaybackService : MediaSessionService() {
             .setUri(url)
             .setMediaMetadata(metadataBuilder.build())
             .build()
+        StreambenchPlaybackState.setMedia(
+            title = title,
+            group = group,
+            playWhenReady = activePlayer.playWhenReady
+        )
         activePlayer.setMediaItem(mediaItem)
         activePlayer.prepare()
         activePlayer.play()
     }
 
+    private fun finishPlayback() {
+        StreambenchPlaybackState.clear()
+        player?.stop()
+        stopSelf()
+    }
+
     override fun onDestroy() {
+        StreambenchPlaybackState.clear()
         mediaSession?.release()
         mediaSession = null
         player?.release()
@@ -97,6 +128,7 @@ class StreambenchPlaybackService : MediaSessionService() {
 
     companion object {
         private const val ACTION_PLAY = "com.twojstar.llmbench.streambench.PLAY"
+        private const val ACTION_STOP = "com.twojstar.llmbench.streambench.STOP"
         private const val EXTRA_URL = "stream_url"
         private const val EXTRA_TITLE = "stream_title"
         private const val EXTRA_GROUP = "stream_group"
@@ -113,7 +145,12 @@ class StreambenchPlaybackService : MediaSessionService() {
         }
 
         fun stop(context: Context) {
-            context.stopService(Intent(context, StreambenchPlaybackService::class.java))
+            val serviceIntent = Intent(context, StreambenchPlaybackService::class.java)
+            if (StreambenchPlaybackState.state.value.active) {
+                context.startService(serviceIntent.setAction(ACTION_STOP))
+            } else {
+                context.stopService(serviceIntent)
+            }
         }
     }
 }
