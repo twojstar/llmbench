@@ -13,30 +13,35 @@ class StreambenchPlaybackStateTest {
     }
 
     @Test
-    fun mediaAndPlayingStateStayCoherent() {
+    fun mediaAndPlaybackIntentStayCoherent() {
         StreambenchPlaybackState.setMedia(
-            title = "Station One",
-            group = "Radio"
+            title = STATION_TITLE,
+            group = STATION_GROUP
         )
 
         val loaded = StreambenchPlaybackState.state.value
         assertTrue(loaded.active)
-        assertEquals("Station One", loaded.title)
-        assertEquals("Radio", loaded.group)
-        assertFalse(loaded.isPlaying)
+        assertEquals(STATION_TITLE, loaded.title)
+        assertEquals(STATION_GROUP, loaded.group)
+        assertFalse(loaded.playWhenReady)
 
-        StreambenchPlaybackState.setPlaying(true)
+        StreambenchPlaybackState.setPlayWhenReady(true)
 
-        assertTrue(StreambenchPlaybackState.state.value.isPlaying)
+        assertTrue(StreambenchPlaybackState.state.value.playWhenReady)
     }
 
     @Test
     fun clearResetsMiniPlayerSnapshot() {
-        StreambenchPlaybackState.setMedia("Station One", "Radio")
-        StreambenchPlaybackState.setPlaying(true)
+        StreambenchPlaybackState.setMedia(STATION_TITLE, STATION_GROUP)
+        StreambenchPlaybackState.setPlayWhenReady(true)
 
         StreambenchPlaybackState.clear()
 
         assertEquals(StreambenchPlaybackSnapshot(), StreambenchPlaybackState.state.value)
+    }
+
+    private companion object {
+        const val STATION_TITLE = "Station One"
+        const val STATION_GROUP = "Radio"
     }
 }
