@@ -7,6 +7,7 @@ import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
+import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.okhttp.OkHttpDataSource
@@ -45,8 +46,18 @@ class StreambenchPlaybackService : MediaSessionService() {
             .build()
         createdPlayer.addListener(
             object : Player.Listener {
-                override fun onIsPlayingChanged(isPlaying: Boolean) {
-                    StreambenchPlaybackState.setPlaying(isPlaying)
+                override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+                    StreambenchPlaybackState.setPlayWhenReady(playWhenReady)
+                }
+
+                override fun onPlaybackStateChanged(playbackState: Int) {
+                    if (playbackState == Player.STATE_ENDED) {
+                        finishPlayback()
+                    }
+                }
+
+                override fun onPlayerError(error: PlaybackException) {
+                    finishPlayback()
                 }
             }
         )
@@ -67,8 +78,9 @@ class StreambenchPlaybackService : MediaSessionService() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val result = super.onStartCommand(intent, flags, startId)
-        if (intent?.action == ACTION_PLAY) {
-            playFromIntent(intent)
+        when (intent?.action) {
+            ACTION_PLAY -> playFromIntent(intent)
+            ACTION_STOP -> finishPlayback()
         }
         return result
     }
@@ -95,6 +107,12 @@ class StreambenchPlaybackService : MediaSessionService() {
         activePlayer.play()
     }
 
+    private fun finishPlayback() {
+        StreambenchPlaybackState.clear()
+        player?.stop()
+        stopSelf()
+    }
+
     override fun onDestroy() {
         StreambenchPlaybackState.clear()
         mediaSession?.release()
@@ -106,6 +124,7 @@ class StreambenchPlaybackService : MediaSessionService() {
 
     companion object {
         private const val ACTION_PLAY = "com.twojstar.llmbench.streambench.PLAY"
+        private const val ACTION_STOP = "com.twojstar.llmbench.streambench.STOP"
         private const val EXTRA_URL = "stream_url"
         private const val EXTRA_TITLE = "stream_title"
         private const val EXTRA_GROUP = "stream_group"
@@ -122,7 +141,12 @@ class StreambenchPlaybackService : MediaSessionService() {
         }
 
         fun stop(context: Context) {
-            context.stopService(Intent(context, StreambenchPlaybackService::class.java))
+            val serviceIntent = Intent(context, StreambenchPlaybackService::class.java)
+            if (StreambenchPlaybackState.state.value.active) {
+                context.startService(serviceIntent.setAction(ACTION_STOP))
+            } else {
+                context.stopService(serviceIntent)
+            }
         }
     }
 }
