@@ -30,7 +30,7 @@ class DocbenchTextInspectorActionTest {
     }
 
     @Test
-    fun disabledAndUnsupportedSurfaceRemainIndependentBlockers() {
+    fun disabledCompanionSurfaceRemainsPolicyBlocked() {
         val availability = DocbenchTextInspectorAction.availability(
             surface = BenchToolSurface.COMPANION_UI,
             isEnabled = false,
@@ -39,12 +39,21 @@ class DocbenchTextInspectorActionTest {
 
         assertFalse(availability.canOffer)
         assertEquals(
-            setOf(
-                BenchToolAvailabilityBlocker.DISABLED,
-                BenchToolAvailabilityBlocker.UNSUPPORTED_SURFACE
-            ),
+            setOf(BenchToolAvailabilityBlocker.DISABLED),
             availability.blockers
         )
+    }
+
+    @Test
+    fun companionSurfaceIsAvailableWithTheDeclaredReadGrant() {
+        val availability = DocbenchTextInspectorAction.availability(
+            surface = BenchToolSurface.COMPANION_UI,
+            isEnabled = true,
+            grantedPermissions = setOf(BenchToolPermission.READ_USER_SELECTED_CONTENT)
+        )
+
+        assertTrue(availability.canOffer)
+        assertEquals(emptySet(), availability.blockers)
     }
 
     @Test
