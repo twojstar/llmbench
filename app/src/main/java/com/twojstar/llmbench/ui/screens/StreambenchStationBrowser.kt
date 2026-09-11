@@ -1,8 +1,10 @@
 package com.twojstar.llmbench.ui.screens
 
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Search
@@ -116,7 +118,12 @@ internal fun StreambenchStationBrowser(
                 .fillMaxWidth()
                 .testTag("streambench_station_search")
         )
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
+        ) {
             StationViewChip(
                 label = "All (${rows.size})",
                 selected = view == StreambenchStationView.ALL,
