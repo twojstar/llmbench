@@ -165,6 +165,7 @@ private suspend fun importCodebenchBarcode(
     }
 }.getOrElse { error ->
     if (error is CancellationException) throw error
+    if (error !is Exception) throw error
     CodebenchImportUiResult(
         when (error) {
             is SecurityException -> "LlmBench could not access the selected image."
