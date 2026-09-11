@@ -94,6 +94,15 @@ internal fun docbenchFindingSummary(
     )
 }
 
+internal fun docbenchValidationErrorPreview(
+    message: String,
+    limit: Int = DOCBENCH_VALIDATION_ERROR_PREVIEW_CHARS
+): String = message
+    .replace('\r', ' ')
+    .replace('\n', ' ')
+    .trim()
+    .take(limit.coerceAtLeast(0))
+
 private data class DocbenchImportUiResult(
     val displayName: String? = null,
     val report: DocumentPreflightReport? = null,
@@ -106,8 +115,11 @@ private val DOCBENCH_DOCUMENT_MIME_TYPES = arrayOf(
     "application/json",
     "application/yaml",
     "text/yaml",
+    "application/x-yaml",
+    "text/x-yaml",
     "application/xml",
-    "text/xml"
+    "text/xml",
+    "application/octet-stream"
 )
 
 private suspend fun importDocbenchDocument(
@@ -332,6 +344,7 @@ fun BenchToolsScreen(modifier: Modifier = Modifier) {
     var codebenchImporting by remember { mutableStateOf(false) }
     var docbenchImportResult by remember { mutableStateOf<DocbenchImportUiResult?>(null) }
     var docbenchImporting by remember { mutableStateOf(false) }
+    var docbenchImportGeneration by remember { mutableIntStateOf(0) }
 
     val streambenchImportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         uri?.let { selectedUri ->
@@ -381,6 +394,9 @@ fun BenchToolsScreen(modifier: Modifier = Modifier) {
         ActivityResultContracts.OpenDocument()
     ) { uri ->
         uri?.let { selectedUri ->
+            val importGeneration = docbenchImportGeneration + 1
+            docbenchImportGeneration = importGeneration
+            docbenchImportResult = null
             scope.launch {
                 docbenchImporting = true
                 val imported = importDocbenchDocument(
@@ -390,14 +406,16 @@ fun BenchToolsScreen(modifier: Modifier = Modifier) {
                         BuiltInBenchTool.DOCBENCH_DOCUMENT in store.loadEnabledTools()
                     }
                 )
-                docbenchImportResult = if (
-                    BuiltInBenchTool.DOCBENCH_DOCUMENT in store.loadEnabledTools()
-                ) {
-                    imported
-                } else {
-                    null
+                if (importGeneration == docbenchImportGeneration) {
+                    docbenchImportResult = if (
+                        BuiltInBenchTool.DOCBENCH_DOCUMENT in store.loadEnabledTools()
+                    ) {
+                        imported
+                    } else {
+                        null
+                    }
+                    docbenchImporting = false
                 }
-                docbenchImporting = false
             }
         }
     }
@@ -498,7 +516,9 @@ fun BenchToolsScreen(modifier: Modifier = Modifier) {
                                         codebenchImportMessage = null
                                     }
                                     if (tool == BuiltInBenchTool.DOCBENCH_DOCUMENT && !shouldEnable) {
+                                        docbenchImportGeneration += 1
                                         docbenchImportResult = null
+                                        docbenchImporting = false
                                     }
                                 },
                                 modifier = Modifier.testTag("bench_toggle_${tool.id}")
@@ -752,6 +772,15 @@ private fun DocbenchDocumentReport(
                 "${validation.format.name}: ${if (validation.isValid) "valid" else "invalid"}",
                 style = MaterialTheme.typography.bodySmall
             )
+            if (!validation.isValid) {
+                validation.errorMessage?.let { error ->
+                    Text(
+                        docbenchValidationErrorPreview(error),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
         }
         report.diagnostics.forEach { diagnostic ->
             Text(
@@ -835,5 +864,6 @@ private const val CODEBENCH_LINEAR_PREVIEW_HEIGHT = 192
 private const val CODEBENCH_POLICY_BLOCKED_MESSAGE =
     "Image decoding is blocked by the current Bench policy."
 private const val DOCBENCH_VISIBLE_FINDINGS = 8
+private const val DOCBENCH_VALIDATION_ERROR_PREVIEW_CHARS = 240
 private const val DOCBENCH_POLICY_BLOCKED_MESSAGE =
     "Document inspection is blocked by the current Bench policy."
