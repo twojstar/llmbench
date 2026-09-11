@@ -26,6 +26,7 @@ import com.twojstar.llmbench.data.model.BuiltInBenchTool
 import com.twojstar.llmbench.data.model.capabilities
 import com.twojstar.llmbench.data.preferences.BuiltInBenchPreferencesStore
 import com.twojstar.llmbench.data.streambench.StreambenchImportedPlaylistActionResult
+import com.twojstar.llmbench.data.streambench.StreambenchPlaybackService
 import com.twojstar.llmbench.data.streambench.StreambenchPlaylistEntry
 import com.twojstar.llmbench.data.streambench.executeStreambenchPlaylistImportAction
 import com.twojstar.llmbench.data.streambench.launchStreambenchPlayback
@@ -213,6 +214,7 @@ fun BenchToolsScreen(modifier: Modifier = Modifier) {
                                     enabledTools = updated
                                     store.saveEnabledTools(updated)
                                     if (tool == BuiltInBenchTool.STREAMBENCH_PLAYER && !shouldEnable) {
+                                        StreambenchPlaybackService.stop(context)
                                         streambenchEntries = emptyList()
                                         streambenchImportMessage = null
                                         streambenchPlaybackMessage = null
@@ -252,24 +254,27 @@ fun BenchToolsScreen(modifier: Modifier = Modifier) {
                                 streambenchPlaybackMessage?.let { message ->
                                     Text(message, style = MaterialTheme.typography.bodySmall)
                                 }
-                                streambenchEntries.take(5).forEach { entry ->
-                                    StreambenchEntryRow(
-                                        entry = entry,
-                                        onPlay = {
-                                            streambenchPlaybackMessage = launchStreambenchPlayback(
-                                                context = context,
+                                if (streambenchEntries.isNotEmpty()) {
+                                    LazyColumn(
+                                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .heightIn(max = 360.dp)
+                                            .testTag("streambench_playlist_entries")
+                                    ) {
+                                        items(streambenchEntries) { entry ->
+                                            StreambenchEntryRow(
                                                 entry = entry,
-                                                isEnabled = BuiltInBenchTool.STREAMBENCH_PLAYER in store.loadEnabledTools()
+                                                onPlay = {
+                                                    streambenchPlaybackMessage = launchStreambenchPlayback(
+                                                        context = context,
+                                                        entry = entry,
+                                                        isEnabled = BuiltInBenchTool.STREAMBENCH_PLAYER in store.loadEnabledTools()
+                                                    )
+                                                }
                                             )
                                         }
-                                    )
-                                }
-                                if (streambenchEntries.size > 5) {
-                                    Text(
-                                        "+${streambenchEntries.size - 5} more",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
+                                    }
                                 }
                             }
                         }
