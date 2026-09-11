@@ -53,6 +53,25 @@ class StreambenchStationBrowserTest {
         )
     }
 
+    @Test
+    fun recentsUseFirstPlaylistOccurrenceForDuplicateStationKeys() {
+        val rows = listOf(
+            row(KEY_ROCK, 0, TITLE_ROCK, GROUP_MUSIC, "GB", LANGUAGE_ENGLISH),
+            row(KEY_ROCK, 1, "Rock duplicate", GROUP_MUSIC, "GB", LANGUAGE_ENGLISH)
+        )
+
+        assertEquals(
+            listOf(TITLE_ROCK),
+            filterStreambenchStationRows(
+                rows = rows,
+                query = "",
+                view = StreambenchStationView.RECENT,
+                favoriteKeys = emptySet(),
+                recentKeys = listOf(KEY_ROCK)
+            ).map { it.entry.title }
+        )
+    }
+
     private fun rows(): List<StreambenchStationRow> = listOf(
         row(KEY_NEWS, 0, TITLE_NEWS, "News", "PL", "Polish"),
         row(KEY_JAZZ, 1, TITLE_JAZZ, GROUP_MUSIC, "US", LANGUAGE_ENGLISH),
