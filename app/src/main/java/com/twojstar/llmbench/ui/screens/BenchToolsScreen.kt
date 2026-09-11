@@ -33,7 +33,10 @@ import com.twojstar.llmbench.data.codebench.CodebenchBarcodeCodec
 import com.twojstar.llmbench.data.codebench.CodebenchImageSampling
 import com.twojstar.llmbench.data.codebench.CodebenchImportedBarcodeDecodeAction
 import com.twojstar.llmbench.data.codebench.CodebenchImportedBarcodeDecodeActionResult
+import com.twojstar.llmbench.data.document.DocbenchDocumentPreflightActionResult
+import com.twojstar.llmbench.data.document.DocumentPreflightReport
 import com.twojstar.llmbench.data.document.TextDocumentFileAccess
+import com.twojstar.llmbench.data.document.executeDocbenchPreflightAction
 import com.twojstar.llmbench.data.model.BenchToolNetworkBehavior
 import com.twojstar.llmbench.data.model.BenchToolPermission
 import com.twojstar.llmbench.data.model.BenchToolSurface
@@ -41,6 +44,8 @@ import com.twojstar.llmbench.data.model.BuiltInBenchTool
 import com.twojstar.llmbench.data.model.capabilities
 import com.twojstar.llmbench.data.preferences.BuiltInBenchPreferencesStore
 import com.twojstar.llmbench.data.preferences.StreambenchStationPreferencesStore
+import com.twojstar.llmbench.data.security.TextInspectionResult
+import com.twojstar.llmbench.data.security.TextSafetyFinding
 import com.twojstar.llmbench.data.streambench.StreambenchImportedPlaylistActionResult
 import com.twojstar.llmbench.data.streambench.StreambenchPlaybackService
 import com.twojstar.llmbench.data.streambench.StreambenchPlaylistEntry
@@ -70,6 +75,95 @@ private data class CodebenchImportUiResult(
     val decodedText: String? = null,
     val decodedFormat: CodebenchBarcodeFormat? = null
 )
+
+internal data class DocbenchFindingSummary(
+    val visibleFindings: List<TextSafetyFinding>,
+    val omittedCount: Int,
+    val detectedCount: Int
+)
+
+internal fun docbenchFindingSummary(
+    inspection: TextInspectionResult,
+    limit: Int = DOCBENCH_VISIBLE_FINDINGS
+): DocbenchFindingSummary {
+    val visibleFindings = inspection.findings.take(limit.coerceAtLeast(0))
+    return DocbenchFindingSummary(
+        visibleFindings = visibleFindings,
+        omittedCount = (inspection.detectedCount - visibleFindings.size).coerceAtLeast(0),
+        detectedCount = inspection.detectedCount
+    )
+}
+
+internal fun docbenchValidationErrorPreview(
+    message: String,
+    limit: Int = DOCBENCH_VALIDATION_ERROR_PREVIEW_CHARS
+): String = message
+    .replace('\r', ' ')
+    .replace('\n', ' ')
+    .trim()
+    .take(limit.coerceAtLeast(0))
+
+private data class DocbenchImportUiResult(
+    val displayName: String? = null,
+    val report: DocumentPreflightReport? = null,
+    val message: String? = null
+)
+
+private val DOCBENCH_DOCUMENT_MIME_TYPES = arrayOf(
+    "text/markdown",
+    "text/plain",
+    "application/json",
+    "application/yaml",
+    "text/yaml",
+    "application/x-yaml",
+    "text/x-yaml",
+    "application/xml",
+    "text/xml",
+    "application/octet-stream"
+)
+
+private suspend fun importDocbenchDocument(
+    context: Context,
+    uri: Uri,
+    isEnabled: () -> Boolean
+): DocbenchImportUiResult = runCatching {
+    if (!isEnabled()) {
+        return@runCatching DocbenchImportUiResult(message = DOCBENCH_POLICY_BLOCKED_MESSAGE)
+    }
+    val result = withContext(Dispatchers.Default) {
+        if (!isEnabled()) return@withContext null
+        val opened = TextDocumentFileAccess.import(
+            context = context,
+            uri = uri,
+            fallbackName = "document.txt"
+        )
+        if (!isEnabled()) return@withContext null
+        when (
+            val action = opened.executeDocbenchPreflightAction(
+                surface = BenchToolSurface.COMPANION_UI,
+                isEnabled = isEnabled(),
+                grantedPermissions = setOf(BenchToolPermission.READ_USER_SELECTED_CONTENT)
+            )
+        ) {
+            is DocbenchDocumentPreflightActionResult.Completed -> DocbenchImportUiResult(
+                displayName = opened.displayName,
+                report = action.report
+            )
+            is DocbenchDocumentPreflightActionResult.Blocked -> null
+        }
+    }
+    result ?: DocbenchImportUiResult(message = DOCBENCH_POLICY_BLOCKED_MESSAGE)
+}.getOrElse { error ->
+    if (error is CancellationException) throw error
+    if (error !is Exception) throw error
+    DocbenchImportUiResult(
+        message = when (error) {
+            is SecurityException -> "LlmBench could not access the selected document."
+            is IOException -> error.message ?: "Could not read the selected document."
+            else -> "Could not inspect the selected document."
+        }
+    )
+}
 
 private suspend fun importCodebenchBarcode(
     context: Context,
@@ -248,6 +342,9 @@ fun BenchToolsScreen(modifier: Modifier = Modifier) {
     var codebenchGenerationMessage by remember { mutableStateOf<String?>(null) }
     var codebenchImportMessage by remember { mutableStateOf<CodebenchImportUiResult?>(null) }
     var codebenchImporting by remember { mutableStateOf(false) }
+    var docbenchImportResult by remember { mutableStateOf<DocbenchImportUiResult?>(null) }
+    var docbenchImporting by remember { mutableStateOf(false) }
+    var docbenchImportGeneration by remember { mutableIntStateOf(0) }
 
     val streambenchImportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         uri?.let { selectedUri ->
@@ -289,6 +386,36 @@ fun BenchToolsScreen(modifier: Modifier = Modifier) {
                     BuiltInBenchTool.CODEBENCH_QR_BARCODE in store.loadEnabledTools()
                 ) imported else null
                 codebenchImporting = false
+            }
+        }
+    }
+
+    val docbenchImportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        uri?.let { selectedUri ->
+            val importGeneration = docbenchImportGeneration + 1
+            docbenchImportGeneration = importGeneration
+            docbenchImportResult = null
+            scope.launch {
+                docbenchImporting = true
+                val imported = importDocbenchDocument(
+                    context = context,
+                    uri = selectedUri,
+                    isEnabled = {
+                        BuiltInBenchTool.DOCBENCH_DOCUMENT in store.loadEnabledTools()
+                    }
+                )
+                if (importGeneration == docbenchImportGeneration) {
+                    docbenchImportResult = if (
+                        BuiltInBenchTool.DOCBENCH_DOCUMENT in store.loadEnabledTools()
+                    ) {
+                        imported
+                    } else {
+                        null
+                    }
+                    docbenchImporting = false
+                }
             }
         }
     }
@@ -387,6 +514,11 @@ fun BenchToolsScreen(modifier: Modifier = Modifier) {
                                         codebenchMatrix = null
                                         codebenchGenerationMessage = null
                                         codebenchImportMessage = null
+                                    }
+                                    if (tool == BuiltInBenchTool.DOCBENCH_DOCUMENT && !shouldEnable) {
+                                        docbenchImportGeneration += 1
+                                        docbenchImportResult = null
+                                        docbenchImporting = false
                                     }
                                 },
                                 modifier = Modifier.testTag("bench_toggle_${tool.id}")
@@ -561,6 +693,47 @@ fun BenchToolsScreen(modifier: Modifier = Modifier) {
                                             )
                                         }
                                     }
+
+                                }
+                            }
+                        }
+
+                        if (tool == BuiltInBenchTool.DOCBENCH_DOCUMENT && enabled) {
+                            HorizontalDivider()
+                            Column(
+                                verticalArrangement = Arrangement.spacedBy(8.dp),
+                                modifier = Modifier.padding(16.dp)
+                            ) {
+                                Text(
+                                    "Inspect a bounded local UTF-8 text document without changing it or uploading its contents.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Button(
+                                    onClick = {
+                                        try {
+                                            docbenchImportLauncher.launch(DOCBENCH_DOCUMENT_MIME_TYPES)
+                                        } catch (_: ActivityNotFoundException) {
+                                            docbenchImportResult = DocbenchImportUiResult(
+                                                message = "No document picker is available."
+                                            )
+                                        }
+                                    },
+                                    enabled = !docbenchImporting,
+                                    modifier = Modifier.testTag("docbench_import_document")
+                                ) {
+                                    Text(if (docbenchImporting) "Inspecting…" else "Inspect document")
+                                }
+                                docbenchImportResult?.let { result ->
+                                    result.message?.let { message ->
+                                        Text(message, style = MaterialTheme.typography.bodySmall)
+                                    }
+                                    if (result.displayName != null && result.report != null) {
+                                        DocbenchDocumentReport(
+                                            displayName = result.displayName,
+                                            report = result.report
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -568,6 +741,75 @@ fun BenchToolsScreen(modifier: Modifier = Modifier) {
                 }
             }
         }
+}
+
+@Composable
+private fun DocbenchDocumentReport(
+    displayName: String,
+    report: DocumentPreflightReport
+) {
+    val findingSummary = remember(report.textInspection) {
+        docbenchFindingSummary(report.textInspection)
+    }
+    Column(
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+        modifier = Modifier.testTag("docbench_report")
+    ) {
+        Text(displayName, fontWeight = FontWeight.SemiBold)
+        Text(
+            "BOM: ${if (report.hadUtf8Bom) "UTF-8 present" else "none"} • " +
+                "line endings: ${report.lineEndings.style.name}",
+            style = MaterialTheme.typography.bodySmall
+        )
+        report.tokenSummary?.let { tokens ->
+            Text(
+                "Tokens: ${tokens.count} (${tokens.encodingLabel})",
+                style = MaterialTheme.typography.bodySmall
+            )
+        }
+        report.structuredValidation?.let { validation ->
+            Text(
+                "${validation.format.name}: ${if (validation.isValid) "valid" else "invalid"}",
+                style = MaterialTheme.typography.bodySmall
+            )
+            if (!validation.isValid) {
+                validation.errorMessage?.let { error ->
+                    Text(
+                        docbenchValidationErrorPreview(error),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+        report.diagnostics.forEach { diagnostic ->
+            Text(
+                "${diagnostic.severity.name}: ${diagnostic.message} " +
+                    "(${diagnostic.line}:${diagnostic.column})",
+                style = MaterialTheme.typography.bodySmall
+            )
+        }
+        Text(
+            "Text Inspector: ${findingSummary.detectedCount} finding(s)",
+            style = MaterialTheme.typography.bodySmall,
+            fontWeight = FontWeight.Medium
+        )
+        findingSummary.visibleFindings.forEach { finding ->
+            Text(
+                "${finding.severity.name}: ${finding.label} (${finding.line}:${finding.column})",
+                style = MaterialTheme.typography.bodySmall,
+                fontWeight = FontWeight.Medium
+            )
+            Text(finding.detail, style = MaterialTheme.typography.bodySmall)
+        }
+        if (findingSummary.omittedCount > 0) {
+            Text(
+                "+${findingSummary.omittedCount} more finding(s)",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
 }
 
 @Composable
@@ -621,3 +863,7 @@ private const val CODEBENCH_PDF417_PREVIEW_HEIGHT = 256
 private const val CODEBENCH_LINEAR_PREVIEW_HEIGHT = 192
 private const val CODEBENCH_POLICY_BLOCKED_MESSAGE =
     "Image decoding is blocked by the current Bench policy."
+private const val DOCBENCH_VISIBLE_FINDINGS = 8
+private const val DOCBENCH_VALIDATION_ERROR_PREVIEW_CHARS = 240
+private const val DOCBENCH_POLICY_BLOCKED_MESSAGE =
+    "Document inspection is blocked by the current Bench policy."
