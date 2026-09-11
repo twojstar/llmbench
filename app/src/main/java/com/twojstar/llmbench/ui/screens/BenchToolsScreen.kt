@@ -75,9 +75,9 @@ private suspend fun importCodebenchBarcode(
     context: Context,
     uri: Uri,
     isEnabled: () -> Boolean
-): CodebenchImportUiResult = try {
+): CodebenchImportUiResult = runCatching {
     if (!isEnabled()) {
-        return CodebenchImportUiResult(CODEBENCH_POLICY_BLOCKED_MESSAGE)
+        return@runCatching CodebenchImportUiResult(CODEBENCH_POLICY_BLOCKED_MESSAGE)
     }
     val result = withContext(Dispatchers.IO) {
         if (!isEnabled()) return@withContext null
@@ -163,9 +163,8 @@ private suspend fun importCodebenchBarcode(
             "Could not decode this image."
         )
     }
-} catch (error: CancellationException) {
-    throw error
-} catch (error: Exception) {
+}.getOrElse { error ->
+    if (error is CancellationException) throw error
     CodebenchImportUiResult(
         when (error) {
             is SecurityException -> "LlmBench could not access the selected image."
@@ -493,12 +492,14 @@ fun BenchToolsScreen(modifier: Modifier = Modifier) {
                                     }
                                     Button(
                                         onClick = {
+                                            val (previewWidth, previewHeight) =
+                                                codebenchPreviewDimensions(codebenchFormat)
                                             when (
                                                 val result = CodebenchBarcodeGenerateAction.execute(
                                                     text = codebenchText,
                                                     format = codebenchFormat,
-                                                    width = CODEBENCH_PREVIEW_DIMENSION,
-                                                    height = CODEBENCH_PREVIEW_DIMENSION,
+                                                    width = previewWidth,
+                                                    height = previewHeight,
                                                     surface = BenchToolSurface.COMPANION_UI,
                                                     isEnabled = BuiltInBenchTool.CODEBENCH_QR_BARCODE in
                                                         store.loadEnabledTools()
@@ -597,6 +598,14 @@ private fun CodebenchBarcodePreview(matrix: CodebenchBarcodeMatrix) {
     }
 }
 
+internal fun codebenchPreviewDimensions(format: CodebenchBarcodeFormat): Pair<Int, Int> = when (format) {
+    CodebenchBarcodeFormat.QR_CODE,
+    CodebenchBarcodeFormat.DATA_MATRIX,
+    CodebenchBarcodeFormat.AZTEC -> CODEBENCH_SQUARE_PREVIEW to CODEBENCH_SQUARE_PREVIEW
+    CodebenchBarcodeFormat.PDF_417 -> CODEBENCH_WIDE_PREVIEW_WIDTH to CODEBENCH_PDF417_PREVIEW_HEIGHT
+    else -> CODEBENCH_WIDE_PREVIEW_WIDTH to CODEBENCH_LINEAR_PREVIEW_HEIGHT
+}
+
 private fun CodebenchBarcodeFormat.displayLabel(): String = name.replace('_', ' ')
 
 private fun BenchToolNetworkBehavior.displayLabel(): String = when (this) {
@@ -605,6 +614,9 @@ private fun BenchToolNetworkBehavior.displayLabel(): String = when (this) {
     BenchToolNetworkBehavior.NETWORK_REQUIRED -> "Network required"
 }
 
-private const val CODEBENCH_PREVIEW_DIMENSION = 256
+private const val CODEBENCH_SQUARE_PREVIEW = 256
+private const val CODEBENCH_WIDE_PREVIEW_WIDTH = 512
+private const val CODEBENCH_PDF417_PREVIEW_HEIGHT = 256
+private const val CODEBENCH_LINEAR_PREVIEW_HEIGHT = 192
 private const val CODEBENCH_POLICY_BLOCKED_MESSAGE =
     "Image decoding is blocked by the current Bench policy."
