@@ -26,8 +26,10 @@ import com.twojstar.llmbench.data.model.BuiltInBenchTool
 import com.twojstar.llmbench.data.model.capabilities
 import com.twojstar.llmbench.data.preferences.BuiltInBenchPreferencesStore
 import com.twojstar.llmbench.data.streambench.StreambenchImportedPlaylistActionResult
+import com.twojstar.llmbench.data.streambench.StreambenchPlaybackService
 import com.twojstar.llmbench.data.streambench.StreambenchPlaylistEntry
 import com.twojstar.llmbench.data.streambench.executeStreambenchPlaylistImportAction
+import com.twojstar.llmbench.data.streambench.launchStreambenchPlayback
 import java.io.IOException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
@@ -104,6 +106,7 @@ fun BenchToolsScreen(modifier: Modifier = Modifier) {
     var enabledTools by remember(store) { mutableStateOf(store.loadEnabledTools()) }
     var streambenchEntries by remember { mutableStateOf<List<StreambenchPlaylistEntry>>(emptyList()) }
     var streambenchImportMessage by remember { mutableStateOf<String?>(null) }
+    var streambenchPlaybackMessage by remember { mutableStateOf<String?>(null) }
     var streambenchImporting by remember { mutableStateOf(false) }
 
     val streambenchImportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -118,9 +121,11 @@ fun BenchToolsScreen(modifier: Modifier = Modifier) {
                 if (BuiltInBenchTool.STREAMBENCH_PLAYER in store.loadEnabledTools()) {
                     streambenchEntries = imported.entries
                     streambenchImportMessage = imported.message
+                    streambenchPlaybackMessage = null
                 } else {
                     streambenchEntries = emptyList()
                     streambenchImportMessage = null
+                    streambenchPlaybackMessage = null
                 }
                 streambenchImporting = false
             }
@@ -209,8 +214,10 @@ fun BenchToolsScreen(modifier: Modifier = Modifier) {
                                     enabledTools = updated
                                     store.saveEnabledTools(updated)
                                     if (tool == BuiltInBenchTool.STREAMBENCH_PLAYER && !shouldEnable) {
+                                        StreambenchPlaybackService.stop(context)
                                         streambenchEntries = emptyList()
                                         streambenchImportMessage = null
+                                        streambenchPlaybackMessage = null
                                     }
                                 },
                                 modifier = Modifier.testTag("bench_toggle_${tool.id}")
@@ -224,7 +231,7 @@ fun BenchToolsScreen(modifier: Modifier = Modifier) {
                                 modifier = Modifier.padding(16.dp)
                             ) {
                                 Text(
-                                    "Import an M3U/M3U8 playlist from Android. Parsing stays local; playback and network access are separate actions.",
+                                    "Import an M3U/M3U8 playlist locally, then explicitly start an allowed HTTPS stream. Playback continues through Android media controls.",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -244,18 +251,30 @@ fun BenchToolsScreen(modifier: Modifier = Modifier) {
                                 streambenchImportMessage?.let { message ->
                                     Text(message, style = MaterialTheme.typography.bodySmall)
                                 }
-                                streambenchEntries.take(5).forEach { entry ->
-                                    Text(
-                                        "• ${entry.title.take(160)}${entry.group.takeIf(String::isNotBlank)?.let { " · ${it.take(96)}" }.orEmpty()}",
-                                        style = MaterialTheme.typography.bodySmall
-                                    )
+                                streambenchPlaybackMessage?.let { message ->
+                                    Text(message, style = MaterialTheme.typography.bodySmall)
                                 }
-                                if (streambenchEntries.size > 5) {
-                                    Text(
-                                        "+${streambenchEntries.size - 5} more",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
+                                if (streambenchEntries.isNotEmpty()) {
+                                    LazyColumn(
+                                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .heightIn(max = 360.dp)
+                                            .testTag("streambench_playlist_entries")
+                                    ) {
+                                        items(streambenchEntries) { entry ->
+                                            StreambenchEntryRow(
+                                                entry = entry,
+                                                onPlay = {
+                                                    streambenchPlaybackMessage = launchStreambenchPlayback(
+                                                        context = context,
+                                                        entry = entry,
+                                                        isEnabled = BuiltInBenchTool.STREAMBENCH_PLAYER in store.loadEnabledTools()
+                                                    )
+                                                }
+                                            )
+                                        }
+                                    }
                                 }
                             }
                         }
