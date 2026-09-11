@@ -566,7 +566,6 @@ fun BenchToolsScreen(modifier: Modifier = Modifier) {
                 }
             }
         }
-    }
 }
 
 @Composable
