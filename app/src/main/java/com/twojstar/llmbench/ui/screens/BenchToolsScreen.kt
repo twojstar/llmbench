@@ -736,6 +736,12 @@ fun BenchToolsScreen(modifier: Modifier = Modifier) {
                                     }
                                 }
                             }
+                            HorizontalDivider()
+                            DocbenchJsonFormatterPanel(
+                                isEnabled = {
+                                    BuiltInBenchTool.DOCBENCH_DOCUMENT in store.loadEnabledTools()
+                                }
+                            )
                         }
 
                         if (tool == BuiltInBenchTool.DOCBENCH_TEXT_INSPECTOR && enabled) {
