@@ -3,8 +3,10 @@ package com.twojstar.llmbench.data.streambench
 import java.net.InetAddress
 import java.net.UnknownHostException
 import okhttp3.Dns
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -65,6 +67,14 @@ class StreambenchNetworkGuardTest {
     fun addressPolicyAllowsOrdinaryPublicAddresses() {
         assertTrue(isPublicStreambenchAddress(ipv4(93, 184, 216, 34)))
         assertTrue(isPublicStreambenchAddress(ipv6(0x26, 0x06, 0x47, 0x00)))
+    }
+
+    @Test
+    fun okhttpCanonicalizationKeepsAllowedRemoteUrlEligible() {
+        val canonical = "https://EXAMPLE.com:443/live".toHttpUrl().toString()
+
+        assertEquals("https://example.com/live", canonical)
+        assertNotNull(StreambenchM3uParser.validateRemotePlaybackUrl(canonical))
     }
 
     private class FakeDns(
