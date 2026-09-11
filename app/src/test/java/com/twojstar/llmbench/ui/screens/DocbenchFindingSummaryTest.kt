@@ -3,8 +3,8 @@ package com.twojstar.llmbench.ui.screens
 import com.twojstar.llmbench.data.security.TextFindingSeverity
 import com.twojstar.llmbench.data.security.TextInspectionResult
 import com.twojstar.llmbench.data.security.TextSafetyFinding
-import kotlin.test.Test
-import kotlin.test.assertEquals
+import org.junit.Assert.assertEquals
+import org.junit.Test
 
 class DocbenchFindingSummaryTest {
     @Test
