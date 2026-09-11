@@ -12,7 +12,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -27,17 +26,21 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+internal class DocbenchJsonFormatterUiState {
+    var source by mutableStateOf("")
+    var sourceGeneration by mutableIntStateOf(0)
+    var message by mutableStateOf<String?>(null)
+    var inputError by mutableStateOf<String?>(null)
+    var formatting by mutableStateOf(false)
+}
+
 @Composable
 internal fun DocbenchJsonFormatterPanel(
+    state: DocbenchJsonFormatterUiState,
     isEnabled: () -> Boolean,
     modifier: Modifier = Modifier
 ) {
     val scope = rememberCoroutineScope()
-    var source by remember { mutableStateOf("") }
-    var sourceGeneration by remember { mutableIntStateOf(0) }
-    var message by remember { mutableStateOf<String?>(null) }
-    var inputError by remember { mutableStateOf<String?>(null) }
-    var formatting by remember { mutableStateOf(false) }
 
     Column(
         verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -49,24 +52,24 @@ internal fun DocbenchJsonFormatterPanel(
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
         OutlinedTextField(
-            value = source,
+            value = state.source,
             onValueChange = { updated ->
-                sourceGeneration += 1
+                state.sourceGeneration += 1
                 if (updated.length > MAX_INTERACTIVE_TOKENIZED_CHARS) {
-                    inputError =
+                    state.inputError =
                         "Interactive formatting is limited to $MAX_INTERACTIVE_TOKENIZED_CHARS characters."
-                    message = null
+                    state.message = null
                 } else {
-                    source = updated
-                    inputError = null
-                    message = null
+                    state.source = updated
+                    state.inputError = null
+                    state.message = null
                 }
             },
             label = { Text("JSON to format") },
             minLines = 5,
-            isError = inputError != null,
+            isError = state.inputError != null,
             supportingText = {
-                inputError?.let { error -> Text(error) }
+                state.inputError?.let { error -> Text(error) }
             },
             modifier = Modifier
                 .fillMaxWidth()
@@ -74,10 +77,10 @@ internal fun DocbenchJsonFormatterPanel(
         )
         Button(
             onClick = {
-                val sourceToFormat = source
-                val generation = sourceGeneration
+                val sourceToFormat = state.source
+                val generation = state.sourceGeneration
                 scope.launch {
-                    formatting = true
+                    state.formatting = true
                     try {
                         val action = withContext(Dispatchers.Default) {
                             DocbenchJsonFormatAction.execute(
@@ -89,34 +92,35 @@ internal fun DocbenchJsonFormatterPanel(
                                 )
                             )
                         }
-                        if (!isEnabled() || generation != sourceGeneration) return@launch
+                        if (!isEnabled() || generation != state.sourceGeneration) return@launch
                         when (action) {
                             is DocbenchJsonFormatActionResult.Completed -> {
                                 if (action.text.length > MAX_INTERACTIVE_TOKENIZED_CHARS) {
-                                    message = "Formatted JSON exceeds the interactive display limit."
+                                    state.message = "Formatted JSON exceeds the interactive display limit."
                                 } else {
-                                    source = action.text
-                                    message = if (action.changed) "Formatted locally." else "Already formatted."
+                                    state.source = action.text
+                                    state.message =
+                                        if (action.changed) "Formatted locally." else "Already formatted."
                                 }
                             }
                             is DocbenchJsonFormatActionResult.Rejected -> {
-                                message = docbenchValidationErrorPreview(action.message)
+                                state.message = docbenchValidationErrorPreview(action.message)
                             }
                             is DocbenchJsonFormatActionResult.Blocked -> {
-                                message = "Formatting is blocked by the current Bench policy."
+                                state.message = "Formatting is blocked by the current Bench policy."
                             }
                         }
                     } finally {
-                        formatting = false
+                        state.formatting = false
                     }
                 }
             },
-            enabled = source.isNotEmpty() && inputError == null && !formatting,
+            enabled = state.source.isNotEmpty() && state.inputError == null && !state.formatting,
             modifier = Modifier.testTag("docbench_json_formatter_run")
         ) {
-            Text(if (formatting) "Formatting…" else "Format JSON")
+            Text(if (state.formatting) "Formatting…" else "Format JSON")
         }
-        message?.let { status ->
+        state.message?.let { status ->
             Text(status, style = MaterialTheme.typography.bodySmall)
         }
     }
