@@ -17,12 +17,12 @@ internal object StreambenchPlaybackState {
     private val mutableState = MutableStateFlow(StreambenchPlaybackSnapshot())
     val state: StateFlow<StreambenchPlaybackSnapshot> = mutableState.asStateFlow()
 
-    fun setMedia(title: String, group: String) {
+    fun setMedia(title: String, group: String, playWhenReady: Boolean) {
         mutableState.value = StreambenchPlaybackSnapshot(
             active = true,
             title = title,
             group = group,
-            playWhenReady = false
+            playWhenReady = playWhenReady
         )
     }
 
