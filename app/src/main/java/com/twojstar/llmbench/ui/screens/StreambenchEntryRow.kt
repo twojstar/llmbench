@@ -3,7 +3,7 @@ package com.twojstar.llmbench.ui.screens
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Star
-import androidx.compose.material.icons.outlined.StarOutline
+import androidx.compose.material.icons.outlined.StarBorder
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -34,7 +34,7 @@ internal fun StreambenchEntryRow(
         )
         IconButton(onClick = onToggleFavorite) {
             Icon(
-                if (isFavorite) Icons.Default.Star else Icons.Outlined.StarOutline,
+                if (isFavorite) Icons.Default.Star else Icons.Outlined.StarBorder,
                 contentDescription = if (isFavorite) "Remove from favorites" else "Add to favorites"
             )
         }
