@@ -25,6 +25,7 @@ import com.twojstar.llmbench.data.model.BenchToolSurface
 import com.twojstar.llmbench.data.model.BuiltInBenchTool
 import com.twojstar.llmbench.data.model.capabilities
 import com.twojstar.llmbench.data.preferences.BuiltInBenchPreferencesStore
+import com.twojstar.llmbench.data.preferences.StreambenchStationPreferencesStore
 import com.twojstar.llmbench.data.streambench.StreambenchImportedPlaylistActionResult
 import com.twojstar.llmbench.data.streambench.StreambenchPlaybackService
 import com.twojstar.llmbench.data.streambench.StreambenchPlaylistEntry
@@ -103,7 +104,12 @@ fun BenchToolsScreen(modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val store = remember(context) { BuiltInBenchPreferencesStore(context.applicationContext) }
+    val stationStore = remember(context) {
+        StreambenchStationPreferencesStore(context.applicationContext)
+    }
     var enabledTools by remember(store) { mutableStateOf(store.loadEnabledTools()) }
+    var favoriteStationKeys by remember(stationStore) { mutableStateOf(stationStore.loadFavoriteKeys()) }
+    var recentStationKeys by remember(stationStore) { mutableStateOf(stationStore.loadRecentKeys()) }
     var streambenchEntries by remember { mutableStateOf<List<StreambenchPlaylistEntry>>(emptyList()) }
     var streambenchImportMessage by remember { mutableStateOf<String?>(null) }
     var streambenchPlaybackMessage by remember { mutableStateOf<String?>(null) }
@@ -231,7 +237,7 @@ fun BenchToolsScreen(modifier: Modifier = Modifier) {
                                 modifier = Modifier.padding(16.dp)
                             ) {
                                 Text(
-                                    "Import an M3U/M3U8 playlist locally, then explicitly start an allowed HTTPS stream. Playback continues through Android media controls.",
+                                    "Import an M3U/M3U8 playlist locally, then search, favorite or explicitly start an allowed HTTPS stream. Playlist contents stay in memory; only local station hashes are kept for favorites and recents.",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -255,26 +261,22 @@ fun BenchToolsScreen(modifier: Modifier = Modifier) {
                                     Text(message, style = MaterialTheme.typography.bodySmall)
                                 }
                                 if (streambenchEntries.isNotEmpty()) {
-                                    LazyColumn(
-                                        verticalArrangement = Arrangement.spacedBy(6.dp),
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .heightIn(max = 360.dp)
-                                            .testTag("streambench_playlist_entries")
-                                    ) {
-                                        items(streambenchEntries) { entry ->
-                                            StreambenchEntryRow(
+                                    StreambenchStationBrowser(
+                                        entries = streambenchEntries,
+                                        favoriteKeys = favoriteStationKeys,
+                                        recentKeys = recentStationKeys,
+                                        onToggleFavorite = { key ->
+                                            favoriteStationKeys = stationStore.toggleFavorite(key)
+                                        },
+                                        onPlay = { entry, key ->
+                                            recentStationKeys = stationStore.recordRecent(key)
+                                            streambenchPlaybackMessage = launchStreambenchPlayback(
+                                                context = context,
                                                 entry = entry,
-                                                onPlay = {
-                                                    streambenchPlaybackMessage = launchStreambenchPlayback(
-                                                        context = context,
-                                                        entry = entry,
-                                                        isEnabled = BuiltInBenchTool.STREAMBENCH_PLAYER in store.loadEnabledTools()
-                                                    )
-                                                }
+                                                isEnabled = BuiltInBenchTool.STREAMBENCH_PLAYER in store.loadEnabledTools()
                                             )
                                         }
-                                    }
+                                    )
                                 }
                             }
                         }
