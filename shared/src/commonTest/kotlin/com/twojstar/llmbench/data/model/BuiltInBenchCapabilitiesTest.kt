@@ -109,12 +109,12 @@ class BuiltInBenchCapabilitiesTest {
     }
 
     @Test
-    fun onlyDocbenchDocumentExposesCompanionUi() {
+    fun docbenchToolsExposeCompanionUi() {
         assertTrue(
             BenchToolSurface.COMPANION_UI in
                 BuiltInBenchTool.DOCBENCH_DOCUMENT.capabilities().surfaces
         )
-        assertFalse(
+        assertTrue(
             BenchToolSurface.COMPANION_UI in
                 BuiltInBenchTool.DOCBENCH_TEXT_INSPECTOR.capabilities().surfaces
         )

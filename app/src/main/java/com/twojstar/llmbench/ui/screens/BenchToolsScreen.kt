@@ -737,6 +737,15 @@ fun BenchToolsScreen(modifier: Modifier = Modifier) {
                                 }
                             }
                         }
+
+                        if (tool == BuiltInBenchTool.DOCBENCH_TEXT_INSPECTOR && enabled) {
+                            HorizontalDivider()
+                            DocbenchTextInspectorPanel(
+                                isEnabled = {
+                                    BuiltInBenchTool.DOCBENCH_TEXT_INSPECTOR in store.loadEnabledTools()
+                                }
+                            )
+                        }
                     }
                 }
             }
