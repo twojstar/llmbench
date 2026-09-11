@@ -1,9 +1,9 @@
 package com.twojstar.llmbench.ui.screens
 
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -23,6 +23,7 @@ import com.twojstar.llmbench.data.model.BenchToolSurface
 import com.twojstar.llmbench.data.security.DocbenchTextInspectorAction
 import com.twojstar.llmbench.data.security.DocbenchTextInspectorActionResult
 import com.twojstar.llmbench.data.security.TextInspectionResult
+import com.twojstar.llmbench.data.tokenizer.MAX_INTERACTIVE_TOKENIZED_CHARS
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -36,6 +37,7 @@ internal fun DocbenchTextInspectorPanel(
     var source by remember { mutableStateOf("") }
     var inspection by remember { mutableStateOf<TextInspectionResult?>(null) }
     var message by remember { mutableStateOf<String?>(null) }
+    var inputError by remember { mutableStateOf<String?>(null) }
     var inspecting by remember { mutableStateOf(false) }
 
     Column(
@@ -50,12 +52,24 @@ internal fun DocbenchTextInspectorPanel(
         OutlinedTextField(
             value = source,
             onValueChange = { updated ->
-                source = updated
-                inspection = null
-                message = null
+                if (updated.length > MAX_INTERACTIVE_TOKENIZED_CHARS) {
+                    inputError =
+                        "Interactive inspection is limited to $MAX_INTERACTIVE_TOKENIZED_CHARS characters."
+                    inspection = null
+                    message = null
+                } else {
+                    source = updated
+                    inputError = null
+                    inspection = null
+                    message = null
+                }
             },
             label = { Text("Text to inspect") },
             minLines = 4,
+            isError = inputError != null,
+            supportingText = {
+                inputError?.let { error -> Text(error) }
+            },
             modifier = Modifier
                 .fillMaxWidth()
                 .testTag("docbench_text_inspector_input")
@@ -93,7 +107,7 @@ internal fun DocbenchTextInspectorPanel(
                     }
                 }
             },
-            enabled = source.isNotBlank() && !inspecting,
+            enabled = source.isNotEmpty() && inputError == null && !inspecting,
             modifier = Modifier.testTag("docbench_text_inspector_run")
         ) {
             Text(if (inspecting) "Inspecting…" else "Inspect text")
