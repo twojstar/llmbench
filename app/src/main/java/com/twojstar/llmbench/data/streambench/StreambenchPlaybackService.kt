@@ -101,7 +101,11 @@ class StreambenchPlaybackService : MediaSessionService() {
             .setUri(url)
             .setMediaMetadata(metadataBuilder.build())
             .build()
-        StreambenchPlaybackState.setMedia(title = title, group = group)
+        StreambenchPlaybackState.setMedia(
+            title = title,
+            group = group,
+            playWhenReady = activePlayer.playWhenReady
+        )
         activePlayer.setMediaItem(mediaItem)
         activePlayer.prepare()
         activePlayer.play()
