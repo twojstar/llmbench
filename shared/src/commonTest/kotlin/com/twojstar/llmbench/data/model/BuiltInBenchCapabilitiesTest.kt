@@ -109,6 +109,18 @@ class BuiltInBenchCapabilitiesTest {
     }
 
     @Test
+    fun onlyDocbenchDocumentExposesCompanionUi() {
+        assertTrue(
+            BenchToolSurface.COMPANION_UI in
+                BuiltInBenchTool.DOCBENCH_DOCUMENT.capabilities().surfaces
+        )
+        assertFalse(
+            BenchToolSurface.COMPANION_UI in
+                BuiltInBenchTool.DOCBENCH_TEXT_INSPECTOR.capabilities().surfaces
+        )
+    }
+
+    @Test
     fun capabilityCallsReturnIndependentCollectionSnapshots() {
         val first = BuiltInBenchTool.DOCBENCH_DOCUMENT.capabilities()
         val second = BuiltInBenchTool.DOCBENCH_DOCUMENT.capabilities()

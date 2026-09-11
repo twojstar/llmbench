@@ -38,18 +38,15 @@ class DocbenchDocumentPreflightActionTest {
     }
 
     @Test
-    fun companionSurfaceIsRejectedByTheCanonicalBenchPolicy() {
+    fun companionSurfaceIsAvailableWithTheDeclaredReadGrant() {
         val availability = DocbenchDocumentPreflightAction.availability(
             surface = BenchToolSurface.COMPANION_UI,
             isEnabled = true,
             grantedPermissions = DOCUMENT_READ_GRANT
         )
 
-        assertFalse(availability.canOffer)
-        assertEquals(
-            setOf(BenchToolAvailabilityBlocker.UNSUPPORTED_SURFACE),
-            availability.blockers
-        )
+        assertTrue(availability.canOffer)
+        assertEquals(emptySet(), availability.blockers)
     }
 
     @Test
