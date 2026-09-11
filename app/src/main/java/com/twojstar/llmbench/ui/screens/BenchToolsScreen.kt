@@ -77,7 +77,7 @@ private suspend fun importCodebenchBarcode(
     isEnabled: () -> Boolean
 ): CodebenchImportUiResult = try {
     if (!isEnabled()) {
-        return CodebenchImportUiResult("Image decoding is blocked by the current Bench policy.")
+        return CodebenchImportUiResult(CODEBENCH_POLICY_BLOCKED_MESSAGE)
     }
     val result = withContext(Dispatchers.IO) {
         if (!isEnabled()) return@withContext null
@@ -147,7 +147,7 @@ private suspend fun importCodebenchBarcode(
         }
     }
     when (result) {
-        null -> CodebenchImportUiResult("Image decoding is blocked by the current Bench policy.")
+        null -> CodebenchImportUiResult(CODEBENCH_POLICY_BLOCKED_MESSAGE)
         is CodebenchImportedBarcodeDecodeActionResult.Completed -> CodebenchImportUiResult(
             message = "Decoded ${result.barcode.format.displayLabel()}.",
             decodedText = result.barcode.text,
@@ -157,7 +157,7 @@ private suspend fun importCodebenchBarcode(
             "No supported QR code or barcode was found."
         )
         is CodebenchImportedBarcodeDecodeActionResult.Blocked -> CodebenchImportUiResult(
-            "Image decoding is blocked by the current Bench policy."
+            CODEBENCH_POLICY_BLOCKED_MESSAGE
         )
         is CodebenchImportedBarcodeDecodeActionResult.Rejected -> CodebenchImportUiResult(
             "Could not decode this image."
@@ -165,12 +165,14 @@ private suspend fun importCodebenchBarcode(
     }
 } catch (error: CancellationException) {
     throw error
-} catch (error: SecurityException) {
-    CodebenchImportUiResult("LlmBench could not access the selected image.")
-} catch (error: IOException) {
-    CodebenchImportUiResult(error.message ?: "Could not read the selected image.")
-} catch (error: IllegalArgumentException) {
-    CodebenchImportUiResult("Could not decode this image.")
+} catch (error: Exception) {
+    CodebenchImportUiResult(
+        when (error) {
+            is SecurityException -> "LlmBench could not access the selected image."
+            is IOException -> error.message ?: "Could not read the selected image."
+            else -> "Could not decode this image."
+        }
+    )
 }
 
 internal fun updatedBenchSelection(
@@ -605,3 +607,5 @@ private fun BenchToolNetworkBehavior.displayLabel(): String = when (this) {
 }
 
 private const val CODEBENCH_PREVIEW_DIMENSION = 256
+private const val CODEBENCH_POLICY_BLOCKED_MESSAGE =
+    "Image decoding is blocked by the current Bench policy."
