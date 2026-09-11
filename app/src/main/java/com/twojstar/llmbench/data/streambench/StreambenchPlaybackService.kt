@@ -4,6 +4,7 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import androidx.annotation.OptIn
+import androidx.media3.common.AudioAttributes
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.util.UnstableApi
@@ -38,6 +39,7 @@ class StreambenchPlaybackService : MediaSessionService() {
 
         val createdPlayer = ExoPlayer.Builder(this)
             .setMediaSourceFactory(mediaSourceFactory)
+            .setAudioAttributes(AudioAttributes.DEFAULT, true)
             .setHandleAudioBecomingNoisy(true)
             .build()
         player = createdPlayer
@@ -108,6 +110,10 @@ class StreambenchPlaybackService : MediaSessionService() {
                     .putExtra(EXTRA_TITLE, request.title)
                     .putExtra(EXTRA_GROUP, request.group)
             )
+        }
+
+        fun stop(context: Context) {
+            context.stopService(Intent(context, StreambenchPlaybackService::class.java))
         }
     }
 }
