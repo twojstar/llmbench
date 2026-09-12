@@ -98,6 +98,8 @@ class IncomingShareTest {
         assertEquals(CONTENT_URI, selectIncomingViewUri(Intent.ACTION_VIEW, CONTENT_URI))
         assertNull(selectIncomingViewUri(Intent.ACTION_SEND, CONTENT_URI))
         assertNull(selectIncomingViewUri(Intent.ACTION_VIEW, "file:///sdcard/private.txt"))
+        assertNull(selectIncomingViewUri(Intent.ACTION_VIEW, "content:opaque"))
+        assertNull(selectIncomingViewUri(Intent.ACTION_VIEW, "content:/missing-authority"))
         assertNull(selectIncomingViewUri(Intent.ACTION_VIEW, UPPERCASE_CONTENT_URI))
     }
 

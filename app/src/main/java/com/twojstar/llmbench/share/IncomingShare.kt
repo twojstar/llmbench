@@ -52,7 +52,8 @@ internal fun normalizeIncomingSharePayload(
 }
 
 private fun isContentUriString(value: String): Boolean = runCatching {
-    URI(value).scheme == "content"
+    val uri = URI(value)
+    uri.scheme == "content" && !uri.rawAuthority.isNullOrBlank()
 }.getOrDefault(false)
 
 internal fun selectIncomingShareText(
