@@ -2218,6 +2218,7 @@ private fun releaseTerminatedWebView(webView: WebView) {
 }
 
 private fun releaseWebView(webView: WebView) {
+    (webView.parent as? ViewGroup)?.removeView(webView)
     webView.onPause()
     webView.stopLoading()
     webView.webChromeClient = null
