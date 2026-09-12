@@ -96,7 +96,7 @@ internal fun DocbenchJsonFormatterPanel(
                         when (action) {
                             is DocbenchJsonFormatActionResult.Completed -> {
                                 if (action.text.length > MAX_INTERACTIVE_TOKENIZED_CHARS) {
-                                    state.message = "Formatted JSON exceeds the interactive display limit."
+                                    state.message = "Formatted result was not applied because it exceeds the 1,000,000-character interactive display limit. Original JSON is unchanged."
                                 } else {
                                     state.source = action.text
                                     state.message =
