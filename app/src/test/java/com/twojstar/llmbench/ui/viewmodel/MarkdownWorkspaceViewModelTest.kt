@@ -50,6 +50,37 @@ class MarkdownWorkspaceViewModelTest {
     }
 
     @Test
+    fun explicitUtf8BomChoiceUpdatesExportMetadata() {
+        val viewModel = MarkdownWorkspaceViewModel()
+        val document = TextDocumentCodec.decodeUtf8("# prompt".encodeToByteArray())
+        viewModel.completeImportAfterBegin(PROMPT_NAME, document)
+
+        assertTrue(viewModel.uiState.value.canChangeUtf8Bom)
+        assertTrue(viewModel.setUtf8Bom(true))
+
+        val state = viewModel.uiState.value
+        assertTrue(state.hadUtf8Bom)
+        assertTrue(state.isDirty)
+        assertTrue(viewModel.currentDocument().hadUtf8Bom)
+
+        val snapshot = requireNotNull(viewModel.beginExport())
+        assertTrue(snapshot.document.hadUtf8Bom)
+        viewModel.failExport(snapshot)
+    }
+
+    @Test
+    fun boundLocalSkillDoesNotTreatBomAsPersistableSourceState() {
+        val viewModel = boundSkillWorkspace()
+
+        assertFalse(viewModel.uiState.value.canChangeUtf8Bom)
+        assertFalse(viewModel.setUtf8Bom(true))
+
+        val state = viewModel.uiState.value
+        assertFalse(state.hadUtf8Bom)
+        assertFalse(state.isDirty)
+    }
+
+    @Test
     fun successfulExportClearsDirtyFlagForMatchingRevision() {
         val viewModel = MarkdownWorkspaceViewModel()
         viewModel.updateText("# prompt")
