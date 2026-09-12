@@ -1,5 +1,6 @@
 package com.twojstar.llmbench
 
+import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteType
 import com.twojstar.llmbench.ui.viewmodel.NavigationTab
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -26,9 +27,19 @@ class PrimaryNavigationTest {
 
     @Test
     fun webChatUsesImmersiveNavigationShell() {
-        assertFalse(showPrimaryBottomNavigation(NavigationTab.WEB_CHATS))
-        assertTrue(showPrimaryBottomNavigation(NavigationTab.COMPARE_HUB))
-        assertTrue(showPrimaryBottomNavigation(NavigationTab.STUDIO))
+        assertFalse(showPrimaryNavigation(NavigationTab.WEB_CHATS))
+        assertTrue(showPrimaryNavigation(NavigationTab.COMPARE_HUB))
+        assertTrue(showPrimaryNavigation(NavigationTab.STUDIO))
+    }
+
+    @Test
+    fun bottomNavigationTypesDoNotNeedExtraSystemInset() {
+        assertTrue(navigationSuiteUsesBottomBar(NavigationSuiteType.NavigationBar))
+        assertTrue(navigationSuiteUsesBottomBar(NavigationSuiteType.ShortNavigationBarCompact))
+        assertTrue(navigationSuiteUsesBottomBar(NavigationSuiteType.ShortNavigationBarMedium))
+        assertFalse(navigationSuiteUsesBottomBar(NavigationSuiteType.NavigationRail))
+        assertFalse(navigationSuiteUsesBottomBar(NavigationSuiteType.WideNavigationRailCollapsed))
+        assertFalse(navigationSuiteUsesBottomBar(NavigationSuiteType.WideNavigationRailExpanded))
     }
 
     @Test
