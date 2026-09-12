@@ -1,6 +1,7 @@
 package com.twojstar.llmbench
 
 import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -21,11 +22,13 @@ import androidx.compose.material3.adaptive.navigationsuite.rememberNavigationSui
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.twojstar.llmbench.data.document.MarkdownDocumentFileAccess
 import com.twojstar.llmbench.data.document.MarkdownWorkspaceRecoveryStore
 import com.twojstar.llmbench.data.model.WebAiService
 import com.twojstar.llmbench.data.model.webChatSections
@@ -33,6 +36,7 @@ import com.twojstar.llmbench.data.security.TextInspectionResult
 import com.twojstar.llmbench.data.security.TextInspector
 import com.twojstar.llmbench.share.IncomingSharePayload
 import com.twojstar.llmbench.share.PendingWebShare
+import com.twojstar.llmbench.share.canOpenInMarkdownWorkspace
 import com.twojstar.llmbench.share.extractIncomingSharePayload
 import com.twojstar.llmbench.share.extractIncomingViewPayload
 import com.twojstar.llmbench.share.normalizeIncomingSharePayload
@@ -43,7 +47,9 @@ import com.twojstar.llmbench.ui.viewmodel.MarkdownWorkspaceViewModel
 import com.twojstar.llmbench.ui.viewmodel.NavigationTab
 import com.twojstar.llmbench.ui.viewmodel.StudioUiState
 import com.twojstar.llmbench.ui.viewmodel.StudioViewModel
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 internal fun profilePlaygroundDestination(): NavigationTab = NavigationTab.PLAYGROUND
@@ -248,6 +254,7 @@ class MainActivity : ComponentActivity() {
             }
             incoming != null -> {
                 outState.putString(KEY_SHARE_STAGE, SHARE_STAGE_INCOMING)
+                outState.putLong(KEY_SHARE_INCOMING_ID, state.incomingShareId)
                 writeSharePayload(outState, incoming)
             }
         }
@@ -258,7 +265,8 @@ class MainActivity : ComponentActivity() {
         val payload = normalizeIncomingSharePayload(
             text = savedState.getString(KEY_SHARE_TEXT),
             uriStrings = savedState.getStringArrayList(KEY_SHARE_URIS).orEmpty(),
-            mimeTypeHint = savedState.getString(KEY_SHARE_MIME_TYPE)
+            mimeTypeHint = savedState.getString(KEY_SHARE_MIME_TYPE),
+            isOpenDocument = savedState.getBoolean(KEY_SHARE_OPEN_DOCUMENT, false)
         ) ?: return
         val pending = if (stage == SHARE_STAGE_PENDING) {
             val serviceId = savedState.getString(KEY_SHARE_SERVICE_ID)
@@ -268,6 +276,7 @@ class MainActivity : ComponentActivity() {
         } else null
         viewModel.restoreShareState(
             incomingShare = payload.takeIf { stage == SHARE_STAGE_INCOMING },
+            incomingShareRequestId = savedState.getLong(KEY_SHARE_INCOMING_ID, 0L),
             pendingShare = pending
         )
     }
@@ -276,16 +285,19 @@ class MainActivity : ComponentActivity() {
         outState.putString(KEY_SHARE_TEXT, payload.text)
         outState.putStringArrayList(KEY_SHARE_URIS, ArrayList(payload.uriStrings))
         outState.putString(KEY_SHARE_MIME_TYPE, payload.mimeTypeHint)
+        outState.putBoolean(KEY_SHARE_OPEN_DOCUMENT, payload.isOpenDocument)
     }
 
     private companion object {
         const val KEY_SHARE_INTENT_HANDLED = "llmbench.share.intent_handled"
         const val KEY_SHARE_STAGE = "llmbench.share.stage"
         const val KEY_SHARE_ID = "llmbench.share.id"
+        const val KEY_SHARE_INCOMING_ID = "llmbench.share.incoming_id"
         const val KEY_SHARE_SERVICE_ID = "llmbench.share.service_id"
         const val KEY_SHARE_TEXT = "llmbench.share.text"
         const val KEY_SHARE_URIS = "llmbench.share.uris"
         const val KEY_SHARE_MIME_TYPE = "llmbench.share.mime_type"
+        const val KEY_SHARE_OPEN_DOCUMENT = "llmbench.share.open_document"
         const val SHARE_STAGE_INCOMING = "incoming"
         const val SHARE_STAGE_PENDING = "pending"
     }
@@ -297,14 +309,30 @@ private fun IncomingShareRoutingDialogs(
     viewModel: StudioViewModel,
     markdownWorkspaceViewModel: MarkdownWorkspaceViewModel
 ) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val markdownUiState by markdownWorkspaceViewModel.uiState.collectAsStateWithLifecycle()
     var confirmMarkdownReplace by rememberSaveable { mutableStateOf(false) }
 
-    LaunchedEffect(uiState.incomingShare) {
+    LaunchedEffect(uiState.incomingShareId) {
         confirmMarkdownReplace = false
     }
 
-    fun openIncomingTextInMarkdown(payload: IncomingSharePayload, allowDiscardDirty: Boolean) {
+    fun finishMarkdownOpen(requestId: Long) {
+        confirmMarkdownReplace = false
+        if (viewModel.dismissIncomingShareIfCurrent(requestId)) {
+            viewModel.selectTab(NavigationTab.YAML)
+        }
+    }
+
+    val markdownBusyMessage = "Markdown workspace is still restoring or busy. Try again when it is ready."
+    val markdownOpenErrorMessage = "Could not open the document in Markdown workspace."
+
+    fun openIncomingTextInMarkdown(
+        payload: IncomingSharePayload,
+        requestId: Long,
+        allowDiscardDirty: Boolean
+    ) {
         val text = payload.text ?: return
         when (
             markdownWorkspaceViewModel.openExternalText(
@@ -312,34 +340,95 @@ private fun IncomingShareRoutingDialogs(
                 allowDiscardDirty = allowDiscardDirty
             )
         ) {
-            ExternalMarkdownOpenResult.OPENED -> {
-                confirmMarkdownReplace = false
-                viewModel.dismissIncomingShare()
-                viewModel.selectTab(NavigationTab.YAML)
-            }
+            ExternalMarkdownOpenResult.OPENED -> finishMarkdownOpen(requestId)
             ExternalMarkdownOpenResult.NEEDS_DISCARD -> confirmMarkdownReplace = true
-            ExternalMarkdownOpenResult.BUSY -> viewModel.showSnackbar(
-                "Markdown workspace is still restoring or busy. Try again when it is ready."
-            )
+            ExternalMarkdownOpenResult.BUSY -> viewModel.showSnackbar(markdownBusyMessage)
             ExternalMarkdownOpenResult.TOO_LARGE -> viewModel.showSnackbar(
                 "Shared text is larger than the 8 MiB Markdown workspace limit."
             )
         }
     }
 
+    fun openIncomingDocumentInMarkdown(
+        payload: IncomingSharePayload,
+        requestId: Long,
+        allowDiscardDirty: Boolean
+    ) {
+        if (!payload.canOpenInMarkdownWorkspace()) return
+        if (markdownUiState.isBusy) {
+            viewModel.showSnackbar(markdownBusyMessage)
+            return
+        }
+        if (markdownUiState.isDirty && !allowDiscardDirty) {
+            confirmMarkdownReplace = true
+            return
+        }
+        val uri = payload.uriStrings.singleOrNull()?.let(Uri::parse) ?: return
+        if (!markdownWorkspaceViewModel.beginImport()) {
+            viewModel.showSnackbar(markdownBusyMessage)
+            return
+        }
+        scope.launch {
+            val result = runCatching { MarkdownDocumentFileAccess.import(context, uri) }
+            result.fold(
+                onSuccess = { opened ->
+                    if (!viewModel.isIncomingShareCurrent(requestId)) {
+                        markdownWorkspaceViewModel.cancelImport()
+                        return@fold
+                    }
+                    if (markdownWorkspaceViewModel.completeImport(opened.displayName, opened.document)) {
+                        finishMarkdownOpen(requestId)
+                    } else {
+                        markdownWorkspaceViewModel.cancelImport()
+                        viewModel.showSnackbar(markdownOpenErrorMessage)
+                    }
+                },
+                onFailure = { error ->
+                    markdownWorkspaceViewModel.cancelImport()
+                    if (error is CancellationException) throw error
+                    viewModel.showSnackbar(error.message ?: markdownOpenErrorMessage)
+                }
+            )
+        }
+    }
+
+    fun openIncomingInMarkdown(
+        payload: IncomingSharePayload,
+        requestId: Long,
+        allowDiscardDirty: Boolean
+    ) {
+        if (payload.text != null) {
+            openIncomingTextInMarkdown(payload, requestId, allowDiscardDirty)
+        } else {
+            openIncomingDocumentInMarkdown(payload, requestId, allowDiscardDirty)
+        }
+    }
+
     uiState.incomingShare?.let { payload ->
-        if (confirmMarkdownReplace && payload.text != null) {
+        if (confirmMarkdownReplace && payload.canOpenInMarkdownWorkspace()) {
             ReplaceMarkdownDraftDialog(
                 currentName = markdownUiState.displayName,
-                onDiscard = { openIncomingTextInMarkdown(payload, allowDiscardDirty = true) },
+                onDiscard = {
+                    openIncomingInMarkdown(
+                        payload = payload,
+                        requestId = uiState.incomingShareId,
+                        allowDiscardDirty = true
+                    )
+                },
                 onDismiss = { confirmMarkdownReplace = false }
             )
         } else {
             IncomingShareProviderDialog(
                 payload = payload,
                 favoriteServices = uiState.favoriteWebServices,
-                onOpenMarkdown = if (payload.text != null && payload.attachmentCount == 0) {
-                    { openIncomingTextInMarkdown(payload, allowDiscardDirty = false) }
+                onOpenMarkdown = if (payload.canOpenInMarkdownWorkspace()) {
+                    {
+                        openIncomingInMarkdown(
+                            payload = payload,
+                            requestId = uiState.incomingShareId,
+                            allowDiscardDirty = false
+                        )
+                    }
                 } else {
                     null
                 },
@@ -401,7 +490,7 @@ private fun IncomingShareProviderDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Share to LlmBench") },
+        title = { Text(if (payload.isOpenDocument) "Open with LlmBench" else "Share to LlmBench") },
         text = {
             Column(
                 modifier = Modifier
