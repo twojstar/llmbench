@@ -94,6 +94,14 @@ class IncomingShareTest {
     }
 
     @Test
+    fun viewIntentKeepsOnlyContentUris() {
+        assertEquals(CONTENT_URI, selectIncomingViewUri(Intent.ACTION_VIEW, CONTENT_URI))
+        assertNull(selectIncomingViewUri(Intent.ACTION_SEND, CONTENT_URI))
+        assertNull(selectIncomingViewUri(Intent.ACTION_VIEW, "file:///sdcard/private.txt"))
+        assertNull(selectIncomingViewUri(Intent.ACTION_VIEW, UPPERCASE_CONTENT_URI))
+    }
+
+    @Test
     fun textClaimKeepsTextUntilCompletionAndCanBeReleased() {
         val pending = PendingWebShare(
             id = 7L,

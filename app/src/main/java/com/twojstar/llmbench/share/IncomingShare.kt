@@ -107,6 +107,16 @@ internal fun extractIncomingSharePayload(intent: Intent): IncomingSharePayload? 
     return normalizeIncomingSharePayload(text, uriStrings)
 }
 
+internal fun selectIncomingViewUri(action: String?, uriString: String?): String? =
+    uriString
+        ?.takeIf { action == Intent.ACTION_VIEW }
+        ?.takeIf(::isContentUriString)
+
+internal fun extractIncomingViewPayload(intent: Intent): IncomingSharePayload? {
+    val uri = selectIncomingViewUri(intent.action, intent.data?.toString()) ?: return null
+    return IncomingSharePayload(uriStrings = listOf(uri))
+}
+
 @Suppress("DEPRECATION")
 private fun intentStreamUris(intent: Intent): List<Uri> = when (intent.action) {
     Intent.ACTION_SEND -> listOfNotNull(

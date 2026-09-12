@@ -34,6 +34,7 @@ import com.twojstar.llmbench.data.security.TextInspector
 import com.twojstar.llmbench.share.IncomingSharePayload
 import com.twojstar.llmbench.share.PendingWebShare
 import com.twojstar.llmbench.share.extractIncomingSharePayload
+import com.twojstar.llmbench.share.extractIncomingViewPayload
 import com.twojstar.llmbench.share.normalizeIncomingSharePayload
 import com.twojstar.llmbench.ui.screens.*
 import com.twojstar.llmbench.ui.theme.LlmBenchTheme
@@ -223,6 +224,7 @@ class MainActivity : ComponentActivity() {
     private fun handleIncomingShareIntent(intent: Intent) {
         val payload = when (intent.action) {
             Intent.ACTION_SEND, Intent.ACTION_SEND_MULTIPLE -> extractIncomingSharePayload(intent)
+            Intent.ACTION_VIEW -> extractIncomingViewPayload(intent)
             Intent.ACTION_PROCESS_TEXT -> normalizeIncomingSharePayload(
                 text = intent.getCharSequenceExtra(Intent.EXTRA_PROCESS_TEXT)?.toString(),
                 uriStrings = emptyList()
