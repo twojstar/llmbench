@@ -104,6 +104,24 @@ class IncomingShareTest {
     }
 
     @Test
+    fun normalizesConcreteMimeHintsOnlyWhenAttachmentsRemain() {
+        val payload = normalizeIncomingSharePayload(
+            text = null,
+            uriStrings = listOf(CONTENT_URI),
+            mimeTypeHint = " Application/PDF; charset=binary "
+        )
+
+        requireNotNull(payload)
+        assertEquals("application/pdf", payload.mimeTypeHint)
+        assertNull(
+            normalizeIncomingSharePayload(SHARED_TEXT, emptyList(), "application/pdf")?.mimeTypeHint
+        )
+        assertNull(
+            normalizeIncomingSharePayload(null, listOf(CONTENT_URI), "application/*")?.mimeTypeHint
+        )
+    }
+
+    @Test
     fun textClaimKeepsTextUntilCompletionAndCanBeReleased() {
         val pending = PendingWebShare(
             id = 7L,

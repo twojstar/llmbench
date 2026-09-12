@@ -8,7 +8,8 @@ import java.net.URI
 
 data class IncomingSharePayload(
     val text: String? = null,
-    val uriStrings: List<String> = emptyList()
+    val uriStrings: List<String> = emptyList(),
+    val mimeTypeHint: String? = null
 ) {
     val attachmentCount: Int get() = uriStrings.size
     val isEmpty: Boolean get() = text == null && uriStrings.isEmpty()
@@ -38,7 +39,8 @@ internal fun PendingWebShare.releaseTextClaim(): PendingWebShare =
 
 internal fun normalizeIncomingSharePayload(
     text: String?,
-    uriStrings: List<String>
+    uriStrings: List<String>,
+    mimeTypeHint: String? = null
 ): IncomingSharePayload? {
     val normalizedText = text?.takeIf(String::isNotBlank)
     val normalizedUris = uriStrings.asSequence()
@@ -47,7 +49,16 @@ internal fun normalizeIncomingSharePayload(
         .filter(::isContentUriString)
         .distinct()
         .toList()
-    return IncomingSharePayload(normalizedText, normalizedUris)
+    val normalizedMimeTypeHint = mimeTypeHint
+        ?.substringBefore(';')
+        ?.trim()
+        ?.lowercase()
+        ?.takeIf { value ->
+            val parts = value.split('/', limit = 2)
+            parts.size == 2 && parts.all(String::isNotBlank) && '*' !in value
+        }
+        ?.takeIf { normalizedUris.isNotEmpty() }
+    return IncomingSharePayload(normalizedText, normalizedUris, normalizedMimeTypeHint)
         .takeUnless(IncomingSharePayload::isEmpty)
 }
 
@@ -105,7 +116,7 @@ internal fun extractIncomingSharePayload(intent: Intent): IncomingSharePayload? 
             }
         }
     }
-    return normalizeIncomingSharePayload(text, uriStrings)
+    return normalizeIncomingSharePayload(text, uriStrings, intent.type)
 }
 
 internal fun selectIncomingViewUri(action: String?, uriString: String?): String? =
@@ -115,7 +126,11 @@ internal fun selectIncomingViewUri(action: String?, uriString: String?): String?
 
 internal fun extractIncomingViewPayload(intent: Intent): IncomingSharePayload? {
     val uri = selectIncomingViewUri(intent.action, intent.data?.toString()) ?: return null
-    return IncomingSharePayload(uriStrings = listOf(uri))
+    return normalizeIncomingSharePayload(
+        text = null,
+        uriStrings = listOf(uri),
+        mimeTypeHint = intent.type
+    )
 }
 
 @Suppress("DEPRECATION")

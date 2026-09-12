@@ -257,7 +257,8 @@ class MainActivity : ComponentActivity() {
         val stage = savedState?.getString(KEY_SHARE_STAGE) ?: return
         val payload = normalizeIncomingSharePayload(
             text = savedState.getString(KEY_SHARE_TEXT),
-            uriStrings = savedState.getStringArrayList(KEY_SHARE_URIS).orEmpty()
+            uriStrings = savedState.getStringArrayList(KEY_SHARE_URIS).orEmpty(),
+            mimeTypeHint = savedState.getString(KEY_SHARE_MIME_TYPE)
         ) ?: return
         val pending = if (stage == SHARE_STAGE_PENDING) {
             val serviceId = savedState.getString(KEY_SHARE_SERVICE_ID)
@@ -274,6 +275,7 @@ class MainActivity : ComponentActivity() {
     private fun writeSharePayload(outState: Bundle, payload: IncomingSharePayload) {
         outState.putString(KEY_SHARE_TEXT, payload.text)
         outState.putStringArrayList(KEY_SHARE_URIS, ArrayList(payload.uriStrings))
+        outState.putString(KEY_SHARE_MIME_TYPE, payload.mimeTypeHint)
     }
 
     private companion object {
@@ -283,6 +285,7 @@ class MainActivity : ComponentActivity() {
         const val KEY_SHARE_SERVICE_ID = "llmbench.share.service_id"
         const val KEY_SHARE_TEXT = "llmbench.share.text"
         const val KEY_SHARE_URIS = "llmbench.share.uris"
+        const val KEY_SHARE_MIME_TYPE = "llmbench.share.mime_type"
         const val SHARE_STAGE_INCOMING = "incoming"
         const val SHARE_STAGE_PENDING = "pending"
     }

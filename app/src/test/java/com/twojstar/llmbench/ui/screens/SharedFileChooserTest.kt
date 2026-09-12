@@ -1,6 +1,8 @@
 package com.twojstar.llmbench.ui.screens
 
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -50,6 +52,15 @@ class SharedFileChooserTest {
         assertFalse(fileChooserAcceptsMimeType(arrayOf("image/*"), PDF_MIME_TYPE))
         assertFalse(fileChooserAcceptsMimeType(arrayOf(PDF_MIME_TYPE), null))
         assertFalse(fileChooserAcceptsMimeType(arrayOf("not-a-mime"), PDF_MIME_TYPE))
+    }
+
+    @Test
+    fun usesIncomingMimeHintWhenResolverTypeIsMissingOrGeneric() {
+        assertEquals(PDF_MIME_TYPE, sharedUploadMimeType(null, PDF_MIME_TYPE))
+        assertEquals(PDF_MIME_TYPE, sharedUploadMimeType("application/octet-stream", PDF_MIME_TYPE))
+        assertEquals(PDF_MIME_TYPE, sharedUploadMimeType("application/*", PDF_MIME_TYPE))
+        assertEquals("image/png", sharedUploadMimeType("image/png", PDF_MIME_TYPE))
+        assertNull(sharedUploadMimeType(null, null))
     }
 
     @Test

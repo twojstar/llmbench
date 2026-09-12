@@ -204,6 +204,21 @@ internal fun fileChooserModeAllowsStagedUpload(mode: Int): Boolean =
     mode == WebChromeClient.FileChooserParams.MODE_OPEN ||
         mode == WebChromeClient.FileChooserParams.MODE_OPEN_MULTIPLE
 
+internal fun sharedUploadMimeType(
+    resolverMimeType: String?,
+    mimeTypeHint: String?
+): String? {
+    val normalizedResolver = resolverMimeType
+        ?.substringBefore(';')
+        ?.trim()
+        ?.lowercase()
+    val resolverIsGeneric = normalizedResolver.isNullOrEmpty() ||
+        normalizedResolver?.contains('*') == true ||
+        normalizedResolver == "application/octet-stream" ||
+        normalizedResolver == "binary/octet-stream"
+    return if (resolverIsGeneric) mimeTypeHint ?: resolverMimeType else resolverMimeType
+}
+
 private fun sharedUriDisplayName(context: Context, uri: Uri): String? = runCatching {
     context.contentResolver.query(
         uri,
@@ -219,17 +234,18 @@ private fun sharedUriDisplayName(context: Context, uri: Uri): String? = runCatch
 private fun sharedUrisForFileChooser(
     context: Context,
     params: WebChromeClient.FileChooserParams,
-    uriStrings: List<String>
+    uriStrings: List<String>,
+    mimeTypeHint: String?
 ): List<Uri> {
     if (params.isCaptureEnabled || !fileChooserModeAllowsStagedUpload(params.mode)) return emptyList()
     val matching = uriStrings.asSequence()
         .map(Uri::parse)
         .filter { isAllowedUploadUri(context, it) }
         .filter { uri ->
-            val mimeType = runCatching { context.contentResolver.getType(uri) }.getOrNull()
+            val resolverMimeType = runCatching { context.contentResolver.getType(uri) }.getOrNull()
             fileChooserAcceptsMimeType(
                 acceptTypes = params.acceptTypes,
-                actualMimeType = mimeType,
+                actualMimeType = sharedUploadMimeType(resolverMimeType, mimeTypeHint),
                 displayName = sharedUriDisplayName(context, uri)
             )
         }
@@ -1123,7 +1139,8 @@ fun WebChatScreen(
                                         val sharedUris = sharedUrisForFileChooser(
                                             context = context,
                                             params = params,
-                                            uriStrings = stagedShare?.payload?.uriStrings.orEmpty()
+                                            uriStrings = stagedShare?.payload?.uriStrings.orEmpty(),
+                                            mimeTypeHint = stagedShare?.payload?.mimeTypeHint
                                         )
                                         if (stagedShare != null && sharedUris.isNotEmpty()) {
                                             val requestId = recordFileChooserRequest(
