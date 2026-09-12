@@ -56,6 +56,16 @@
             </intent-filter>
         </activity>
         <service
+            android:name=".LlmBenchTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_quick_settings"
+            android:label="@string/app_name"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+        <service
             android:name=".data.streambench.StreambenchPlaybackService"
             android:exported="false"
             android:foregroundServiceType="mediaPlayback">
