@@ -9,7 +9,8 @@ import java.net.URI
 data class IncomingSharePayload(
     val text: String? = null,
     val uriStrings: List<String> = emptyList(),
-    val mimeTypeHint: String? = null
+    val mimeTypeHint: String? = null,
+    val isOpenDocument: Boolean = false
 ) {
     val attachmentCount: Int get() = uriStrings.size
     val isEmpty: Boolean get() = text == null && uriStrings.isEmpty()
@@ -40,7 +41,8 @@ internal fun PendingWebShare.releaseTextClaim(): PendingWebShare =
 internal fun normalizeIncomingSharePayload(
     text: String?,
     uriStrings: List<String>,
-    mimeTypeHint: String? = null
+    mimeTypeHint: String? = null,
+    isOpenDocument: Boolean = false
 ): IncomingSharePayload? {
     val normalizedText = text?.takeIf(String::isNotBlank)
     val normalizedUris = uriStrings.asSequence()
@@ -58,8 +60,12 @@ internal fun normalizeIncomingSharePayload(
             parts.size == 2 && parts.all(String::isNotBlank) && '*' !in value
         }
         ?.takeIf { normalizedUris.isNotEmpty() }
-    return IncomingSharePayload(normalizedText, normalizedUris, normalizedMimeTypeHint)
-        .takeUnless(IncomingSharePayload::isEmpty)
+    return IncomingSharePayload(
+        text = normalizedText,
+        uriStrings = normalizedUris,
+        mimeTypeHint = normalizedMimeTypeHint,
+        isOpenDocument = isOpenDocument && normalizedUris.isNotEmpty()
+    ).takeUnless(IncomingSharePayload::isEmpty)
 }
 
 private fun isContentUriString(value: String): Boolean = runCatching {
@@ -129,8 +135,24 @@ internal fun extractIncomingViewPayload(intent: Intent): IncomingSharePayload? {
     return normalizeIncomingSharePayload(
         text = null,
         uriStrings = listOf(uri),
-        mimeTypeHint = intent.type
+        mimeTypeHint = intent.type,
+        isOpenDocument = true
     )
+}
+
+private val markdownWorkspaceDocumentMimeTypes = setOf(
+    "application/json",
+    "application/ld+json",
+    "application/xml",
+    "application/yaml",
+    "application/x-yaml"
+)
+
+internal fun IncomingSharePayload.canOpenInMarkdownWorkspace(): Boolean = when {
+    text != null -> attachmentCount == 0
+    !isOpenDocument || attachmentCount != 1 -> false
+    mimeTypeHint?.startsWith("text/") == true -> true
+    else -> mimeTypeHint in markdownWorkspaceDocumentMimeTypes
 }
 
 @Suppress("DEPRECATION")

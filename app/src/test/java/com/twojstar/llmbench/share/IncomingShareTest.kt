@@ -122,6 +122,66 @@ class IncomingShareTest {
     }
 
     @Test
+    fun markdownWorkspaceAcceptsTextAndSingleTextualOpenDocumentsOnly() {
+        assertTrue(IncomingSharePayload(text = SHARED_TEXT).canOpenInMarkdownWorkspace())
+        assertTrue(
+            IncomingSharePayload(
+                uriStrings = listOf(CONTENT_URI),
+                mimeTypeHint = "text/markdown",
+                isOpenDocument = true
+            ).canOpenInMarkdownWorkspace()
+        )
+        assertTrue(
+            IncomingSharePayload(
+                uriStrings = listOf(CONTENT_URI),
+                mimeTypeHint = "application/json",
+                isOpenDocument = true
+            ).canOpenInMarkdownWorkspace()
+        )
+        assertFalse(
+            IncomingSharePayload(
+                uriStrings = listOf(CONTENT_URI),
+                mimeTypeHint = "application/pdf",
+                isOpenDocument = true
+            ).canOpenInMarkdownWorkspace()
+        )
+        assertFalse(
+            IncomingSharePayload(
+                uriStrings = listOf(CONTENT_URI),
+                mimeTypeHint = "text/plain"
+            ).canOpenInMarkdownWorkspace()
+        )
+        assertFalse(
+            IncomingSharePayload(
+                text = SHARED_TEXT,
+                uriStrings = listOf(CONTENT_URI)
+            ).canOpenInMarkdownWorkspace()
+        )
+    }
+
+    @Test
+    fun openDocumentMarkerSurvivesNormalizationOnlyWithAttachments() {
+        val opened = normalizeIncomingSharePayload(
+            text = null,
+            uriStrings = listOf(CONTENT_URI),
+            mimeTypeHint = "text/plain",
+            isOpenDocument = true
+        )
+
+        requireNotNull(opened)
+        assertTrue(opened.isOpenDocument)
+        assertFalse(
+            requireNotNull(
+                normalizeIncomingSharePayload(
+                    text = SHARED_TEXT,
+                    uriStrings = emptyList(),
+                    isOpenDocument = true
+                )
+            ).isOpenDocument
+        )
+    }
+
+    @Test
     fun textClaimKeepsTextUntilCompletionAndCanBeReleased() {
         val pending = PendingWebShare(
             id = 7L,

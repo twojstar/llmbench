@@ -211,6 +211,14 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
         _uiState.update { it.copy(incomingShare = null) }
     }
 
+    fun dismissIncomingShareIfCurrent(expected: IncomingSharePayload): Boolean {
+        while (true) {
+            val state = _uiState.value
+            if (state.incomingShare != expected) return false
+            if (_uiState.compareAndSet(state, state.copy(incomingShare = null))) return true
+        }
+    }
+
     fun routeIncomingShareToWeb(service: WebAiService) {
         val shareId = pendingWebShareId.incrementAndGet()
         var routed = false
@@ -269,7 +277,8 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
             val remainingUris = pending.payload.uriStrings.filterNot(consumed::contains)
             val payload = pending.payload.copy(
                 uriStrings = remainingUris,
-                mimeTypeHint = pending.payload.mimeTypeHint.takeIf { remainingUris.isNotEmpty() }
+                mimeTypeHint = pending.payload.mimeTypeHint.takeIf { remainingUris.isNotEmpty() },
+                isOpenDocument = pending.payload.isOpenDocument && remainingUris.isNotEmpty()
             )
             if (payload.isEmpty) null else pending.copy(payload = payload)
         }
