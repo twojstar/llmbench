@@ -1,3 +1,4 @@
 <resources>
     <string name="app_name">LlmBench</string>
+    <string name="widget_description">Quick access to Web AI, Compare, and Studio.</string>
 </resources>

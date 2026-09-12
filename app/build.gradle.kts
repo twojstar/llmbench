@@ -86,6 +86,7 @@ dependencies {
     implementation(libs.okhttp)
     implementation(libs.okhttp.logging)
     implementation(libs.zxing.core)
+    implementation(libs.androidx.glance.appwidget)
 
     testImplementation(libs.junit)
     testImplementation(libs.rhino)
