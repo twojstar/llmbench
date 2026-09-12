@@ -266,8 +266,10 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
             shareId = shareId,
             predicate = { pending -> pending.payload.uriStrings.containsAll(consumed) }
         ) { pending ->
+            val remainingUris = pending.payload.uriStrings.filterNot(consumed::contains)
             val payload = pending.payload.copy(
-                uriStrings = pending.payload.uriStrings.filterNot(consumed::contains)
+                uriStrings = remainingUris,
+                mimeTypeHint = pending.payload.mimeTypeHint.takeIf { remainingUris.isNotEmpty() }
             )
             if (payload.isEmpty) null else pending.copy(payload = payload)
         }
