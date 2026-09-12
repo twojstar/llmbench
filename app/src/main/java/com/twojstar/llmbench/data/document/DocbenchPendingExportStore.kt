@@ -55,6 +55,20 @@ internal class DocbenchPendingExportStore(
         fileFor(id)?.delete()
     }
 
+    fun pruneOrphans(preserveId: String?) {
+        if (!directory.isDirectory) return
+        val preservedName = preserveId
+            ?.takeIf(ID_PATTERN::matches)
+            ?.let { "$it.bin" }
+        directory.listFiles()?.forEach { file ->
+            val name = file.name
+            val stem = name.substringBeforeLast('.', missingDelimiterValue = "")
+            val isOwnedPayload = ID_PATTERN.matches(stem) &&
+                (name.endsWith(".bin") || name.endsWith(".tmp"))
+            if (isOwnedPayload && name != preservedName) file.delete()
+        }
+    }
+
     private fun fileFor(id: String): File? {
         if (!ID_PATTERN.matches(id)) return null
         return File(directory, "$id.bin")

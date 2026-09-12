@@ -25,6 +25,7 @@ import com.twojstar.llmbench.data.document.DocbenchJsonFormatActionResult
 import com.twojstar.llmbench.data.document.DocbenchLineEndingNormalizeAction
 import com.twojstar.llmbench.data.document.DocbenchLineEndingNormalizeActionResult
 import com.twojstar.llmbench.data.document.LineEnding
+import com.twojstar.llmbench.data.document.TextDocument
 import com.twojstar.llmbench.data.model.BenchToolPermission
 import com.twojstar.llmbench.data.model.BenchToolSurface
 import com.twojstar.llmbench.data.tokenizer.MAX_INTERACTIVE_TOKENIZED_CHARS
@@ -59,6 +60,13 @@ internal class DocbenchTextTransformUiState {
         source = updated
         inputError = null
         message = null
+    }
+
+    fun restoreExportDocument(document: TextDocument) {
+        sourceGeneration += 1
+        source = document.text
+        includeUtf8Bom = document.hadUtf8Bom
+        inputError = null
     }
 }
 

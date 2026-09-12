@@ -32,6 +32,25 @@ class DocbenchPendingExportStoreTest {
     }
 
     @Test
+    fun pruningKeepsOnlyTheRestoredPendingExport() {
+        val directory = Files.createTempDirectory("docbench-export-test").toFile()
+        try {
+            val store = DocbenchPendingExportStore(directory)
+            val firstId = store.save(TextDocumentCodec.decodeUtf8("first".encodeToByteArray()))
+            val preservedId = store.save(TextDocumentCodec.decodeUtf8("second".encodeToByteArray()))
+            directory.resolve("$firstId.tmp").writeText("stale")
+
+            store.pruneOrphans(preservedId)
+
+            assertNull(store.load(firstId))
+            assertEquals("second", requireNotNull(store.load(preservedId)).text)
+            assertTrue(directory.listFiles().orEmpty().none { it.extension == "tmp" })
+        } finally {
+            directory.deleteRecursively()
+        }
+    }
+
+    @Test
     fun rejectsUntrustedIdentifiersOutsideTheStoreDirectory() {
         val directory = Files.createTempDirectory("docbench-export-test").toFile()
         try {
