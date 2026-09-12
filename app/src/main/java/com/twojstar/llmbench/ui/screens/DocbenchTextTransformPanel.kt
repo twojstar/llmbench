@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -38,9 +39,14 @@ internal class DocbenchTextTransformUiState {
     var message by mutableStateOf<String?>(null)
     var inputError by mutableStateOf<String?>(null)
     var working by mutableStateOf(false)
+    var exporting by mutableStateOf(false)
+    var includeUtf8Bom by mutableStateOf(false)
 
     val canTransform: Boolean
-        get() = source.isNotEmpty() && inputError == null && !working
+        get() = source.isNotEmpty() && inputError == null && !working && !exporting
+
+    val canExport: Boolean
+        get() = canTransform
 
     fun updateSource(updated: String) {
         sourceGeneration += 1
@@ -60,6 +66,7 @@ internal class DocbenchTextTransformUiState {
 internal fun DocbenchTextTransformPanel(
     state: DocbenchTextTransformUiState,
     isEnabled: () -> Boolean,
+    onExport: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val scope = rememberCoroutineScope()
@@ -69,7 +76,7 @@ internal fun DocbenchTextTransformPanel(
         modifier = modifier.padding(16.dp)
     ) {
         Text(
-            "Format strict JSON or normalize line endings locally. Text stays on this device.",
+            "Format strict JSON, normalize line endings or export the transformed text locally.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -78,6 +85,7 @@ internal fun DocbenchTextTransformPanel(
             onValueChange = state::updateSource,
             label = { Text("Text to transform") },
             minLines = 5,
+            enabled = !state.exporting,
             isError = state.inputError != null,
             supportingText = {
                 state.inputError?.let { error -> Text(error) }
@@ -106,6 +114,24 @@ internal fun DocbenchTextTransformPanel(
                 ) {
                     Text(target.name)
                 }
+            }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FilterChip(
+                selected = state.includeUtf8Bom,
+                onClick = { state.includeUtf8Bom = !state.includeUtf8Bom },
+                enabled = !state.working && !state.exporting,
+                label = {
+                    Text(if (state.includeUtf8Bom) "UTF-8 BOM" else "UTF-8 no BOM")
+                },
+                modifier = Modifier.testTag("docbench_export_bom")
+            )
+            OutlinedButton(
+                onClick = onExport,
+                enabled = state.canExport,
+                modifier = Modifier.testTag("docbench_export_text")
+            ) {
+                Text(if (state.exporting) "Exporting..." else "Export text")
             }
         }
         state.message?.let { status ->
