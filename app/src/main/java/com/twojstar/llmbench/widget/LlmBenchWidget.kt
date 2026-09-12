@@ -16,7 +16,7 @@ import androidx.glance.layout.fillMaxSize
 import androidx.glance.layout.fillMaxWidth
 import androidx.glance.layout.padding
 import androidx.glance.text.Text
-import androidx.glance.action.actionStartActivity
+import androidx.glance.appwidget.action.actionStartActivity
 
 class LlmBenchWidget : GlanceAppWidget() {
     override suspend fun provideGlance(context: Context, id: GlanceId) {
