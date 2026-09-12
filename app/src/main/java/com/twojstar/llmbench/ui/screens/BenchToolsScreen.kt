@@ -345,7 +345,9 @@ fun BenchToolsScreen(modifier: Modifier = Modifier) {
     var docbenchImportResult by remember { mutableStateOf<DocbenchImportUiResult?>(null) }
     var docbenchImporting by remember { mutableStateOf(false) }
     var docbenchImportGeneration by remember { mutableIntStateOf(0) }
-    val docbenchJsonFormatterState = remember { DocbenchJsonFormatterUiState() }
+    val docbenchJsonFormatterState = remember(
+        BuiltInBenchTool.DOCBENCH_DOCUMENT in enabledTools
+    ) { DocbenchJsonFormatterUiState() }
 
     val streambenchImportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         uri?.let { selectedUri ->
