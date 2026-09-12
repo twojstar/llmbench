@@ -46,15 +46,13 @@ internal class DocbenchPendingExportStore(
         }
         return try {
             TextDocumentCodec.decodeUtf8(file.readBytes())
-        } catch (_: IOException) {
-            null
         } catch (_: IllegalArgumentException) {
             null
         }
     }
 
-    fun delete(id: String?) {
-        id?.let(::fileFor)?.delete()
+    fun delete(id: String) {
+        fileFor(id)?.delete()
     }
 
     private fun fileFor(id: String): File? {
