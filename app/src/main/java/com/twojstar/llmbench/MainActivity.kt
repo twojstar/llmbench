@@ -47,6 +47,7 @@ import com.twojstar.llmbench.ui.viewmodel.MarkdownWorkspaceViewModel
 import com.twojstar.llmbench.ui.viewmodel.NavigationTab
 import com.twojstar.llmbench.ui.viewmodel.StudioUiState
 import com.twojstar.llmbench.ui.viewmodel.StudioViewModel
+import com.twojstar.llmbench.widget.LlmBenchWidgetNavigation
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -133,6 +134,7 @@ class MainActivity : ComponentActivity() {
         markdownWorkspaceViewModel.attachLifecycle(this)
         retainedShareIntentHandled = savedInstanceState?.getBoolean(KEY_SHARE_INTENT_HANDLED) == true
         restoreShareState(savedInstanceState)
+        handleWidgetNavigationIntent(intent)
         if (!retainedShareIntentHandled) handleIncomingShareIntent(intent)
 
         setContent {
@@ -218,6 +220,7 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         retainedShareIntentHandled = false
         setIntent(intent)
+        handleWidgetNavigationIntent(intent)
         handleIncomingShareIntent(intent)
     }
 
@@ -225,6 +228,16 @@ class MainActivity : ComponentActivity() {
         super.onSaveInstanceState(outState)
         outState.putBoolean(KEY_SHARE_INTENT_HANDLED, retainedShareIntentHandled)
         saveShareState(outState)
+    }
+
+    private fun handleWidgetNavigationIntent(intent: Intent) {
+        if (intent.action != LlmBenchWidgetNavigation.ACTION_OPEN_DESTINATION) return
+        LlmBenchWidgetNavigation.destination(
+            intent.getStringExtra(LlmBenchWidgetNavigation.EXTRA_DESTINATION)
+        )?.let(viewModel::selectTab)
+        intent.action = Intent.ACTION_MAIN
+        intent.data = null
+        intent.removeExtra(LlmBenchWidgetNavigation.EXTRA_DESTINATION)
     }
 
     private fun handleIncomingShareIntent(intent: Intent) {
