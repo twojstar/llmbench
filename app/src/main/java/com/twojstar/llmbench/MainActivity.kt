@@ -254,6 +254,7 @@ class MainActivity : ComponentActivity() {
             }
             incoming != null -> {
                 outState.putString(KEY_SHARE_STAGE, SHARE_STAGE_INCOMING)
+                outState.putLong(KEY_SHARE_INCOMING_ID, state.incomingShareId)
                 writeSharePayload(outState, incoming)
             }
         }
@@ -275,6 +276,7 @@ class MainActivity : ComponentActivity() {
         } else null
         viewModel.restoreShareState(
             incomingShare = payload.takeIf { stage == SHARE_STAGE_INCOMING },
+            incomingShareRequestId = savedState.getLong(KEY_SHARE_INCOMING_ID, 0L),
             pendingShare = pending
         )
     }
@@ -290,6 +292,7 @@ class MainActivity : ComponentActivity() {
         const val KEY_SHARE_INTENT_HANDLED = "llmbench.share.intent_handled"
         const val KEY_SHARE_STAGE = "llmbench.share.stage"
         const val KEY_SHARE_ID = "llmbench.share.id"
+        const val KEY_SHARE_INCOMING_ID = "llmbench.share.incoming_id"
         const val KEY_SHARE_SERVICE_ID = "llmbench.share.service_id"
         const val KEY_SHARE_TEXT = "llmbench.share.text"
         const val KEY_SHARE_URIS = "llmbench.share.uris"
@@ -311,18 +314,22 @@ private fun IncomingShareRoutingDialogs(
     val markdownUiState by markdownWorkspaceViewModel.uiState.collectAsStateWithLifecycle()
     var confirmMarkdownReplace by rememberSaveable { mutableStateOf(false) }
 
-    LaunchedEffect(uiState.incomingShare) {
+    LaunchedEffect(uiState.incomingShareId) {
         confirmMarkdownReplace = false
     }
 
-    fun finishMarkdownOpen(payload: IncomingSharePayload) {
+    fun finishMarkdownOpen(requestId: Long) {
         confirmMarkdownReplace = false
-        if (viewModel.dismissIncomingShareIfCurrent(payload)) {
+        if (viewModel.dismissIncomingShareIfCurrent(requestId)) {
             viewModel.selectTab(NavigationTab.YAML)
         }
     }
 
-    fun openIncomingInMarkdown(payload: IncomingSharePayload, allowDiscardDirty: Boolean) {
+    fun openIncomingInMarkdown(
+        payload: IncomingSharePayload,
+        requestId: Long,
+        allowDiscardDirty: Boolean
+    ) {
         payload.text?.let { text ->
             when (
                 markdownWorkspaceViewModel.openExternalText(
@@ -330,7 +337,7 @@ private fun IncomingShareRoutingDialogs(
                     allowDiscardDirty = allowDiscardDirty
                 )
             ) {
-                ExternalMarkdownOpenResult.OPENED -> finishMarkdownOpen(payload)
+                ExternalMarkdownOpenResult.OPENED -> finishMarkdownOpen(requestId)
                 ExternalMarkdownOpenResult.NEEDS_DISCARD -> confirmMarkdownReplace = true
                 ExternalMarkdownOpenResult.BUSY -> viewModel.showSnackbar(
                     "Markdown workspace is still restoring or busy. Try again when it is ready."
@@ -360,8 +367,12 @@ private fun IncomingShareRoutingDialogs(
             val result = runCatching { MarkdownDocumentFileAccess.import(context, uri) }
             result.fold(
                 onSuccess = { opened ->
+                    if (!viewModel.isIncomingShareCurrent(requestId)) {
+                        markdownWorkspaceViewModel.cancelImport()
+                        return@fold
+                    }
                     if (markdownWorkspaceViewModel.completeImport(opened.displayName, opened.document)) {
-                        finishMarkdownOpen(payload)
+                        finishMarkdownOpen(requestId)
                     } else {
                         markdownWorkspaceViewModel.cancelImport()
                         viewModel.showSnackbar("Could not open the document in Markdown workspace.")
@@ -380,7 +391,13 @@ private fun IncomingShareRoutingDialogs(
         if (confirmMarkdownReplace && payload.canOpenInMarkdownWorkspace()) {
             ReplaceMarkdownDraftDialog(
                 currentName = markdownUiState.displayName,
-                onDiscard = { openIncomingInMarkdown(payload, allowDiscardDirty = true) },
+                onDiscard = {
+                    openIncomingInMarkdown(
+                        payload = payload,
+                        requestId = uiState.incomingShareId,
+                        allowDiscardDirty = true
+                    )
+                },
                 onDismiss = { confirmMarkdownReplace = false }
             )
         } else {
@@ -388,7 +405,13 @@ private fun IncomingShareRoutingDialogs(
                 payload = payload,
                 favoriteServices = uiState.favoriteWebServices,
                 onOpenMarkdown = if (payload.canOpenInMarkdownWorkspace()) {
-                    { openIncomingInMarkdown(payload, allowDiscardDirty = false) }
+                    {
+                        openIncomingInMarkdown(
+                            payload = payload,
+                            requestId = uiState.incomingShareId,
+                            allowDiscardDirty = false
+                        )
+                    }
                 } else {
                     null
                 },

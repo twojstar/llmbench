@@ -55,6 +55,7 @@ data class StudioUiState(
     val favoriteWebServices: Set<WebAiService> = emptySet(),
     val snackbarMessage: String? = null,
     val incomingShare: IncomingSharePayload? = null,
+    val incomingShareId: Long = 0L,
     val pendingWebShare: PendingWebShare? = null,
 
     // Integrated Multi-Provider AI Chat
@@ -107,6 +108,7 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
     private var studioPersistenceJob: Job? = null
     private var studioPersistenceOwnerId: Long? = null
     private val activeChatGenerationId = AtomicLong(0)
+    private val incomingShareId = AtomicLong(0)
     private val pendingWebShareId = AtomicLong(0)
     val uiState: StateFlow<StudioUiState> = _uiState.asStateFlow()
 
@@ -182,13 +184,29 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun receiveIncomingShare(payload: IncomingSharePayload) {
-        _uiState.update { it.copy(incomingShare = payload, pendingWebShare = null) }
+        val requestId = incomingShareId.incrementAndGet()
+        _uiState.update {
+            it.copy(
+                incomingShare = payload,
+                incomingShareId = requestId,
+                pendingWebShare = null
+            )
+        }
     }
 
     fun restoreShareState(
         incomingShare: IncomingSharePayload?,
+        incomingShareRequestId: Long,
         pendingShare: PendingWebShare?
     ) {
+        val restoredIncomingId = when {
+            incomingShare == null -> 0L
+            incomingShareRequestId > 0L -> {
+                incomingShareId.updateAndGet { current -> maxOf(current, incomingShareRequestId) }
+                incomingShareRequestId
+            }
+            else -> incomingShareId.incrementAndGet()
+        }
         pendingShare?.let { restored ->
             pendingWebShareId.updateAndGet { current -> maxOf(current, restored.id) }
         }
@@ -199,23 +217,36 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
                     currentTab = NavigationTab.WEB_CHATS,
                     selectedWebService = pendingShare.service,
                     incomingShare = null,
+                    incomingShareId = 0L,
                     pendingWebShare = pendingShare
                 )
-                incomingShare != null -> state.copy(incomingShare = incomingShare)
+                incomingShare != null -> state.copy(
+                    incomingShare = incomingShare,
+                    incomingShareId = restoredIncomingId
+                )
                 else -> state
             }
         }
     }
 
     fun dismissIncomingShare() {
-        _uiState.update { it.copy(incomingShare = null) }
+        _uiState.update { it.copy(incomingShare = null, incomingShareId = 0L) }
     }
 
-    fun dismissIncomingShareIfCurrent(expected: IncomingSharePayload): Boolean {
+    fun isIncomingShareCurrent(requestId: Long): Boolean {
+        val state = _uiState.value
+        return requestId > 0L && state.incomingShare != null && state.incomingShareId == requestId
+    }
+
+    fun dismissIncomingShareIfCurrent(requestId: Long): Boolean {
         while (true) {
             val state = _uiState.value
-            if (state.incomingShare != expected) return false
-            if (_uiState.compareAndSet(state, state.copy(incomingShare = null))) return true
+            if (requestId <= 0L || state.incomingShare == null || state.incomingShareId != requestId) return false
+            if (_uiState.compareAndSet(
+                    state,
+                    state.copy(incomingShare = null, incomingShareId = 0L)
+                )
+            ) return true
         }
     }
 
@@ -229,6 +260,7 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
                 currentTab = NavigationTab.WEB_CHATS,
                 selectedWebService = service,
                 incomingShare = null,
+                incomingShareId = 0L,
                 pendingWebShare = PendingWebShare(shareId, service, payload)
             )
         }
