@@ -325,33 +325,38 @@ private fun IncomingShareRoutingDialogs(
         }
     }
 
-    fun openIncomingInMarkdown(
+    val markdownBusyMessage = "Markdown workspace is still restoring or busy. Try again when it is ready."
+    val markdownOpenErrorMessage = "Could not open the document in Markdown workspace."
+
+    fun openIncomingTextInMarkdown(
         payload: IncomingSharePayload,
         requestId: Long,
         allowDiscardDirty: Boolean
     ) {
-        payload.text?.let { text ->
-            when (
-                markdownWorkspaceViewModel.openExternalText(
-                    text = text,
-                    allowDiscardDirty = allowDiscardDirty
-                )
-            ) {
-                ExternalMarkdownOpenResult.OPENED -> finishMarkdownOpen(requestId)
-                ExternalMarkdownOpenResult.NEEDS_DISCARD -> confirmMarkdownReplace = true
-                ExternalMarkdownOpenResult.BUSY -> viewModel.showSnackbar(
-                    "Markdown workspace is still restoring or busy. Try again when it is ready."
-                )
-                ExternalMarkdownOpenResult.TOO_LARGE -> viewModel.showSnackbar(
-                    "Shared text is larger than the 8 MiB Markdown workspace limit."
-                )
-            }
-            return
+        val text = payload.text ?: return
+        when (
+            markdownWorkspaceViewModel.openExternalText(
+                text = text,
+                allowDiscardDirty = allowDiscardDirty
+            )
+        ) {
+            ExternalMarkdownOpenResult.OPENED -> finishMarkdownOpen(requestId)
+            ExternalMarkdownOpenResult.NEEDS_DISCARD -> confirmMarkdownReplace = true
+            ExternalMarkdownOpenResult.BUSY -> viewModel.showSnackbar(markdownBusyMessage)
+            ExternalMarkdownOpenResult.TOO_LARGE -> viewModel.showSnackbar(
+                "Shared text is larger than the 8 MiB Markdown workspace limit."
+            )
         }
+    }
 
+    fun openIncomingDocumentInMarkdown(
+        payload: IncomingSharePayload,
+        requestId: Long,
+        allowDiscardDirty: Boolean
+    ) {
         if (!payload.canOpenInMarkdownWorkspace()) return
         if (markdownUiState.isBusy) {
-            viewModel.showSnackbar("Markdown workspace is still restoring or busy. Try again when it is ready.")
+            viewModel.showSnackbar(markdownBusyMessage)
             return
         }
         if (markdownUiState.isDirty && !allowDiscardDirty) {
@@ -360,7 +365,7 @@ private fun IncomingShareRoutingDialogs(
         }
         val uri = payload.uriStrings.singleOrNull()?.let(Uri::parse) ?: return
         if (!markdownWorkspaceViewModel.beginImport()) {
-            viewModel.showSnackbar("Markdown workspace is still restoring or busy. Try again when it is ready.")
+            viewModel.showSnackbar(markdownBusyMessage)
             return
         }
         scope.launch {
@@ -375,15 +380,27 @@ private fun IncomingShareRoutingDialogs(
                         finishMarkdownOpen(requestId)
                     } else {
                         markdownWorkspaceViewModel.cancelImport()
-                        viewModel.showSnackbar("Could not open the document in Markdown workspace.")
+                        viewModel.showSnackbar(markdownOpenErrorMessage)
                     }
                 },
                 onFailure = { error ->
                     markdownWorkspaceViewModel.cancelImport()
                     if (error is CancellationException) throw error
-                    viewModel.showSnackbar(error.message ?: "Could not open the document in Markdown workspace.")
+                    viewModel.showSnackbar(error.message ?: markdownOpenErrorMessage)
                 }
             )
+        }
+    }
+
+    fun openIncomingInMarkdown(
+        payload: IncomingSharePayload,
+        requestId: Long,
+        allowDiscardDirty: Boolean
+    ) {
+        if (payload.text != null) {
+            openIncomingTextInMarkdown(payload, requestId, allowDiscardDirty)
+        } else {
+            openIncomingDocumentInMarkdown(payload, requestId, allowDiscardDirty)
         }
     }
 
