@@ -11,7 +11,27 @@ import kotlin.test.assertTrue
 
 class DocbenchTextExportActionTest {
     @Test
-    fun exportRequiresBothReadAndExplicitWriteGrant() {
+    fun missingReadAndWriteGrantsBlockExport() {
+        val result = DocbenchTextExportAction.execute(
+            text = "hello",
+            includeUtf8Bom = false,
+            surface = BenchToolSurface.COMPANION_UI,
+            isEnabled = true,
+            grantedPermissions = emptySet()
+        )
+
+        val blocked = assertIs<DocbenchTextExportActionResult.Blocked>(result)
+        assertEquals(
+            setOf(
+                BenchToolPermission.READ_USER_SELECTED_CONTENT,
+                BenchToolPermission.WRITE_USER_EXPORT
+            ),
+            blocked.availability.missingRequiredPermissions
+        )
+    }
+
+    @Test
+    fun missingWriteGrantBlocksExport() {
         val result = DocbenchTextExportAction.execute(
             text = "hello",
             includeUtf8Bom = false,

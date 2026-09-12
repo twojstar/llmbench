@@ -22,7 +22,7 @@ sealed interface DocbenchTextExportActionResult {
     ) : DocbenchTextExportActionResult
 }
 
-/** Prepares bounded user text for the existing Android SAF export boundary. */
+/** Prepares user text and byte-level BOM metadata for an explicit export boundary. */
 object DocbenchTextExportAction {
     private val EXPORT_PERMISSION = setOf(BenchToolPermission.WRITE_USER_EXPORT)
 
