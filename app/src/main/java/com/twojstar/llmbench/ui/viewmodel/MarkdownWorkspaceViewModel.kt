@@ -54,6 +54,9 @@ data class MarkdownWorkspaceUiState(
     val isBusy: Boolean
         get() = isRecoveryLoading || isExporting || isImporting
 
+    val canChangeUtf8Bom: Boolean
+        get() = !isBusy && origin == null
+
     val isLargeDocumentReadOnly: Boolean
         get() = text.length > MAX_EDITABLE_MARKDOWN_CHARS
 
@@ -247,6 +250,24 @@ class MarkdownWorkspaceViewModel : ViewModel() {
             } else {
                 changed = true
                 state.copy(text = text, isDirty = true, revision = state.revision + 1)
+            }
+        }
+        if (changed) scheduleRecovery()
+        return changed
+    }
+
+    fun setUtf8Bom(include: Boolean): Boolean {
+        var changed = false
+        _uiState.update { state ->
+            if (!state.canChangeUtf8Bom || state.hadUtf8Bom == include) {
+                state
+            } else {
+                changed = true
+                state.copy(
+                    hadUtf8Bom = include,
+                    isDirty = true,
+                    revision = state.revision + 1
+                )
             }
         }
         if (changed) scheduleRecovery()

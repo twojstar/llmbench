@@ -275,6 +275,7 @@ fun MarkdownWorkspaceScreen(
                 }
             },
             onNormalize = { workspaceViewModel.normalizeLineEndings(it) },
+            onUtf8BomChange = { workspaceViewModel.setUtf8Bom(it) },
             modifier = Modifier.fillMaxSize().padding(innerPadding)
         )
     }
@@ -373,6 +374,7 @@ private fun MarkdownWorkspaceBody(
     analysis: MarkdownWorkspaceAnalysis?,
     onTextChange: (String) -> Unit,
     onNormalize: (LineEnding) -> Unit,
+    onUtf8BomChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier
 ) {
     Column(
@@ -381,6 +383,8 @@ private fun MarkdownWorkspaceBody(
     ) {
         WorkspaceMetadataRow(
             hadUtf8Bom = uiState.hadUtf8Bom,
+            canChangeUtf8Bom = uiState.canChangeUtf8Bom,
+            onUtf8BomChange = onUtf8BomChange,
             isDirty = uiState.isDirty,
             isLargeReadOnly = uiState.isLargeDocumentReadOnly,
             analysis = analysis
@@ -627,6 +631,8 @@ private fun DiscardWorkspaceChangesDialog(
 @Composable
 private fun WorkspaceMetadataRow(
     hadUtf8Bom: Boolean,
+    canChangeUtf8Bom: Boolean,
+    onUtf8BomChange: (Boolean) -> Unit,
     isDirty: Boolean,
     isLargeReadOnly: Boolean,
     analysis: MarkdownWorkspaceAnalysis?
@@ -635,7 +641,13 @@ private fun WorkspaceMetadataRow(
         modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        MetadataChip(if (hadUtf8Bom) "UTF-8 BOM" else "UTF-8")
+        FilterChip(
+            selected = hadUtf8Bom,
+            onClick = { onUtf8BomChange(!hadUtf8Bom) },
+            enabled = canChangeUtf8Bom,
+            label = { Text(if (hadUtf8Bom) "UTF-8 BOM" else "UTF-8 no BOM") },
+            modifier = Modifier.testTag("markdown_utf8_bom")
+        )
         MetadataChip(analysis?.lineEndings?.style?.name ?: "EOL …")
         MetadataChip(
             when {
