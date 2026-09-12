@@ -10,6 +10,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -28,17 +29,22 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+internal class DocbenchTextInspectorUiState {
+    var source by mutableStateOf("")
+    var sourceGeneration by mutableIntStateOf(0)
+    var inspection by mutableStateOf<TextInspectionResult?>(null)
+    var message by mutableStateOf<String?>(null)
+    var inputError by mutableStateOf<String?>(null)
+    var inspecting by mutableStateOf(false)
+}
+
 @Composable
 internal fun DocbenchTextInspectorPanel(
+    state: DocbenchTextInspectorUiState,
     isEnabled: () -> Boolean,
     modifier: Modifier = Modifier
 ) {
     val scope = rememberCoroutineScope()
-    var source by remember { mutableStateOf("") }
-    var inspection by remember { mutableStateOf<TextInspectionResult?>(null) }
-    var message by remember { mutableStateOf<String?>(null) }
-    var inputError by remember { mutableStateOf<String?>(null) }
-    var inspecting by remember { mutableStateOf(false) }
 
     Column(
         verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -50,25 +56,26 @@ internal fun DocbenchTextInspectorPanel(
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
         OutlinedTextField(
-            value = source,
+            value = state.source,
             onValueChange = { updated ->
+                state.sourceGeneration += 1
                 if (updated.length > MAX_INTERACTIVE_TOKENIZED_CHARS) {
-                    inputError =
+                    state.inputError =
                         "Interactive inspection is limited to $MAX_INTERACTIVE_TOKENIZED_CHARS characters."
-                    inspection = null
-                    message = null
+                    state.inspection = null
+                    state.message = null
                 } else {
-                    source = updated
-                    inputError = null
-                    inspection = null
-                    message = null
+                    state.source = updated
+                    state.inputError = null
+                    state.inspection = null
+                    state.message = null
                 }
             },
             label = { Text("Text to inspect") },
             minLines = 4,
-            isError = inputError != null,
+            isError = state.inputError != null,
             supportingText = {
-                inputError?.let { error -> Text(error) }
+                state.inputError?.let { error -> Text(error) }
             },
             modifier = Modifier
                 .fillMaxWidth()
@@ -76,9 +83,10 @@ internal fun DocbenchTextInspectorPanel(
         )
         Button(
             onClick = {
-                val inspectedSource = source
+                val inspectedSource = state.source
+                val generation = state.sourceGeneration
                 scope.launch {
-                    inspecting = true
+                    state.inspecting = true
                     try {
                         val action = withContext(Dispatchers.Default) {
                             DocbenchTextInspectorAction.execute(
@@ -90,32 +98,32 @@ internal fun DocbenchTextInspectorPanel(
                                 )
                             )
                         }
-                        if (!isEnabled() || source != inspectedSource) return@launch
+                        if (!isEnabled() || generation != state.sourceGeneration) return@launch
                         when (action) {
                             is DocbenchTextInspectorActionResult.Completed -> {
-                                inspection = action.inspection
-                                message = if (action.inspection.hasFindings) null
+                                state.inspection = action.inspection
+                                state.message = if (action.inspection.hasFindings) null
                                 else "No flagged patterns found."
                             }
                             is DocbenchTextInspectorActionResult.Blocked -> {
-                                inspection = null
-                                message = "Inspection is blocked by the current Bench policy."
+                                state.inspection = null
+                                state.message = "Inspection is blocked by the current Bench policy."
                             }
                         }
                     } finally {
-                        inspecting = false
+                        state.inspecting = false
                     }
                 }
             },
-            enabled = source.isNotEmpty() && inputError == null && !inspecting,
+            enabled = state.source.isNotEmpty() && state.inputError == null && !state.inspecting,
             modifier = Modifier.testTag("docbench_text_inspector_run")
         ) {
-            Text(if (inspecting) "Inspecting…" else "Inspect text")
+            Text(if (state.inspecting) "Inspecting…" else "Inspect text")
         }
-        message?.let { status ->
+        state.message?.let { status ->
             Text(status, style = MaterialTheme.typography.bodySmall)
         }
-        inspection?.let { result ->
+        state.inspection?.let { result ->
             DocbenchTextInspectionReport(result)
         }
     }

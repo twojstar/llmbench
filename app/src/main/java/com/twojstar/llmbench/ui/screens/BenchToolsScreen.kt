@@ -348,6 +348,9 @@ fun BenchToolsScreen(modifier: Modifier = Modifier) {
     val docbenchJsonFormatterState = remember(
         BuiltInBenchTool.DOCBENCH_DOCUMENT in enabledTools
     ) { DocbenchJsonFormatterUiState() }
+    val docbenchTextInspectorState = remember(
+        BuiltInBenchTool.DOCBENCH_TEXT_INSPECTOR in enabledTools
+    ) { DocbenchTextInspectorUiState() }
 
     val streambenchImportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         uri?.let { selectedUri ->
@@ -751,6 +754,7 @@ fun BenchToolsScreen(modifier: Modifier = Modifier) {
                         if (tool == BuiltInBenchTool.DOCBENCH_TEXT_INSPECTOR && enabled) {
                             HorizontalDivider()
                             DocbenchTextInspectorPanel(
+                                state = docbenchTextInspectorState,
                                 isEnabled = {
                                     BuiltInBenchTool.DOCBENCH_TEXT_INSPECTOR in store.loadEnabledTools()
                                 }
