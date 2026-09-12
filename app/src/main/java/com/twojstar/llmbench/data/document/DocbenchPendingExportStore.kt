@@ -9,7 +9,10 @@ import java.util.UUID
 internal class DocbenchPendingExportStore(
     private val directory: File
 ) {
-    fun save(document: TextDocument): String {
+    private val lock = Any()
+    private val activeIds = mutableSetOf<String>()
+
+    fun save(document: TextDocument): String = synchronized(lock) {
         val bytes = TextDocumentCodec.encodeUtf8(document)
         if (bytes.size > TextDocumentFileAccess.MAX_DOCUMENT_BYTES) {
             throw IOException("Document is larger than the export limit.")
@@ -34,38 +37,54 @@ internal class DocbenchPendingExportStore(
             target.delete()
             throw error
         }
-        return id
+        activeIds += id
+        id
     }
 
-    fun load(id: String): TextDocument? {
-        val file = fileFor(id) ?: return null
-        if (!file.isFile) return null
-        if (file.length() !in 0..TextDocumentFileAccess.MAX_DOCUMENT_BYTES.toLong()) {
-            file.delete()
-            return null
+    fun load(id: String): TextDocument? = synchronized(lock) {
+        val file = fileFor(id) ?: return@synchronized null
+        if (!file.isFile) {
+            activeIds -= id
+            return@synchronized null
         }
-        return try {
+        if (file.length() !in 0..TextDocumentFileAccess.MAX_DOCUMENT_BYTES.toLong()) {
+            activeIds -= id
+            file.delete()
+            return@synchronized null
+        }
+        val document = try {
             TextDocumentCodec.decodeUtf8(file.readBytes())
         } catch (_: IllegalArgumentException) {
             null
         }
+        if (document != null) {
+            activeIds += id
+        } else {
+            activeIds -= id
+        }
+        document
     }
 
     fun delete(id: String) {
-        fileFor(id)?.delete()
+        synchronized(lock) {
+            activeIds -= id
+            fileFor(id)?.delete()
+        }
     }
 
     fun pruneOrphans(preserveId: String?) {
-        if (!directory.isDirectory) return
-        val preservedName = preserveId
-            ?.takeIf(ID_PATTERN::matches)
-            ?.let { "$it.bin" }
-        directory.listFiles()?.forEach { file ->
-            val name = file.name
-            val stem = name.substringBeforeLast('.', missingDelimiterValue = "")
-            val isOwnedPayload = ID_PATTERN.matches(stem) &&
-                (name.endsWith(".bin") || name.endsWith(".tmp"))
-            if (isOwnedPayload && name != preservedName) file.delete()
+        synchronized(lock) {
+            if (!directory.isDirectory) return@synchronized
+            val preservedIds = activeIds.toMutableSet().apply {
+                preserveId?.takeIf(ID_PATTERN::matches)?.let(::add)
+            }
+            directory.listFiles()?.forEach { file ->
+                val name = file.name
+                val stem = name.substringBeforeLast('.', missingDelimiterValue = "")
+                val isOwnedPayload = ID_PATTERN.matches(stem) &&
+                    (name.endsWith(".bin") || name.endsWith(".tmp"))
+                if (isOwnedPayload && stem !in preservedIds) file.delete()
+            }
         }
     }
 
