@@ -1,5 +1,6 @@
 package com.twojstar.llmbench
 
+import android.annotation.SuppressLint
 import android.app.PendingIntent
 import android.content.Intent
 import android.os.Build
@@ -29,8 +30,13 @@ class LlmBenchTileService : TileService() {
             )
             startActivityAndCollapse(pendingIntent)
         } else {
-            @Suppress("DEPRECATION")
-            startActivityAndCollapse(launchIntent)
+            startActivityAndCollapseCompat(launchIntent)
         }
+    }
+
+    @SuppressLint("StartActivityAndCollapseDeprecated")
+    @Suppress("DEPRECATION")
+    private fun startActivityAndCollapseCompat(intent: Intent) {
+        startActivityAndCollapse(intent)
     }
 }
