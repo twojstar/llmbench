@@ -27,6 +27,7 @@ import com.twojstar.llmbench.data.document.LineEnding
 import com.twojstar.llmbench.data.model.BenchToolPermission
 import com.twojstar.llmbench.data.model.BenchToolSurface
 import com.twojstar.llmbench.data.tokenizer.MAX_INTERACTIVE_TOKENIZED_CHARS
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -37,6 +38,22 @@ internal class DocbenchTextTransformUiState {
     var message by mutableStateOf<String?>(null)
     var inputError by mutableStateOf<String?>(null)
     var working by mutableStateOf(false)
+
+    val canTransform: Boolean
+        get() = source.isNotEmpty() && inputError == null && !working
+
+    fun updateSource(updated: String) {
+        sourceGeneration += 1
+        if (updated.length > MAX_INTERACTIVE_TOKENIZED_CHARS) {
+            inputError =
+                "Interactive transforms are limited to $MAX_INTERACTIVE_TOKENIZED_CHARS characters."
+            message = null
+            return
+        }
+        source = updated
+        inputError = null
+        message = null
+    }
 }
 
 @Composable
@@ -46,50 +63,6 @@ internal fun DocbenchTextTransformPanel(
     modifier: Modifier = Modifier
 ) {
     val scope = rememberCoroutineScope()
-
-    fun normalizeLineEndings(target: LineEnding) {
-        val sourceToNormalize = state.source
-        val generation = state.sourceGeneration
-        scope.launch {
-            state.working = true
-            try {
-                val action = withContext(Dispatchers.Default) {
-                    DocbenchLineEndingNormalizeAction.execute(
-                        text = sourceToNormalize,
-                        target = target,
-                        surface = BenchToolSurface.COMPANION_UI,
-                        isEnabled = isEnabled(),
-                        grantedPermissions = setOf(
-                            BenchToolPermission.READ_USER_SELECTED_CONTENT
-                        )
-                    )
-                }
-                if (!isEnabled() || generation != state.sourceGeneration) return@launch
-                when (action) {
-                    is DocbenchLineEndingNormalizeActionResult.Completed -> {
-                        if (action.text.length > MAX_INTERACTIVE_TOKENIZED_CHARS) {
-                            state.message =
-                                "Normalized result was not applied because it exceeds the " +
-                                    "1,000,000-character interactive display limit. " +
-                                    "Original text is unchanged."
-                        } else {
-                            state.source = action.text
-                            state.message = if (action.changed) {
-                                "Normalized line endings to ${target.name}."
-                            } else {
-                                "Line endings are already ${target.name}."
-                            }
-                        }
-                    }
-                    is DocbenchLineEndingNormalizeActionResult.Blocked -> {
-                        state.message = "Normalization is blocked by the current Bench policy."
-                    }
-                }
-            } finally {
-                state.working = false
-            }
-        }
-    }
 
     Column(
         verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -102,18 +75,7 @@ internal fun DocbenchTextTransformPanel(
         )
         OutlinedTextField(
             value = state.source,
-            onValueChange = { updated ->
-                state.sourceGeneration += 1
-                if (updated.length > MAX_INTERACTIVE_TOKENIZED_CHARS) {
-                    state.inputError =
-                        "Interactive transforms are limited to $MAX_INTERACTIVE_TOKENIZED_CHARS characters."
-                    state.message = null
-                } else {
-                    state.source = updated
-                    state.inputError = null
-                    state.message = null
-                }
-            },
+            onValueChange = state::updateSource,
             label = { Text("Text to transform") },
             minLines = 5,
             isError = state.inputError != null,
@@ -125,46 +87,8 @@ internal fun DocbenchTextTransformPanel(
                 .testTag("docbench_json_formatter_input")
         )
         Button(
-            onClick = {
-                val sourceToFormat = state.source
-                val generation = state.sourceGeneration
-                scope.launch {
-                    state.working = true
-                    try {
-                        val action = withContext(Dispatchers.Default) {
-                            DocbenchJsonFormatAction.execute(
-                                text = sourceToFormat,
-                                surface = BenchToolSurface.COMPANION_UI,
-                                isEnabled = isEnabled(),
-                                grantedPermissions = setOf(
-                                    BenchToolPermission.READ_USER_SELECTED_CONTENT
-                                )
-                            )
-                        }
-                        if (!isEnabled() || generation != state.sourceGeneration) return@launch
-                        when (action) {
-                            is DocbenchJsonFormatActionResult.Completed -> {
-                                if (action.text.length > MAX_INTERACTIVE_TOKENIZED_CHARS) {
-                                    state.message = "Transformed result was not applied because it exceeds the 1,000,000-character interactive display limit. Original text is unchanged."
-                                } else {
-                                    state.source = action.text
-                                    state.message =
-                                        if (action.changed) "Formatted locally." else "Already formatted."
-                                }
-                            }
-                            is DocbenchJsonFormatActionResult.Rejected -> {
-                                state.message = docbenchValidationErrorPreview(action.message)
-                            }
-                            is DocbenchJsonFormatActionResult.Blocked -> {
-                                state.message = "Formatting is blocked by the current Bench policy."
-                            }
-                        }
-                    } finally {
-                        state.working = false
-                    }
-                }
-            },
-            enabled = state.source.isNotEmpty() && state.inputError == null && !state.working,
+            onClick = { launchJsonFormat(scope, state, isEnabled) },
+            enabled = state.canTransform,
             modifier = Modifier.testTag("docbench_json_formatter_run")
         ) {
             Text(if (state.working) "Working…" else "Format JSON")
@@ -172,10 +96,10 @@ internal fun DocbenchTextTransformPanel(
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             LineEnding.entries.forEach { target ->
                 OutlinedButton(
-                    onClick = { normalizeLineEndings(target) },
-                    enabled = state.source.isNotEmpty() &&
-                        state.inputError == null &&
-                        !state.working,
+                    onClick = {
+                        launchLineEndingNormalization(scope, state, target, isEnabled)
+                    },
+                    enabled = state.canTransform,
                     modifier = Modifier.testTag(
                         "docbench_normalize_${target.name.lowercase()}"
                     )
@@ -189,3 +113,109 @@ internal fun DocbenchTextTransformPanel(
         }
     }
 }
+
+private fun launchJsonFormat(
+    scope: CoroutineScope,
+    state: DocbenchTextTransformUiState,
+    isEnabled: () -> Boolean
+) {
+    val sourceToFormat = state.source
+    val generation = state.sourceGeneration
+    scope.launch {
+        state.working = true
+        try {
+            val action = withContext(Dispatchers.Default) {
+                DocbenchJsonFormatAction.execute(
+                    text = sourceToFormat,
+                    surface = BenchToolSurface.COMPANION_UI,
+                    isEnabled = isEnabled(),
+                    grantedPermissions = DOCUMENT_READ_GRANT
+                )
+            }
+            if (!isEnabled() || generation != state.sourceGeneration) return@launch
+            applyJsonFormatResult(state, action)
+        } finally {
+            state.working = false
+        }
+    }
+}
+
+private fun applyJsonFormatResult(
+    state: DocbenchTextTransformUiState,
+    action: DocbenchJsonFormatActionResult
+) {
+    when (action) {
+        is DocbenchJsonFormatActionResult.Completed -> {
+            if (action.text.length > MAX_INTERACTIVE_TOKENIZED_CHARS) {
+                state.message =
+                    "Transformed result was not applied because it exceeds the " +
+                        "1,000,000-character interactive display limit. Original text is unchanged."
+                return
+            }
+            state.source = action.text
+            state.message = if (action.changed) "Formatted locally." else "Already formatted."
+        }
+        is DocbenchJsonFormatActionResult.Rejected -> {
+            state.message = docbenchValidationErrorPreview(action.message)
+        }
+        is DocbenchJsonFormatActionResult.Blocked -> {
+            state.message = "Formatting is blocked by the current Bench policy."
+        }
+    }
+}
+
+private fun launchLineEndingNormalization(
+    scope: CoroutineScope,
+    state: DocbenchTextTransformUiState,
+    target: LineEnding,
+    isEnabled: () -> Boolean
+) {
+    val sourceToNormalize = state.source
+    val generation = state.sourceGeneration
+    scope.launch {
+        state.working = true
+        try {
+            val action = withContext(Dispatchers.Default) {
+                DocbenchLineEndingNormalizeAction.execute(
+                    text = sourceToNormalize,
+                    target = target,
+                    surface = BenchToolSurface.COMPANION_UI,
+                    isEnabled = isEnabled(),
+                    grantedPermissions = DOCUMENT_READ_GRANT
+                )
+            }
+            if (!isEnabled() || generation != state.sourceGeneration) return@launch
+            applyLineEndingResult(state, target, action)
+        } finally {
+            state.working = false
+        }
+    }
+}
+
+private fun applyLineEndingResult(
+    state: DocbenchTextTransformUiState,
+    target: LineEnding,
+    action: DocbenchLineEndingNormalizeActionResult
+) {
+    when (action) {
+        is DocbenchLineEndingNormalizeActionResult.Completed -> {
+            if (action.text.length > MAX_INTERACTIVE_TOKENIZED_CHARS) {
+                state.message =
+                    "Normalized result was not applied because it exceeds the " +
+                        "1,000,000-character interactive display limit. Original text is unchanged."
+                return
+            }
+            state.source = action.text
+            state.message = if (action.changed) {
+                "Normalized line endings to ${target.name}."
+            } else {
+                "Line endings are already ${target.name}."
+            }
+        }
+        is DocbenchLineEndingNormalizeActionResult.Blocked -> {
+            state.message = "Normalization is blocked by the current Bench policy."
+        }
+    }
+}
+
+private val DOCUMENT_READ_GRANT = setOf(BenchToolPermission.READ_USER_SELECTED_CONTENT)
