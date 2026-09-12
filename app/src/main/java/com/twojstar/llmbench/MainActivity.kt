@@ -12,6 +12,12 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import androidx.compose.material3.adaptive.currentWindowAdaptiveInfoV2
+import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffold
+import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffoldDefaults
+import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffoldValue
+import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteType
+import androidx.compose.material3.adaptive.navigationsuite.rememberNavigationSuiteScaffoldState
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
@@ -41,7 +47,71 @@ import kotlinx.coroutines.withContext
 
 internal fun profilePlaygroundDestination(): NavigationTab = NavigationTab.PLAYGROUND
 
-internal fun showPrimaryBottomNavigation(tab: NavigationTab): Boolean = tab != NavigationTab.WEB_CHATS
+internal fun showPrimaryNavigation(tab: NavigationTab): Boolean = tab != NavigationTab.WEB_CHATS
+
+internal fun navigationSuiteUsesBottomBar(type: NavigationSuiteType): Boolean =
+    type == NavigationSuiteType.NavigationBar ||
+        type == NavigationSuiteType.ShortNavigationBarCompact ||
+        type == NavigationSuiteType.ShortNavigationBarMedium
+
+@Composable
+private fun PrimaryNavigationShell(
+    currentTab: NavigationTab,
+    onSelectTab: (NavigationTab) -> Unit,
+    content: @Composable (applyNavigationBarInset: Boolean) -> Unit
+) {
+    val showNavigation = showPrimaryNavigation(currentTab)
+    val navigationSuiteType = NavigationSuiteScaffoldDefaults.navigationSuiteType(
+        currentWindowAdaptiveInfoV2()
+    )
+    val navigationState = rememberNavigationSuiteScaffoldState(
+        initialValue = if (showNavigation) {
+            NavigationSuiteScaffoldValue.Visible
+        } else {
+            NavigationSuiteScaffoldValue.Hidden
+        }
+    )
+
+    LaunchedEffect(showNavigation) {
+        navigationState.snapTo(
+            if (showNavigation) NavigationSuiteScaffoldValue.Visible
+            else NavigationSuiteScaffoldValue.Hidden
+        )
+    }
+
+    NavigationSuiteScaffold(
+        navigationSuiteItems = {
+            item(
+                selected = currentTab == NavigationTab.WEB_CHATS,
+                onClick = { onSelectTab(NavigationTab.WEB_CHATS) },
+                icon = { Icon(Icons.Default.Language, contentDescription = "Web AI Accounts") },
+                label = { Text("Web AI") },
+                modifier = Modifier.testTag("nav_tab_web_chats")
+            )
+            item(
+                selected = currentTab == NavigationTab.COMPARE_HUB,
+                onClick = { onSelectTab(NavigationTab.COMPARE_HUB) },
+                icon = { Icon(Icons.Default.Forum, contentDescription = "AI Compare Hub") },
+                label = { Text("Compare") },
+                modifier = Modifier.testTag("nav_tab_compare_hub")
+            )
+            item(
+                selected = currentTab.belongsToStudioSection(),
+                onClick = { onSelectTab(NavigationTab.STUDIO) },
+                icon = { Icon(Icons.Default.Tune, contentDescription = "Studio") },
+                label = { Text("Studio") },
+                modifier = Modifier.testTag("nav_tab_studio")
+            )
+        },
+        layoutType = navigationSuiteType,
+        state = navigationState,
+        modifier = Modifier
+            .fillMaxSize()
+            .testTag("main_adaptive_nav")
+    ) {
+        content(!showNavigation || !navigationSuiteUsesBottomBar(navigationSuiteType))
+    }
+}
 
 class MainActivity : ComponentActivity() {
 
@@ -76,67 +146,20 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
-                Scaffold(
-                    snackbarHost = { SnackbarHost(snackbarHostState) },
-                    bottomBar = {
-                        val showNavigation = showPrimaryBottomNavigation(uiState.currentTab)
-                        Column(modifier = Modifier.fillMaxWidth()) {
-                            StreambenchMiniPlayer(applyNavigationBarInset = !showNavigation)
-                            if (showNavigation) {
-                                NavigationBar(
-                                    containerColor = MaterialTheme.colorScheme.surface,
-                                    tonalElevation = 8.dp,
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .windowInsetsPadding(WindowInsets.navigationBars)
-                                        .testTag("main_bottom_nav")
-                                ) {
-                                    NavigationBarItem(
-                                        selected = uiState.currentTab == NavigationTab.WEB_CHATS,
-                                        onClick = { viewModel.selectTab(NavigationTab.WEB_CHATS) },
-                                        icon = { Icon(Icons.Default.Language, contentDescription = "Web AI Accounts") },
-                                        label = {
-                                            Text(
-                                                "Web AI",
-                                                fontSize = 11.sp,
-                                                fontWeight = if (uiState.currentTab == NavigationTab.WEB_CHATS) FontWeight.Bold else FontWeight.Normal
-                                            )
-                                        },
-                                        modifier = Modifier.testTag("nav_tab_web_chats")
-                                    )
-                                    NavigationBarItem(
-                                        selected = uiState.currentTab == NavigationTab.COMPARE_HUB,
-                                        onClick = { viewModel.selectTab(NavigationTab.COMPARE_HUB) },
-                                        icon = { Icon(Icons.Default.Forum, contentDescription = "AI Compare Hub") },
-                                        label = {
-                                            Text(
-                                                "Compare",
-                                                fontSize = 11.sp,
-                                                fontWeight = if (uiState.currentTab == NavigationTab.COMPARE_HUB) FontWeight.Bold else FontWeight.Normal
-                                            )
-                                        },
-                                        modifier = Modifier.testTag("nav_tab_compare_hub")
-                                    )
-                                    NavigationBarItem(
-                                        selected = uiState.currentTab.belongsToStudioSection(),
-                                        onClick = { viewModel.selectTab(NavigationTab.STUDIO) },
-                                        icon = { Icon(Icons.Default.Tune, contentDescription = "Studio") },
-                                        label = {
-                                            Text(
-                                                "Studio",
-                                                fontSize = 11.sp,
-                                                fontWeight = if (uiState.currentTab.belongsToStudioSection()) FontWeight.Bold else FontWeight.Normal
-                                            )
-                                        },
-                                        modifier = Modifier.testTag("nav_tab_studio")
-                                    )
-                                }
-                            }
-                        }
-                    },
-                    modifier = Modifier.fillMaxSize()
-                ) { innerPadding ->
-                    Box(
+                PrimaryNavigationShell(
+                    currentTab = uiState.currentTab,
+                    onSelectTab = viewModel::selectTab
+                ) { applyNavigationBarInset ->
+                    Scaffold(
+                        snackbarHost = { SnackbarHost(snackbarHostState) },
+                        bottomBar = {
+                            StreambenchMiniPlayer(
+                                applyNavigationBarInset = applyNavigationBarInset
+                            )
+                        },
+                        modifier = Modifier.fillMaxSize()
+                    ) { innerPadding ->
+                        Box(
                         modifier = Modifier
                             .fillMaxSize()
                             .padding(bottom = innerPadding.calculateBottomPadding())
@@ -176,6 +199,7 @@ class MainActivity : ComponentActivity() {
                             NavigationTab.SKILLS -> SkillsBrowserScreen(
                                 viewModel = viewModel
                             )
+                        }
                         }
                     }
                 }
