@@ -16,6 +16,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -34,6 +35,9 @@ import com.twojstar.llmbench.data.codebench.CodebenchImageSampling
 import com.twojstar.llmbench.data.codebench.CodebenchImportedBarcodeDecodeAction
 import com.twojstar.llmbench.data.codebench.CodebenchImportedBarcodeDecodeActionResult
 import com.twojstar.llmbench.data.document.DocbenchDocumentPreflightActionResult
+import com.twojstar.llmbench.data.document.DocbenchPendingExportStore
+import com.twojstar.llmbench.data.document.DocbenchTextExportAction
+import com.twojstar.llmbench.data.document.DocbenchTextExportActionResult
 import com.twojstar.llmbench.data.document.DocumentPreflightReport
 import com.twojstar.llmbench.data.document.TextDocumentFileAccess
 import com.twojstar.llmbench.data.document.executeDocbenchPreflightAction
@@ -51,6 +55,7 @@ import com.twojstar.llmbench.data.streambench.StreambenchPlaybackService
 import com.twojstar.llmbench.data.streambench.StreambenchPlaylistEntry
 import com.twojstar.llmbench.data.streambench.executeStreambenchPlaylistImportAction
 import com.twojstar.llmbench.data.streambench.launchStreambenchPlayback
+import java.io.File
 import java.io.IOException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -345,12 +350,36 @@ fun BenchToolsScreen(modifier: Modifier = Modifier) {
     var docbenchImportResult by remember { mutableStateOf<DocbenchImportUiResult?>(null) }
     var docbenchImporting by remember { mutableStateOf(false) }
     var docbenchImportGeneration by remember { mutableIntStateOf(0) }
+    var docbenchExportGeneration by rememberSaveable { mutableIntStateOf(0) }
+    var pendingDocbenchExportId by rememberSaveable { mutableStateOf<String?>(null) }
+    var pendingDocbenchExportGeneration by rememberSaveable { mutableIntStateOf(-1) }
+    var activeDocbenchExportLaunchGeneration by rememberSaveable { mutableIntStateOf(-1) }
+    val docbenchPendingExportStore = remember(context.applicationContext) {
+        DocbenchPendingExportStore(
+            File(context.applicationContext.cacheDir, "docbench-pending-exports")
+        )
+    }
     val docbenchTextTransformState = remember(
         BuiltInBenchTool.DOCBENCH_DOCUMENT in enabledTools
-    ) { DocbenchTextTransformUiState() }
+    ) {
+        DocbenchTextTransformUiState().apply {
+            exporting = activeDocbenchExportLaunchGeneration >= 0
+        }
+    }
     val docbenchTextInspectorState = remember(
         BuiltInBenchTool.DOCBENCH_TEXT_INSPECTOR in enabledTools
     ) { DocbenchTextInspectorUiState() }
+
+    LaunchedEffect(docbenchPendingExportStore) {
+        val pendingId = pendingDocbenchExportId
+        val restored = withContext(Dispatchers.IO) {
+            docbenchPendingExportStore.pruneOrphans(pendingId)
+            pendingId?.let(docbenchPendingExportStore::load)
+        }
+        if (restored != null && pendingDocbenchExportId == pendingId) {
+            docbenchTextTransformState.restoreExportDocument(restored)
+        }
+    }
 
     val streambenchImportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         uri?.let { selectedUri ->
@@ -422,6 +451,122 @@ fun BenchToolsScreen(modifier: Modifier = Modifier) {
                     }
                     docbenchImporting = false
                 }
+            }
+        }
+    }
+
+    val docbenchTextExportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("text/plain")
+    ) { uri ->
+        val launchGeneration = activeDocbenchExportLaunchGeneration
+        val pendingId = pendingDocbenchExportId
+        val pendingGeneration = pendingDocbenchExportGeneration
+        if (launchGeneration < 0) return@rememberLauncherForActivityResult
+
+        if (uri == null) {
+            activeDocbenchExportLaunchGeneration = -1
+            if (pendingId == null || pendingGeneration != launchGeneration) {
+                docbenchTextTransformState.exporting = false
+                return@rememberLauncherForActivityResult
+            }
+            scope.launch {
+                val restored = withContext(Dispatchers.IO) {
+                    docbenchPendingExportStore.load(pendingId)
+                }
+                if (
+                    restored != null &&
+                    pendingGeneration == docbenchExportGeneration &&
+                    BuiltInBenchTool.DOCBENCH_DOCUMENT in store.loadEnabledTools()
+                ) {
+                    docbenchTextTransformState.restoreExportDocument(restored)
+                }
+                withContext(Dispatchers.IO) { docbenchPendingExportStore.delete(pendingId) }
+                if (
+                    pendingDocbenchExportId == pendingId &&
+                    pendingDocbenchExportGeneration == pendingGeneration
+                ) {
+                    pendingDocbenchExportId = null
+                    pendingDocbenchExportGeneration = -1
+                }
+                docbenchTextTransformState.exporting = false
+                if (
+                    pendingGeneration == docbenchExportGeneration &&
+                    BuiltInBenchTool.DOCBENCH_DOCUMENT in store.loadEnabledTools()
+                ) {
+                    docbenchTextTransformState.message = "Export cancelled."
+                }
+            }
+            return@rememberLauncherForActivityResult
+        }
+
+        if (
+            pendingId == null ||
+            pendingGeneration != launchGeneration ||
+            pendingGeneration != docbenchExportGeneration ||
+            BuiltInBenchTool.DOCBENCH_DOCUMENT !in store.loadEnabledTools()
+        ) {
+            activeDocbenchExportLaunchGeneration = -1
+            if (pendingId != null) {
+                pendingDocbenchExportId = null
+                pendingDocbenchExportGeneration = -1
+                scope.launch {
+                    withContext(Dispatchers.IO) { docbenchPendingExportStore.delete(pendingId) }
+                }
+            }
+            docbenchTextTransformState.exporting = false
+            return@rememberLauncherForActivityResult
+        }
+
+        scope.launch {
+            val loadResult = runCatching {
+                withContext(Dispatchers.IO) {
+                    docbenchPendingExportStore.load(pendingId)
+                        ?: throw IOException("Pending export data is no longer available.")
+                }
+            }
+            var failure = loadResult.exceptionOrNull()
+            if (failure is CancellationException) throw failure
+            if (failure != null && failure !is Exception) throw failure
+
+            val document = loadResult.getOrNull()
+            if (
+                document != null &&
+                pendingGeneration == docbenchExportGeneration &&
+                BuiltInBenchTool.DOCBENCH_DOCUMENT in store.loadEnabledTools()
+            ) {
+                docbenchTextTransformState.restoreExportDocument(document)
+                val writeResult = runCatching {
+                    TextDocumentFileAccess.export(context, uri, document)
+                }
+                failure = writeResult.exceptionOrNull()
+                if (failure is CancellationException) throw failure
+                if (failure != null && failure !is Exception) throw failure
+            }
+
+            withContext(Dispatchers.IO) { docbenchPendingExportStore.delete(pendingId) }
+            if (activeDocbenchExportLaunchGeneration == launchGeneration) {
+                activeDocbenchExportLaunchGeneration = -1
+            }
+            if (
+                pendingDocbenchExportId == pendingId &&
+                pendingDocbenchExportGeneration == pendingGeneration
+            ) {
+                pendingDocbenchExportId = null
+                pendingDocbenchExportGeneration = -1
+            }
+            docbenchTextTransformState.exporting = false
+
+            if (
+                pendingGeneration != docbenchExportGeneration ||
+                BuiltInBenchTool.DOCBENCH_DOCUMENT !in store.loadEnabledTools()
+            ) {
+                return@launch
+            }
+            docbenchTextTransformState.message = when (failure) {
+                null -> "Exported text locally."
+                is SecurityException -> "LlmBench could not write to the selected document."
+                is IOException -> failure.message ?: "Could not export the text."
+                else -> "Could not export the text."
             }
         }
     }
@@ -522,9 +667,20 @@ fun BenchToolsScreen(modifier: Modifier = Modifier) {
                                         codebenchImportMessage = null
                                     }
                                     if (tool == BuiltInBenchTool.DOCBENCH_DOCUMENT && !shouldEnable) {
+                                        val pendingExportId = pendingDocbenchExportId
                                         docbenchImportGeneration += 1
+                                        docbenchExportGeneration += 1
+                                        pendingDocbenchExportId = null
+                                        pendingDocbenchExportGeneration = -1
                                         docbenchImportResult = null
                                         docbenchImporting = false
+                                        if (pendingExportId != null) {
+                                            scope.launch {
+                                                withContext(Dispatchers.IO) {
+                                                    docbenchPendingExportStore.delete(pendingExportId)
+                                                }
+                                            }
+                                        }
                                     }
                                 },
                                 modifier = Modifier.testTag("bench_toggle_${tool.id}")
@@ -747,6 +903,89 @@ fun BenchToolsScreen(modifier: Modifier = Modifier) {
                                 state = docbenchTextTransformState,
                                 isEnabled = {
                                     BuiltInBenchTool.DOCBENCH_DOCUMENT in store.loadEnabledTools()
+                                },
+                                onExport = {
+                                    val generation = docbenchExportGeneration + 1
+                                    docbenchExportGeneration = generation
+                                    val source = docbenchTextTransformState.source
+                                    val includeUtf8Bom = docbenchTextTransformState.includeUtf8Bom
+                                    docbenchTextTransformState.exporting = true
+                                    scope.launch {
+                                        val action = withContext(Dispatchers.Default) {
+                                            DocbenchTextExportAction.execute(
+                                                text = source,
+                                                includeUtf8Bom = includeUtf8Bom,
+                                                surface = BenchToolSurface.COMPANION_UI,
+                                                isEnabled = BuiltInBenchTool.DOCBENCH_DOCUMENT in
+                                                    store.loadEnabledTools(),
+                                                grantedPermissions = setOf(
+                                                    BenchToolPermission.READ_USER_SELECTED_CONTENT,
+                                                    BenchToolPermission.WRITE_USER_EXPORT
+                                                )
+                                            )
+                                        }
+                                        if (
+                                            generation != docbenchExportGeneration ||
+                                            BuiltInBenchTool.DOCBENCH_DOCUMENT !in store.loadEnabledTools()
+                                        ) {
+                                            docbenchTextTransformState.exporting = false
+                                            return@launch
+                                        }
+                                        when (action) {
+                                            is DocbenchTextExportActionResult.Completed -> {
+                                                val saveResult = runCatching {
+                                                    withContext(Dispatchers.IO) {
+                                                        docbenchPendingExportStore.save(action.document)
+                                                    }
+                                                }
+                                                val failure = saveResult.exceptionOrNull()
+                                                if (failure is CancellationException) throw failure
+                                                if (failure != null && failure !is Exception) throw failure
+                                                val exportId = saveResult.getOrNull()
+                                                if (
+                                                    generation != docbenchExportGeneration ||
+                                                    BuiltInBenchTool.DOCBENCH_DOCUMENT !in
+                                                        store.loadEnabledTools()
+                                                ) {
+                                                    if (exportId != null) {
+                                                        withContext(Dispatchers.IO) {
+                                                            docbenchPendingExportStore.delete(exportId)
+                                                        }
+                                                    }
+                                                    docbenchTextTransformState.exporting = false
+                                                    return@launch
+                                                }
+                                                if (exportId == null) {
+                                                    docbenchTextTransformState.exporting = false
+                                                    docbenchTextTransformState.message =
+                                                        failure?.message ?: "Could not prepare the export."
+                                                    return@launch
+                                                }
+
+                                                pendingDocbenchExportId = exportId
+                                                pendingDocbenchExportGeneration = generation
+                                                activeDocbenchExportLaunchGeneration = generation
+                                                try {
+                                                    docbenchTextExportLauncher.launch("docbench.txt")
+                                                } catch (_: ActivityNotFoundException) {
+                                                    activeDocbenchExportLaunchGeneration = -1
+                                                    pendingDocbenchExportId = null
+                                                    pendingDocbenchExportGeneration = -1
+                                                    withContext(Dispatchers.IO) {
+                                                        docbenchPendingExportStore.delete(exportId)
+                                                    }
+                                                    docbenchTextTransformState.exporting = false
+                                                    docbenchTextTransformState.message =
+                                                        "No document picker is available for export."
+                                                }
+                                            }
+                                            is DocbenchTextExportActionResult.Blocked -> {
+                                                docbenchTextTransformState.exporting = false
+                                                docbenchTextTransformState.message =
+                                                    "Export is blocked by the current Bench policy."
+                                            }
+                                        }
+                                    }
                                 }
                             )
                         }
